@@ -28,3 +28,18 @@
 
 ## 專案驗收
 可用真實多支手機加入、互動、通關、重新開始，且有 3／6／10 人的現場試玩紀錄。沒有實證就明確標「未測試」。
+## Agent skills
+
+### Issue tracker
+
+Issues 與規格放在本 repo 的 GitHub Issues（`tokpmpm/impossible-mission-bible-game`），用 `gh` CLI 操作。See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+使用預設五個標籤：`needs-triage`、`needs-info`、`ready-for-agent`、`ready-for-human`、`wontfix`。See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context：repo 根目錄一份 `GLOSSARY.md`，決策紀錄放 `docs/adr/`（尚未建立，由 `/grill-with-docs` 需要時再建立）。現有的 `DECISIONS.md` 仍是使用者約束的最高依據。See `docs/agents/domain.md`.
+
+Skills 本身放在 `.claude/skills/`（複製自 mattpocock/skills）。
