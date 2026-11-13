@@ -11,7 +11,7 @@
 
 ## v0.5 改進重點
 - **危機真的打亂計畫**：兩條常規路線工具重量不同，危機前排得進三村的方案，危機後裝不下，必須重新取捨。
-- **可以連玩兩局**：seed 001 與人工變體 seed 002，需求、危機、突破口與關鍵職能都不同。
+- **可以連玩兩局**：seed 001（封路→換路）與 seed 002（載重下降→替代物資）結構不同，關鍵職能也不同。
 - **停電時人人有事做**：每位非工程師都持有符號或排除線索。
 - **經文配上真實事件**：結尾把系統記錄到的事直接對應經節；感謝卡可用點選、不計票。
 
@@ -38,7 +38,7 @@
 | [docs/03-UX_UI.md](docs/03-UX_UI.md) | 手機 UX、停電畫面、入房與無障礙 |
 | [docs/04-MVP_TECH.md](docs/04-MVP_TECH.md) | 技術方向（沿用前版，開發前需依 v0.4 審核） |
 | [docs/05-BIBLE_INTEGRATION.md](docs/05-BIBLE_INTEGRATION.md) | 聖經內容與 60–90 秒收尾 |
-| [docs/06-TEST_PLAN.md](docs/06-TEST_PLAN.md) | 26 項功能／邏輯案例與真人試玩 |
+| [docs/06-TEST_PLAN.md](docs/06-TEST_PLAN.md) | 28 項功能／邏輯案例與真人試玩 |
 | [docs/07-BACKLOG.md](docs/07-BACKLOG.md) | P0／P1／P2 優先順序 |
 | [docs/08-V0.4-REVIEW.md](docs/08-V0.4-REVIEW.md) | v0.4 設計審核重點與風險 |
 | [docs/09-V0.5-REVIEW.md](docs/09-V0.5-REVIEW.md) | v0.5 改動、試算結果與待確認事項 |

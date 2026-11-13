@@ -7,14 +7,14 @@
 - Room：id、joinCode、hostId、phase、startedAt、phaseStartedAt、roundNo、scenarioId、revision、isSettled。
 - Player：id、roomId、nickname、roleIds[]、connected、optionalPreference（可空、房內短期使用）。
 - SharedPlan：route、cargoIds[]、totalWeight、villageNeedsCovered[]、planLocked。
-- Crisis：blockedRoute（由 scenario 固定）、powerOff、repairPlayerIds[]、repairSymbols[]、eliminationClues[]、preferenceBoostPlayerId、repairProgress、assistAvailable。
-- WorldRules：routeTravelMinutes、floodWindowMinutes、breakthroughActivated（001 分洪閘門／002 便橋）、toolWeight、cargoCapacity、urgentVillages；**故事世界的分鐘**與房間倒數 milliseconds **完全分開**。
+- Crisis：blockedRoute 或 capacityAfterCrisis（由 scenario 固定）、powerOff、repairPlayerIds[]、repairSymbols[]、eliminationClues[]、preferenceBoostPlayerId、repairProgress、assistAvailable。
+- WorldRules：routeTravelMinutes、floodWindowMinutes、breakthroughActivated（001 分洪閘門延長安全窗／002 確認井水後發放淨水錠）、toolWeight、cargoCapacity、urgentVillages；**故事世界的分鐘**與房間倒數 milliseconds **完全分開**。
 - ContributionEvents：有限事件紀錄（不推論人格、不公開排行），例如「玩家提交符號」或「另一玩家交換情報」；人際行為不可只靠點擊推斷。
 
 ## 主要階段
 lobby → introduction → planning → single_crisis_repair → replanning → settled。
 - 進房到 host 開始之間不計時；開始後服務端保有 8 分鐘目標時限。
-- 初步鎖定只允許可行的紅／藍常規路線。危機封閉該 scenario 指定的路線（001 紅、002 藍），同時停電；最晚 2:45 觸發，不論是否已鎖定。
+- 初步鎖定只允許可行的紅／藍常規路線。危機依 scenario 固定（001 封閉紅線、002 載重降為 5 kg），同時停電；最晚 2:45 觸發，不論是否已鎖定。
 - 危機時只開一項符號修復：2–4 位隊友持有符號，其餘非工程師持有排除線索。45–60 秒後進入可協助模式，不能硬卡死。
 - 電力恢復後才允許啟動突破口、更新路線與裝載。沒有任何一村需要的物資時拒絕出發。
 - 最終由伺服器判定是否合法，再依急迫需求與三村送達情形給 ★／★★／★★★。
@@ -32,7 +32,7 @@ room.created, player.joined, player.reconnected, room.started, player.role_assig
 7. 課程／聖經內容需人工審核與合理譯本使用。
 
 ## MVP 開發順序
-1. seed 001、seed 002 規則與 F04–F15、F21–F26 自動化測試；`tools/verify_seeds.py` 的窮舉試算可作為對照。
+1. seed 001、seed 002 規則與 F04–F15、F21–F28 自動化測試；`tools/verify_seeds.py` 的窮舉試算可作為對照。
 2. 房間與角色分配、6 人同步與手機畫面。
 3. 3、4–5、7–10 人職能拆分及同步測試。
 4. 真實 3、6、10 人場測、時間與參與觀察、斷線處理。
