@@ -9,9 +9,10 @@ const PREFS = [
   { value: 'either', label: '都可以' },
 ];
 const ROUTE_STYLE = {
-  紅: { cls: 'r-red', mark: 'A', dash: '' },
-  藍: { cls: 'r-blue', mark: 'B', dash: '10 7' },
-  綠: { cls: 'r-green', mark: 'C', dash: '2 7' },
+  // 不只靠顏色：每條線有不同的記號與線型（實線／虛線／點線）
+  紅: { cls: 'r-red', mark: '━', dash: '' },
+  藍: { cls: 'r-blue', mark: '╍', dash: '10 7' },
+  綠: { cls: 'r-green', mark: '┈', dash: '2 7' },
 };
 const VILLAGES = ['東村', '西村', '北村'];
 
@@ -41,6 +42,7 @@ const ui = {
   qQuestion: null,
   qConfirm: false,
   leaveConfirm: false,
+  prefSkipped: false,
   noFlicker: readFlag('im.noFlicker'),
 };
 
@@ -243,7 +245,7 @@ function renderHome() {
 function renderLobby(v) {
   const prefBtns = [...PREFS, { value: null, label: '跳過' }]
     .map((p) => {
-      const on = v.me.pref === p.value;
+      const on = p.value === null ? v.me.pref === null && ui.prefSkipped : v.me.pref === p.value;
       return `<button class="chip ${on ? 'on' : ''}" aria-pressed="${on}" data-action="pref" data-value="${p.value ?? ''}">${esc(
         p.label,
       )}</button>`;
@@ -266,7 +268,7 @@ function renderLobby(v) {
       n < 3 ? `開始（至少 3 人，還差 ${3 - n} 人）` : '開始任務'
     }</button>`;
   } else {
-    action = `<p class="waiting">等房主開始…</p>`;
+    action = '';
   }
   return `${renderTopbar(v)}
   <main class="screen lobby">
@@ -285,7 +287,7 @@ function renderLobby(v) {
       <p class="muted small">可以跳過，不影響遊戲。</p>
       <div class="chips">${prefBtns}</div>
     </section>
-    <div class="action-bar">${action}</div>
+    ${action ? `<div class="action-bar">${action}</div>` : '<p class="waiting">等房主開始…</p>'}
   </main>`;
 }
 
@@ -299,7 +301,8 @@ function renderIntro(v) {
   </div>`;
   const introLeft = r ? `<p class="intro-cd">認識隊友 <strong data-cd="intro">${mmss(r.startedAt + r.introMs - now())}</strong></p>` : '';
   if (ui.introTab === 'plan') {
-    return `${renderTopbar(v)}${timerBar(v, '開局')}<main class="screen">${tabs}${planningBody(v)}</main>`;
+    const lock = v.can.lock ? `<div class="action-bar"><button class="btn primary block" data-action="lock">鎖定方案</button></div>` : '';
+    return `${renderTopbar(v)}${timerBar(v, '開局')}<main class="screen planning">${tabs}${planningBody(v)}${lock}</main>`;
   }
   const roles = v.me.roles
     .map(
@@ -315,15 +318,15 @@ function renderIntro(v) {
       <h2 class="eyebrow">你是誰</h2>
       ${roles || '<p class="muted">（你這局沒有職能）</p>'}
     </section>
+    <section class="card next-step">
+      <h2 class="eyebrow">下一步</h2>
+      <p class="lead">找一位隊友，交換暱稱與情報。</p>
+    </section>
     <section class="card">
       <h2 class="eyebrow">我知道什麼</h2>
       ${clueCards(v)}
     </section>
     ${v.preferenceHint ? `<div class="note">${esc(v.preferenceHint)}</div>` : ''}
-    <section class="card next-step">
-      <h2 class="eyebrow">下一步</h2>
-      <p class="lead">找一位隊友，交換暱稱與情報。</p>
-    </section>
     <div class="action-bar"><button class="btn primary block" data-action="zoom">放大讓隊友看</button></div>
   </main>`;
 }
@@ -344,7 +347,7 @@ function planSummary(v) {
   const p = v.plan;
   if (!p) return '';
   const route = p.route
-    ? `<span class="rmark ${ROUTE_STYLE[p.route.id]?.cls || ''}">${esc(p.route.id)}線</span> ${esc(p.route.label)}${
+    ? `<span class="rmark ${ROUTE_STYLE[p.route.id]?.cls || ''}" aria-hidden="true">${ROUTE_STYLE[p.route.id]?.mark || ''}</span> ${esc(p.route.label)}${
         p.route.closed ? ' <span class="tag warn">封閉</span>' : ''
       }`
     : '<span class="muted">還沒選路線</span>';
@@ -364,7 +367,7 @@ function planSummary(v) {
       </div>`
       : '';
   return `<section class="card summary" aria-live="polite">
-    <div class="sum-head"><h2>共享方案</h2>${p.locked ? '<span class="tag gold">已鎖定</span>' : ''}</div>
+    <div class="sum-head"><h2>共享方案</h2>${p.locked && v.phase !== 'replanning' ? '<span class="tag gold">已鎖定</span>' : ''}</div>
     <div class="reach"><span class="reach-n">${p.reachable}</span><span class="reach-d">／3 村</span><span class="reach-l">目前可送達</span></div>
     <dl class="sum-list">
       <div><dt>路線</dt><dd>${route}${tool ? `<div class="muted small">${tool}</div>` : ''}</dd></div>
@@ -401,11 +404,11 @@ function routeCards(v) {
     .map((r) => {
       const st = ROUTE_STYLE[r.id] || {};
       const sel = p.route && p.route.id === r.id;
-      const disabled = !v.can.route || r.closed || p.locked;
+      const disabled = !v.can.route || r.closed;
       return `<button class="route ${st.cls || ''} ${sel ? 'sel' : ''} ${r.closed ? 'closed' : ''}" data-action="route" data-route="${esc(
         r.id,
       )}" ${disabled ? 'disabled' : ''} aria-pressed="${sel}">
-        <div class="route-top"><span class="rmark ${st.cls || ''}">${esc(r.id)}線</span><span class="route-label">${esc(r.label)}</span>
+        <div class="route-top"><span class="rmark ${st.cls || ''}" aria-hidden="true">${st.mark || ''}</span><span class="route-label">${esc(r.label)}</span>
         ${sel ? '<span class="tag gold">✓ 已選</span>' : ''}${r.closed ? '<span class="tag warn">✕ 封閉</span>' : ''}</div>
         ${routeLine(r.id, r.closed)}
         <div class="route-meta"><span>路程 <strong>${r.travel}</strong> 故事分鐘</span><span>${
@@ -423,7 +426,7 @@ function itemChips(v) {
   if (!p) return '';
   const chips = p.itemChoices
     .map((it) => {
-      const disabled = !v.can.items || it.locked || p.locked;
+      const disabled = !v.can.items || it.locked;
       return `<button class="chip item ${it.on ? 'on' : ''} ${it.locked ? 'locked' : ''}" data-action="item" data-item="${esc(
         it.id,
       )}" data-on="${it.on ? '0' : '1'}" aria-pressed="${it.on}" ${disabled ? 'disabled' : ''}>
@@ -542,11 +545,7 @@ function renderBlackout(v) {
           <h2>你手上有第 ${s.slot + base} 格的符號</h2>
           <p>描述給工程師 <strong>${esc(r.engineerNickname)}</strong> 聽。</p>
           <button class="hold ${show ? 'show' : ''}" data-hold="${s.slot}" aria-label="按住顯示第 ${s.slot + base} 格符號">
-            ${
-              show
-                ? `<span class="hold-sym">${symbolSvg(s.id, { size: 150 })}</span><span class="hold-desc">${esc(s.desc || describeSymbol(s.id))}</span>`
-                : '<span class="hold-cover">按住這裡<br>才會顯示符號</span>'
-            }
+            ${show ? holdInner(v, s.slot) : HOLD_COVER}
           </button>
           <p class="muted small">放開就會藏起來。說說外形、有幾個缺口、開口朝哪。</p>
         </section>`;
@@ -649,7 +648,7 @@ function renderResult(v) {
       (x) => `<li><p class="ev">${esc(x.event)}</p><blockquote>${esc(x.verse)}<cite>${esc(x.ref)}</cite></blockquote></li>`,
     )
     .join('');
-  const others = v.players.filter((p) => p.id !== v.me.id);
+  const others = v.players.filter((p) => p.id !== v.me.id && p.roles.length > 0); // 只有這局的隊員能收感謝卡
   const thankBtns = others
     .map((p) => {
       const on = res.myThanks === p.id;
@@ -665,14 +664,14 @@ function renderResult(v) {
     : '';
   const action = v.can.next
     ? `<button class="btn primary block" data-action="next">下一局：${esc(res.nextSeedTitle)}</button>`
-    : `<p class="waiting">等房主開始下一局：${esc(res.nextSeedTitle)}</p>`;
+    : '';
   return `${renderTopbar(v)}
   <main class="screen result">
     <section class="card result-hero">
       <h1>${esc(res.title)}</h1>
       ${stars}
       ${served}${unserved}
-      <p class="muted small">沒送到的村，故事裡由另一支救援隊接手。</p>
+      ${res.unserved.length ? '<p class="muted small">沒送到的村，故事裡由另一支救援隊接手。</p>' : ''}
     </section>
     ${recap ? `<section class="card"><h2>這局發生的事</h2><ul class="recap">${recap}</ul></section>` : ''}
     ${
@@ -686,7 +685,7 @@ function renderResult(v) {
       <div class="chips">${thankBtns || '<span class="muted">沒有其他隊友</span>'}</div>
       ${thanks}
     </section>
-    <div class="action-bar">${action}</div>
+    ${action ? `<div class="action-bar">${action}</div>` : `<p class="waiting">等房主開始下一局：${esc(res.nextSeedTitle)}</p>`}
   </main>`;
 }
 
@@ -865,6 +864,8 @@ document.addEventListener('click', (e) => {
       break;
     case 'pref': {
       const val = el.getAttribute('data-value');
+      ui.prefSkipped = !val;
+      render();
       conn.send({ t: 'pref', value: val ? val : null });
       break;
     }
@@ -960,11 +961,21 @@ document.addEventListener('click', (e) => {
   }
 });
 
-// 長按才顯示符號：按下顯示、放開／移開就隱藏
+// 長按才顯示符號：按下顯示、放開就隱藏。就地更新按鈕內容，不重畫整頁，避免按住的元素被換掉。
+function holdInner(v, slot) {
+  const s = v && v.repair ? v.repair.mySymbols.find((x) => String(x.slot) === String(slot)) : null;
+  if (!s) return '';
+  return `<span class="hold-sym">${symbolSvg(s.id, { size: 150 })}</span><span class="hold-desc">${esc(s.desc || describeSymbol(s.id))}</span>`;
+}
+const HOLD_COVER = '<span class="hold-cover">按住這裡<br>才會顯示符號</span>';
 function setHolding(slot) {
   if (ui.holding === slot) return;
   ui.holding = slot;
-  render();
+  for (const el of root.querySelectorAll('[data-hold]')) {
+    const on = slot != null && el.getAttribute('data-hold') === slot;
+    el.classList.toggle('show', on);
+    el.innerHTML = on ? holdInner(ui.view, slot) : HOLD_COVER;
+  }
 }
 document.addEventListener('pointerdown', (e) => {
   const el = e.target.closest('[data-hold]');
@@ -972,14 +983,11 @@ document.addEventListener('pointerdown', (e) => {
   e.preventDefault();
   setHolding(el.getAttribute('data-hold'));
 });
-for (const t of ['pointerup', 'pointercancel', 'blur']) {
-  (t === 'blur' ? window : document).addEventListener(t, () => setHolding(null));
+for (const t of ['pointerup', 'pointercancel', 'touchend', 'touchcancel']) {
+  document.addEventListener(t, () => setHolding(null));
 }
-document.addEventListener('pointerout', (e) => {
-  if (ui.holding == null) return;
-  const el = e.target.closest && e.target.closest('[data-hold]');
-  if (el && !el.contains(e.relatedTarget)) setHolding(null);
-});
+window.addEventListener('blur', () => setHolding(null));
+document.addEventListener('visibilitychange', () => setHolding(null));
 document.addEventListener('contextmenu', (e) => {
   if (e.target.closest && e.target.closest('[data-hold]')) e.preventDefault();
 });
@@ -990,8 +998,6 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     if (!e.repeat) {
       setHolding(el.getAttribute('data-hold'));
-      const again = root.querySelector(`[data-hold="${el.getAttribute('data-hold')}"]`);
-      if (again) again.focus();
     }
   } else if (e.key === 'Escape' && ui.zoom) {
     ui.zoom = false;

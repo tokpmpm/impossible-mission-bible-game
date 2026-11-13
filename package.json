@@ -12,7 +12,7 @@
     "test": "node --test 'test/**/*.test.ts' && python3 tools/verify_seeds.py > /dev/null",
     "typecheck": "tsc --noEmit",
     "golden": "python3 tools/verify_seeds.py --export test/fixtures/verify_seeds_golden.json",
-    "e2e": "node --test 'e2e/**/*.e2e.ts'"
+    "e2e": "NODE_PATH=${NODE_PATH:-/opt/node22/lib/node_modules} node e2e/run.mjs"
   },
   "dependencies": {
     "qrcode": "^1.5.4",
