@@ -2,7 +2,10 @@
 """窮舉驗證手工關卡（seed）的可解性與分星。只做規則試算，不是遊戲程式。
 
 用法：python3 tools/verify_seeds.py
+      python3 tools/verify_seeds.py --export 路徑.json   # 匯出逐筆對照檔給規則引擎測試
 """
+import json
+import sys
 from itertools import combinations
 
 REGULAR = ("紅", "藍")
@@ -113,6 +116,30 @@ def check(name, seed):
     return ok
 
 
+def export(path):
+    """逐筆匯出：種子 × 情境 × 路線 × 每組物資（含工具）的星等與第一個拒絕原因。"""
+    scenarios = {"危機前": (False, False), "危機後": (True, False), "危機後＋突破口": (True, True)}
+    rows = []
+    for name, seed in SEEDS.items():
+        items = list(seed["weights"])
+        for scen, (crisis, used) in scenarios.items():
+            for route in seed["routes"]:
+                for n in range(len(items) + 1):
+                    for cargo in combinations(items, n):
+                        s, reason = stars(seed, route, cargo, crisis, used)
+                        rows.append(dict(seed=name, scenario=scen, route=route,
+                                         cargo=list(cargo), stars=s,
+                                         reason=None if s else reason))
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(dict(seeds={n: dict(tools={r: t for r, (_, t) in s["routes"].items()})
+                              for n, s in SEEDS.items()}, rows=rows),
+                  f, ensure_ascii=False, indent=0)
+    print(f"已匯出 {len(rows)} 筆到 {path}")
+
+
 if __name__ == "__main__":
+    if len(sys.argv) == 3 and sys.argv[1] == "--export":
+        export(sys.argv[2])
+        raise SystemExit(0)
     results = [check(n, s) for n, s in SEEDS.items()]
     raise SystemExit(0 if all(results) else 1)
