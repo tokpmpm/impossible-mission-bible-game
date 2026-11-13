@@ -306,3 +306,33 @@ test('F19：偏好全跳過或多人同選隨性派，都一定有人持有排�
     }
   }
 });
+
+test('F02／F03：3–10 每種人數，每人都有職能、開局線索；停電時每位非工程師都有符號或排除線索', async () => {
+  for (let n = 3; n <= 10; n++) {
+    const { srv, phones, host } = await setup(n);
+    try {
+      host.send({ t: 'start' });
+      await Promise.all(phones.map((p) => p.until((v) => v.phase === 'intro')));
+      for (const p of phones) {
+        assert.ok(p.view!.me.roles.length >= 1, `${n} 人`);
+        assert.ok(p.view!.clues.length >= 1, `${n} 人：${p.view!.me.roles.map((r) => r.name)} 沒有開局線索`);
+      }
+      const nav = who(phones, (v) => v.can.route);
+      const supply = who(phones, (v) => v.can.items);
+      nav.act({ type: 'selectRoute', route: '藍' });
+      supply.act({ type: 'setItem', item: '藥品', on: true });
+      await host.until((v) => v.plan?.reachable === 1);
+      host.act({ type: 'lock' });
+      await Promise.all(phones.map((p) => p.until((v) => v.phase === 'blackout')));
+      const eng = who(phones, (v) => v.can.repair);
+      for (const p of phones) {
+        if (p === eng) continue;
+        const r = p.view!.repair!;
+        assert.ok(r.mySymbols.length + (r.myEliminationClue ? 1 : 0) === 1, `${n} 人：${p.view!.me.nickname}`);
+      }
+    } finally {
+      phones.forEach((p) => p.close());
+      await srv.close();
+    }
+  }
+});
