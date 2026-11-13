@@ -1,0 +1,27 @@
+{
+  "name": "impossible-mission",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "不可能的任務：第一關暴風雨救援（原型，未經真人試玩）",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "start": "node src/server/main.ts",
+    "test": "node --test 'test/**/*.test.ts' && python3 tools/verify_seeds.py > /dev/null",
+    "typecheck": "tsc --noEmit",
+    "golden": "python3 tools/verify_seeds.py --export test/fixtures/verify_seeds_golden.json",
+    "e2e": "NODE_PATH=${NODE_PATH:-/opt/node22/lib/node_modules} node e2e/run.mjs"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4",
+    "ws": "^8.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/qrcode": "^1.5.6",
+    "@types/ws": "^8.18.2",
+    "typescript": "^5.9.3"
+  }
+}
