@@ -1,47 +1,41 @@
-# MVP 技術規格（建議，尚未實作）
+# MVP 技術規格建議 v0.4（未開發）
 
 ## 建議架構
-- 手機前端：TypeScript + React／Next.js，Web App／PWA。
-- 房間即時訊息：Supabase Realtime 或其他具伺服器權威的方案。
-- 後端：負責身分／角色權限、狀態機、計時、危機發布、答案驗證。
-- 部署：先本地測試，通過後可部署 Vercel 或相容平台取得測試網址。
-- 不使用原生 App、實體卡片或額外硬體。
+手機 Web App（TypeScript + React／Next.js，PWA 可選）＋具伺服器權威狀態的即時同步（如 Supabase Realtime）＋後端規則驗證。框架可調整，重要的是 3–10 人同步、正確判定及重連。沒有原生 App、印刷卡或額外硬體。
 
-這是技術提案，不代表已選型或已經部署。
+## 資料模型（概念）
+- Room：id、joinCode、hostId、phase、startedAt、phaseStartedAt、roundNo、scenarioId、revision、isSettled。
+- Player：id、roomId、nickname、roleIds[]、connected、optionalPreference（可空、房內短期使用）。
+- SharedPlan：route、cargoIds[]、totalWeight、villageNeedsCovered[]、planLocked。
+- Crisis：blockedRoute（依鎖定的紅／藍路線）、powerOff、repairPlayerIds[]、repairSymbols[]、repairProgress、assistAvailable。
+- WorldRules：routeTravelMinutes、floodWindowMinutes、floodGateActivated、toolWeight、cargoCapacity；**故事世界的分鐘**與房間倒數 milliseconds **完全分開**。
+- ContributionEvents：有限事件紀錄（不推論人格、不公開排行），例如「玩家提交符號」或「另一玩家交換情報」；人際行為不可只靠點擊推斷。
 
-## 建議資料模型
-- Room: id, joinCode, hostPlayerId, stage, stageStartedAt, version, scenarioSeed。
-- Player: id, roomId, nickname, roles[]（3–5 人可兼任）, connected。
-- RescueState: route, cargo[], powerRestored, bridgeCollapsed, resolved。
-- Stage: lobby → briefing → planning → blackout → replanning → result。
-- Role: navigation, supply, communications, engineering, medical, weather。
+## 主要階段
+lobby → introduction → planning → single_crisis_repair → replanning → settled。
+- 進房到 host 開始之間不計時；開始後服務端保有 8 分鐘目標時限。
+- 初步鎖定只允許可行的紅／藍常規路線。危機依選擇封閉該線，同時停電；保留另一條常規二星解。
+- 危機時只開一項三符號修復，三位隊友有線索，工程師有選擇面板。45 秒後進入可協助模式，不能硬卡死。
+- 電力恢復後才允許啟動分洪閘門授權、更新路線與裝載。
+- 最終由伺服器判定是否合法，再依急迫需求與三村送達情形給 ★／★★／★★★。
 
-## 即時同步事件
-- room.created / player.joined / player.reconnected
-- room.started / plan.route_selected / plan.cargo_changed
-- crisis.bridge_collapsed / crisis.blackout_started
-- engineering.backup_submitted / crisis.power_restored
-- rescue.final_submitted / rescue.succeeded / rescue.failed
-- room.next_round
+## 同步事件（示例）
+room.created, player.joined, player.reconnected, room.started, player.role_assigned, plan.updated, plan.locked, crisis.started, repair.symbol_submitted, repair.assist_enabled, crisis.power_restored, floodgate.activated, rescue.submit_requested, rescue.settled, room.next_round。
 
-## 系統必須保障
-1. 每房只有單一伺服器真實狀態；用 version 或交易防止並行更新覆蓋。
-2. 重要操作角色權限由伺服器判定；不能只用隱藏 UI 按鈕。
-3. 計時以伺服器時間為準；停電不是實際斷網，亦不能斷開即時連線。
-4. 終局答案驗證在伺服器進行；不讓前端任意宣告通關。
-5. 重複送出、快速點擊、斷線重連不應產生第二次結算或失去角色。
-6. 使用暱稱即可，不需要真名、GPS、錄音或額外個資；房間有有效期限。
-7. 客戶端可安全地在短暫背景／恢復後重新取得最新房間狀態。
+## 後端規則必須保證
+1. 房間狀態單一來源、版本或交易比較更新，不讓並行提交競爭。
+2. 只有指定職能擁有特定操作入口，但所有人都可看、可提出建議；不可把真實交流當權限檢查。
+3. 符號分派、隊友偏好、提示均由服務端產生；偏好可跳過／相同選項／離線，必需線索不能遺失。
+4. 路線封閉、故事安全窗、載重、工具、村莊優先級都在伺服器驗證；不能讓前端直接宣布三星。
+5. 同局危機只觸發一次、結算一次；斷線重連能回到正確階段，host 離線可恢復或移交。
+6. 遊戲只需暱稱。避免收集 GPS、真名、錄音；房間與偏好資料設短期有效期限；以最低必要權限儲存。
+7. 課程／聖經內容需人工審核與合理譯本使用。
 
-## 最小里程碑
-1. 先做單機狀態機、重量／路線邏輯、事件及結果的自動化測試。
-2. 建立房間、QR Code、3–10 人加入與主持人控制。
-3. 各角色不同情報及可操作功能。
-4. 整房同步停電和恢復、備援解鎖。
-5. 結局／聖經反思／下一局。
-6. 3、6、10 人實機、真實網路斷線重連測試。
+## MVP 開發順序
+1. seed 001 規則與 F04–F15 自動化測試。
+2. 房間與角色分配、6 人同步與手機畫面。
+3. 3、4–5、7–10 人職能拆分及同步測試。
+4. 真實 3、6、10 人場測、時間與參與觀察、斷線處理。
+5. 人工加入兩個已驗證變體後，再評估完整隨機生成器。
 
-## 不應提前做
-- 付費商城、每日登入、排行榜。
-- 未審核經文的 AI 自動生成。
-- 大量關卡或複雜 NPC，卻沒有第一關真正好玩的驗證。
+無現場實測不能宣稱「已驗證好玩」。完整規格以 01、02、06 文件為準。
