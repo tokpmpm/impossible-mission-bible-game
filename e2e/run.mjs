@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const PORT = process.env.PORT || '3100';
 // E2E_EXTERNAL=1：不自己開伺服器，直接測 PORT 上已在跑的伺服器（例如 wrangler dev）。
-const server = process.env.E2E_EXTERNAL ? null : spawn(process.execPath, ['src/server/main.ts'], { cwd: root, env: { ...process.env, PORT }, stdio: 'ignore' });
+const server = process.env.E2E_EXTERNAL ? null : spawn(process.execPath, ['src/server/main.ts'], { cwd: root, env: { ...process.env, PORT, INTRO_MS: process.env.INTRO_MS || '12000' }, stdio: 'ignore' });
 const run = (env) =>
   new Promise((resolve) => {
     const c = spawn(process.execPath, ['e2e/play.cjs'], { cwd: root, env: { ...process.env, PORT, ...env }, stdio: 'inherit' });

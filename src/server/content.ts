@@ -120,3 +120,41 @@ export const PREFERENCES = {
   either: '都可以',
 } as const;
 export type Preference = keyof typeof PREFERENCES;
+
+/**
+ * 開局「下一步」：依線索互補關係，告訴每個人該去找誰、問什麼（暫定，ADR-0003 第 25 條）。
+ * 依序挑第一個「不是自己」的對象；每個職能最多給一句，不直接給答案。
+ */
+export const ASKS: Record<RoleId, { to: RoleId; verb: '問' | '告訴' | '找'; text: string }[]> = {
+  nav: [
+    { to: 'observer', verb: '問', text: '洪水第幾分鐘會到？' },
+    { to: 'store', verb: '問', text: '工具各多重？' },
+  ],
+  supply: [
+    { to: 'comms', verb: '問', text: '各村需要什麼？' },
+    { to: 'medic', verb: '問', text: '哪一村今晚最急？' },
+  ],
+  comms: [
+    { to: 'supply', verb: '問', text: '車子最多能載多重？' },
+    { to: 'nav', verb: '問', text: '有哪幾條路、各要多久？' },
+  ],
+  eng: [
+    { to: 'nav', verb: '問', text: '有哪幾條路、各要帶什麼工具？' },
+    { to: 'supply', verb: '問', text: '車子最多能載多重？' },
+  ],
+  medic: [
+    { to: 'supply', verb: '告訴', text: '哪一村今晚一定要送到' },
+    { to: 'comms', verb: '告訴', text: '哪一村今晚一定要送到' },
+  ],
+  observer: [
+    { to: 'nav', verb: '告訴', text: '洪水第幾分鐘會到' },
+    { to: 'supply', verb: '告訴', text: '洪水第幾分鐘會到、哪一村急需什麼' },
+  ],
+  scout: [{ to: 'nav', verb: '告訴', text: '每條路的路況' }],
+  liaison: [{ to: 'supply', verb: '告訴', text: '哪一村可以明天再補送' }],
+  store: [
+    { to: 'nav', verb: '告訴', text: '每種工具多重' },
+    { to: 'supply', verb: '告訴', text: '工具也算在車子的載重裡' },
+  ],
+  backup: [{ to: 'eng', verb: '找', text: '停電時你們要一起看修復面板，先打聲招呼' }],
+};

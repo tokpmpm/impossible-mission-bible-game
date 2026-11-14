@@ -26,9 +26,11 @@ export class Hub {
   private roomOrigin = new Map<string, string>();
   private qrCache = new Map<string, string>();
   private fixedBaseUrl: string | null;
+  private introMs: number | undefined;
 
-  constructor(opts: { publicUrl?: string | null } = {}) {
+  constructor(opts: { publicUrl?: string | null; introMs?: number } = {}) {
     this.fixedBaseUrl = opts.publicUrl || null;
+    this.introMs = opts.introMs;
   }
 
   joinUrl(code: string): string {
@@ -106,7 +108,7 @@ export class Hub {
     switch (msg.t) {
       case 'create': {
         const code = this.newCode();
-        const r = new Room(code);
+        const r = new Room(code, { introMs: this.introMs });
         this.rooms.set(code, r);
         this.roomOrigin.set(code, conn.origin);
         const p = r.addPlayer(String(msg.nickname ?? ''));
@@ -153,7 +155,8 @@ export class Hub {
         const id = String(msg.id ?? '');
         if (!id) throw new Error('缺少動作代號');
         try {
-          room.act(pid, id, msg.ev);
+          const rejected = room.act(pid, id, msg.ev);
+          if (rejected) this.send(conn, { t: 'rejected', id, ...rejected });
         } finally {
           this.send(conn, { t: 'ack', id });
           this.broadcast(room);

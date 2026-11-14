@@ -45,6 +45,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await shot(pages[1], '03-lobby-guest');
   await host.click('[data-action=start]');
   await host.waitForSelector('.role-hero');
+  // 前 60 秒（測試時縮短）不能鎖定：按了會在按鈕上方說明還要等多久
+  await host.click('[data-action=intro-tab][data-tab=plan]');
+  await host.click('[data-action=lock]');
+  await host.waitForSelector('.bar-note.rejected:has-text("認識隊友")', { timeout: 5000 });
+  await shot(host, '04a-lock-too-early');
+  await host.click('[data-action=note-close]');
+  await host.click('[data-action=intro-tab][data-tab=me]');
+  const steps = await host.textContent('.next-step');
+  if (!/去(問|告訴|找)/.test(steps)) errs.push('開局下一步沒有具體對象：' + steps.trim().slice(0, 60));
   for (let i = 0; i < N; i++) await shot(pages[i], `04-intro-p${i}`);
   await host.click('[data-action=zoom]');
   await shot(host, '05-zoom');
@@ -55,8 +64,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     for (const p of pages) if (await p.$(sel + ':not([disabled])')) return p;
     return null;
   };
-  const nav = await findPage('[data-action=route]');
-  const sup = await findPage('[data-action=item]');
+  // 路線、物資按鈕大家都能按；自己負責的才有 data-mine
+  const mineOf = async (action) => findPage(`[data-action=${action}][data-mine]`);
+  const waitLockOpen = (p) => p.waitForSelector('.status-line[data-lock-open="1"]', { timeout: 75000 });
+  const nav = await mineOf('route');
+  const sup = await mineOf('item');
   await nav.click('[data-action=route][data-route=紅]');
   await sleep(150);
   for (const name of ['藥品', '飲水', '毛毯', '食物']) {
@@ -65,10 +77,23 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   }
   await sleep(300);
   await shot(nav, '06-plan-overweight');
+  if (!(await nav.$('.status-line.bad'))) errs.push('超重時狀態列沒有變紅');
+  // 不是導航的人點路線：不會沒反應，會說要找誰
+  const notNav = pages.find((p) => p !== nav);
+  await notNav.click('[data-fold=route] > summary'); // 別人負責的區塊預設收成一行，展開才看得到
+  await notNav.click('[data-action=route][data-route=藍]');
+  await notNav.waitForSelector('.bar-note:has-text("導航")', { timeout: 3000 });
+  await shot(notNav, '06b-not-my-button');
+  // 超重時按鎖定：按的人看到原因＋下一步
+  await waitLockOpen(nav);
+  await nav.click('[data-action=lock]');
+  await nav.waitForSelector('.bar-note.rejected:has-text("超重 2 kg")', { timeout: 3000 });
+  await shot(nav, '06c-lock-overweight');
   const food = await sup.$('[data-action=item]:has-text("食物")');
   if (food) await food.click();
   await sleep(300);
   for (let i = 0; i < N; i++) await shot(pages[i], `07-plan-p${i}`);
+  await waitLockOpen(pages[0]);
   const locker = await findPage('[data-action=lock]');
   await locker.click('[data-action=lock]');
   await pages[0].waitForSelector('.blackout');
@@ -82,9 +107,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const slotDisp = Number(ask.match(/第 (\d+) 格/)[1]);
     let desc = null;
     for (const p of pages) {
-      for (const h of await p.$$('[data-hold]')) {
+      const holds = p.locator('[data-hold]');
+      for (let hi = 0; hi < (await holds.count()); hi++) {
+        const h = holds.nth(hi);
         const label = await h.getAttribute('aria-label');
         if (!label.includes(`第 ${slotDisp} 格`)) continue;
+        await h.scrollIntoViewIfNeeded();
         const box = await h.boundingBox();
         await p.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
         await p.mouse.down();
@@ -97,16 +125,24 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       }
     }
     if (guard === 0) {
-      for (const w of await eng.$$('[data-action=pick]:not([disabled])')) {
-        if ((await w.textContent()).trim() !== desc) { await w.click(); break; }
+      const picks = eng.locator('[data-action=pick]:not([disabled])');
+      for (let wi = 0; wi < (await picks.count()); wi++) {
+        const w = picks.nth(wi);
+        // 按鈕文字含圖示標題＋描述，用 includes 判斷，確保真的選到錯的
+        if (!(await w.textContent()).includes(desc)) { await w.click(); break; }
       }
       await sleep(250);
       await shot(eng, tag+'11-eng-wrong');
     }
-    const opt = await eng.$(`[data-action=pick]:has-text("${desc}")`);
-    if (!opt) { console.log('no opt for', desc); break; }
-    await opt.click();
-    await sleep(250);
+    const opt = eng.locator(`[data-action=pick]:has-text("${desc}")`);
+    if (!(await opt.count())) { console.log("no opt for", desc, "ask", ask, "opts", (await eng.locator("[data-action=pick]").allTextContents()).join("/")); break; }
+    await opt.first().click();
+    // 等工程師畫面換到下一格（或修好）再讀，避免讀到舊的格子
+    await eng.waitForFunction((prev) => {
+      const h = document.querySelector('.eng h2');
+      return !h || h.textContent.trim() !== prev;
+    }, ask, { timeout: 5000 });
+    await sleep(100);
   }
   }
   await doRepair('');
@@ -150,12 +186,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await sleep(300);
   for (const p of pages) await p.click('[data-action=intro-tab][data-tab=plan]');
   await sleep(300);
-  const nav2 = await findPage('[data-action=route]');
-  const sup2 = await findPage('[data-action=item]');
+  const nav2 = await mineOf('route');
+  const sup2 = await mineOf('item');
   await nav2.click('[data-action=route][data-route=藍]');
   for (const name of ['食物', '藥品', '飲水']) { await sup2.click(`[data-action=item]:has-text("${name}")`); await sleep(150); }
   await sleep(300);
   await shot(nav2, 'r2-07-plan');
+  await waitLockOpen(nav2);
   await (await findPage('[data-action=lock]')).click('[data-action=lock]');
   await pages[0].waitForSelector('.blackout');
   await sleep(300);

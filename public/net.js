@@ -48,6 +48,7 @@ export function newId() {
  *   onWelcome: (w: any) => void,
  *   onError: (msg: string, ctx: {duringResume: boolean}) => void,
  *   onStatus: (status: 'connecting'|'open'|'closed') => void,
+ *   onRejected?: (r: {id: string, action: string, reasons: {code: string, text: string}[]}) => void,
  * }} handlers
  */
 export function createConnection(handlers) {
@@ -109,6 +110,9 @@ export function createConnection(handlers) {
       } else if (msg.t === 'state') {
         resuming = false;
         handlers.onState(msg.view);
+      } else if (msg.t === 'rejected') {
+        // 只有按的那支手機會收到：這個動作被規則擋下了
+        if (handlers.onRejected) handlers.onRejected(msg);
       } else if (msg.t === 'ack') {
         pendingActs.delete(msg.id);
       } else if (msg.t === 'error') {
