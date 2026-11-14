@@ -691,3 +691,6 @@ cite { display: block; margin-top: 4px; font-style: normal; color: var(--gold-2)
 .clue-list li.new { border-left-color: var(--gold); }
 .clue-list li.old { font-size: 0.84rem; padding: 3px 8px; line-height: 1.4; opacity: 0.9; }
 .status-line { padding: 4px 10px; }
+
+.bo-reveal { margin: 0; text-align: center; font-weight: 700; }
+.bo-reveal strong { font-size: 1.6rem; color: var(--gold-2); }

@@ -285,12 +285,14 @@ function statusLine(v) {
   const open = lockOpen(v);
   const over = p.overweight > 0;
   const okNow = p.reasons.length === 0 && (!planning || open);
+  // 危機前不告訴你能送幾村：要問隊友各村需要什麼。鎖定後在停電畫面揭曉
+  const reach = p.showReach ? `<span class="sl-sep">｜</span><span>可送 ${p.reachable} 村</span>` : '';
   let main;
   if (okNow) {
-    main = `<span class="sl-ok">${planning ? '可以鎖定了 ✓' : '可以出發了 ✓'}</span><span class="sl-sep">｜</span><span>可送 ${p.reachable} 村</span>`;
+    main = `<span class="sl-ok">${planning ? '可以鎖定了 ✓' : '可以出發了 ✓'}</span>${reach}`;
   } else {
     const route = p.route ? `${p.route.id}線${p.route.closed ? '（斷了）' : ''}` : '還沒選路線';
-    main = `<span>${esc(route)}</span><span class="sl-sep">｜</span><span>${p.weight}／${p.cap} kg${over ? ' 超重' : ''}</span><span class="sl-sep">｜</span><span>可送 ${p.reachable} 村</span>`;
+    main = `<span>${esc(route)}</span><span class="sl-sep">｜</span><span>${p.weight}／${p.cap} kg${over ? ' 超重' : ''}</span>${reach}`;
   }
   let sub = '';
   if (planning && !open && v.round) {
@@ -643,6 +645,7 @@ function renderBlackout(v) {
       <h1><span class="bo-bolt" aria-hidden="true">⚡</span> 停電了${c ? `・${esc(c.title)}` : ''}</h1>
       <button class="btn tiny ghost" data-action="flicker" aria-label="${ui.noFlicker ? '開啟閃爍' : '關閉閃爍'}">${ui.noFlicker ? '閃爍：關' : '閃爍：開'}</button>
     </div>
+    ${c ? `<p class="bo-reveal">${c.cause === 'lock' ? '你們鎖定的方案' : '時間到時的方案'}原本能送到 <strong>${c.reachBefore}</strong>／3 村……</p>` : ''}
     ${c ? `<p class="bo-story">${esc(c.text)}${c.extra ? ` <span class="bo-extra">${esc(c.extra)}</span>` : ''}</p>` : ''}
     ${
       r

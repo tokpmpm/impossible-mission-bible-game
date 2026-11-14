@@ -10,7 +10,7 @@ import {
   type GameEvent,
   type GameState,
 } from '../engine/game.ts';
-import { REASON_TEXT, type Evaluation, type RejectReason } from '../engine/rules.ts';
+import { REASON_TEXT, evaluatePlan, type Evaluation, type RejectReason } from '../engine/rules.ts';
 import { SEEDS, VILLAGES, cargoItems, displayName, type RouteId, type SeedId } from '../engine/seeds.ts';
 import { describeSymbol, makeEliminationClues, makeSlots, parseSymbol, rng } from '../engine/symbols.ts';
 import {
@@ -574,6 +574,7 @@ export class Room {
       overweight: ev.overweight,
       safeWindow: ev.safeWindow,
       reachable: ev.reachable,
+      showReach: g.crisisAt !== null,
       reasons: shownReasons.map((x) => reasonText(x, ev.overweight)),
       reasonCodes: shownReasons,
       advice: shownReasons.map((x) => this.advice(x, pid, elapsed, ev)),
@@ -637,7 +638,9 @@ export class Room {
       let extra: string | null = null;
       if (seed.crisis.closed && g.planAtCrisis?.route !== seed.crisis.closed) extra = '吊橋斷了，原本唯一能三村全送的路沒了。';
       if (g.crisisCause === 'timeout') extra = (extra ? extra + ' ' : '') + '時間到了，危機照常發生——別擔心，還有機會。';
-      v.crisis = { title: seed.crisis.title, text: seed.crisis.text, at: r.startedAt + g.crisisAt, cause: g.crisisCause!, extra };
+      // 揭曉：危機發生前，你們的方案原本能送到幾村
+      const before = g.planAtCrisis ? evaluatePlan(seed, g.planAtCrisis, { crisis: false, powerOn: true, floodgate: false, released: false }).reachable : 0;
+      v.crisis = { title: seed.crisis.title, text: seed.crisis.text, at: r.startedAt + g.crisisAt, cause: g.crisisCause!, extra, reachBefore: before };
     }
 
     if (g.repair) {
