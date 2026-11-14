@@ -11,6 +11,7 @@ import {
   symbolCount,
   CRISIS_AT,
   HINT_AT,
+  LOCK_OPENS_AT,
   TIME_UP_AT,
   type GameEvent,
   type GameState,
@@ -97,6 +98,22 @@ test('鎖定前方案必須合法（超重不能鎖）', () => {
   assert.equal(s.phase, 'planning');
   assert.deepEqual(s.lastRejection?.reasons, ['OVERWEIGHT']);
   assert.equal(evaluate(s).overweight, 2);
+});
+
+test('前 60 秒可以排方案但不能鎖定（先認識隊友）；拒絕次數會累計', () => {
+  let s = applyAll(newGame('seed 001'), plan('紅', ['藥品', '飲水', '毛毯'], 10_000));
+  assert.equal(evaluate(s).reachable, 3); // 排方案不受限
+  s = apply(s, { type: 'lock', at: LOCK_OPENS_AT - 1 });
+  assert.equal(s.phase, 'planning');
+  assert.deepEqual(s.lastRejection?.reasons, ['TOO_EARLY']);
+  assert.equal(s.rejections, 1);
+  s = apply(s, { type: 'lock', at: LOCK_OPENS_AT });
+  assert.equal(s.phase, 'blackout');
+  assert.equal(s.rejections, 1);
+  // 測試或特殊房間可以把限制設成 0
+  const t = createGame({ seedId: 'seed 001', playerCount: 3, firstRound: false, slots: makeSlots(2, 1), lockOpensAt: 0 });
+  const u = apply(applyAll(t, plan('紅', ['藥品'], 0)), { type: 'lock', at: 0 });
+  assert.equal(u.phase, 'blackout');
 });
 
 test('F07（引擎層）符號數與排除線索名額：3／4／5／10 人', () => {

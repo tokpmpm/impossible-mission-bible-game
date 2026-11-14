@@ -485,6 +485,102 @@ blockquote { margin: 6px 0 0; padding: 10px 12px; border-left: 4px solid var(--g
 cite { display: block; margin-top: 4px; font-style: normal; color: var(--gold-2); font-size: 0.88rem; }
 .thanks { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 4px; color: var(--muted); }
 
+/* ───── 新手說明與操作回饋 ───── */
+
+/* 底部固定列：提示＋狀態＋主按鈕，疊在一起 */
+.action-bar.stack { flex-direction: column; align-items: center; gap: 8px; padding-top: 18px; }
+.action-bar.stack > * { width: 100%; }
+.screen.planning { padding-bottom: 200px; }
+.status-line {
+  background: var(--bg-2);
+  border: 2px solid var(--line);
+  border-radius: var(--radius-s);
+  padding: 6px 12px;
+  text-align: center;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.sl-main { display: flex; flex-wrap: wrap; justify-content: center; gap: 0 2px; }
+.sl-sep { color: var(--muted); }
+.status-line.bad { border-color: var(--warn); background: var(--warn-bg); color: #ffe2d8; }
+.status-line.ok { border-color: var(--ok); color: var(--ok); }
+.sl-ok { font-weight: 900; }
+.status-sub { font-size: 0.82rem; font-weight: 600; color: var(--muted); }
+.status-sub strong { color: var(--gold-2); }
+.bar-note {
+  background: #fff6dd;
+  color: #2a1d00;
+  border-radius: var(--radius-s);
+  padding: 10px 12px;
+  box-shadow: var(--shadow);
+  border-left: 6px solid var(--gold);
+  max-height: 40vh;
+  overflow-y: auto;
+}
+.bar-note.rejected { border-left-color: var(--warn); }
+.bar-note-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.bar-note-head strong { font-size: 1.05rem; }
+.bar-note p, .bar-note ul { margin: 4px 0 0; font-weight: 600; }
+.bar-note ul { padding-left: 1.2em; }
+.note-x { background: none; border: 0; font-size: 1.1rem; min-width: 44px; min-height: 36px; cursor: pointer; color: inherit; }
+
+/* 被擋下時，相關區塊閃一下 */
+.flash { animation: flash-block 0.6s ease-in-out 2; }
+@keyframes flash-block {
+  0%, 100% { box-shadow: var(--shadow); }
+  50% { box-shadow: 0 0 0 4px var(--warn), var(--shadow); }
+}
+
+/* 第一局每階段頂端導引：先大，3 秒後縮小 */
+.guide {
+  background: linear-gradient(90deg, rgba(242, 193, 78, 0.28), rgba(242, 193, 78, 0.1));
+  border: 2px solid var(--gold);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  font-size: 1.15rem;
+  font-weight: 800;
+  transition: font-size 0.3s, padding 0.3s;
+}
+.guide.mini { font-size: 0.85rem; font-weight: 600; padding: 6px 12px; border-width: 1px; }
+.blackout .guide { color: var(--gold-2); }
+
+/* 自己負責的區塊 */
+.card.mine { border-color: var(--gold); }
+.card.mine h2 { display: flex; align-items: center; gap: 8px; }
+
+/* 別人負責的區塊：收成一行 */
+.fold { padding: 0; }
+.fold > summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  min-height: 48px;
+  cursor: pointer;
+}
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::after { content: '展開 ▾'; font-size: 0.8rem; color: var(--muted); white-space: nowrap; }
+.fold[open] > summary::after { content: '收起 ▴'; }
+.fold-k { color: var(--muted); flex: none; }
+.fold-v { flex: 1; min-width: 0; font-weight: 700; }
+.fold-who { font-size: 0.8rem; color: var(--gold-2); white-space: nowrap; }
+.fold > :not(summary) { margin-left: 16px; margin-right: 16px; }
+.fold > :last-child { margin-bottom: 16px; }
+.route.not-mine, .chip.item.not-mine { opacity: 0.8; }
+
+/* 大廳「怎麼玩」 */
+.howto { border-color: var(--gold); }
+.howto-list { margin: 0; padding-left: 1.4em; display: grid; gap: 6px; font-weight: 600; }
+
+/* 開局下一步 */
+.next-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.ns-verb { color: var(--muted); font-weight: 600; }
+.ns-nick { color: var(--gold-2); }
+
+/* 結算頁：下一局按鈕放在最後，不蓋住內容 */
+.action-end { margin-top: 4px; }
+
 @media (max-width: 360px) {
   body { font-size: 16px; }
   .screen { padding-left: 12px; padding-right: 12px; }

@@ -10,10 +10,11 @@ import {
   type GameEvent,
   type GameState,
 } from '../engine/game.ts';
-import { REASON_TEXT, type RejectReason } from '../engine/rules.ts';
+import { REASON_TEXT, type Evaluation, type RejectReason } from '../engine/rules.ts';
 import { SEEDS, VILLAGES, cargoItems, displayName, type RouteId, type SeedId } from '../engine/seeds.ts';
 import { describeSymbol, makeEliminationClues, makeSlots, parseSymbol, rng } from '../engine/symbols.ts';
 import {
+  ASKS,
   CLUES,
   HINT_ROLE,
   PREFERENCES,
@@ -26,7 +27,7 @@ import {
   type Preference,
   type RoleId,
 } from './content.ts';
-import type { Action, View, ViewPhase } from './view.ts';
+import type { Action, Rejection, View, ViewPhase } from './view.ts';
 
 export const INTRO_MS = 60_000;
 export const MIN_PLAYERS = 3;
@@ -58,11 +59,14 @@ interface Round {
   actors: { kind: string; playerId: string; at: number }[];
   thanks: Map<string, string>;
   queryReply: string | null;
+  /** 突破口第 n 段線索在誰手上（同一支手機不會拿到兩段，ADR-0003 第 26 條）。 */
+  btHolders: Map<number, string>;
 }
 
 const EXTRA_REASON_TEXT: Record<string, string> = {
   GREEN_NOT_LOCKABLE: '故事安全窗不足：綠線山路 6 分鐘，洪水第 5 分鐘就到',
   WRONG_PHASE: '現在不能做這個動作',
+  TOO_EARLY: '還在認識隊友的時間',
 };
 
 function reasonText(r: string, overweight = 0): string {
@@ -84,11 +88,15 @@ export class Room {
   round: Round | null = null;
   roundsPlayed = 0;
   lastActivity = Date.now();
+  /** 開局認識隊友的時間；這段時間可以排方案但不能鎖定。 */
+  introMs: number;
+  private lastSig = '';
   private now: () => number;
   private random: () => number;
 
-  constructor(code: string, opts: { now?: () => number; seed?: number } = {}) {
+  constructor(code: string, opts: { now?: () => number; seed?: number; introMs?: number } = {}) {
     this.code = code;
+    this.introMs = opts.introMs ?? INTRO_MS;
     this.now = opts.now ?? Date.now;
     this.random = opts.seed !== undefined ? rng(opts.seed) : Math.random;
   }
@@ -221,12 +229,13 @@ export class Room {
 
     const firstRound = this.roundsPlayed === 0;
     this.roundsPlayed++;
+    const btHolders = this.assignBreakthrough(seedId, participants, roles);
     this.round = {
       no: this.roundsPlayed,
       seedId,
       startedAt: this.now(),
       firstRound,
-      game: createGame({ seedId, playerCount: n, firstRound, slots, channel, grayOrder }),
+      game: createGame({ seedId, playerCount: n, firstRound, slots, channel, grayOrder, lockOpensAt: this.introMs }),
       participants,
       roles,
       engineerId,
@@ -237,8 +246,33 @@ export class Room {
       actors: [],
       thanks: new Map(),
       queryReply: null,
+      btHolders,
     };
     this.touch();
+  }
+
+  /** 職能持有者（含拆分職能回到原職能）。 */
+  private static holderIn(participants: string[], roles: Map<string, RoleId[]>, role: RoleId): string | null {
+    for (const pid of participants) if (roles.get(pid)!.includes(role)) return pid;
+    const parent = SPLIT_FROM[role];
+    return parent ? Room.holderIn(participants, roles, parent) : null;
+  }
+
+  /**
+   * 突破口三段線索本來依職能分給三個人；人少時兩段可能落在同一支手機（例：3 人局通訊＋工程）。
+   * 這時把後面那段轉給還沒拿到突破口線索的隊友，確保三段在三支手機上，一定要開口合作。
+   */
+  private assignBreakthrough(seedId: SeedId, participants: string[], roles: Map<string, RoleId[]>): Map<number, string> {
+    const out = new Map<number, string>();
+    const taken = new Set<string>();
+    for (const c of CLUES[seedId].filter((x) => x.breakthrough).sort((a, b) => a.breakthrough! - b.breakthrough!)) {
+      let holder = Room.holderIn(participants, roles, c.role);
+      if (!holder || taken.has(holder)) holder = participants.find((p) => !taken.has(p)) ?? holder;
+      if (!holder) continue;
+      out.set(c.breakthrough!, holder);
+      taken.add(holder);
+    }
+    return out;
   }
 
   // ---------- 操作 ----------
@@ -251,15 +285,18 @@ export class Room {
   tick(): boolean {
     const r = this.round;
     if (!r || r.game.phase === 'settled' || r.game.phase === 'ended') return false;
-    const before = this.signature();
     r.game = apply(r.game, { type: 'tick', at: this.elapsed() });
-    return this.signature() !== before;
+    const sig = this.signature();
+    if (sig === this.lastSig) return false;
+    this.lastSig = sig;
+    return true;
   }
 
   private signature(): string {
     const g = this.round?.game;
     if (!g) return '';
-    return [g.phase, g.hint.shown, g.repair?.assistLevel, g.crisisAt, g.result?.stars].join('|');
+    // 認識隊友時間結束（intro → planning）也要廣播，手機才會換畫面
+    return [g.phase, this.elapsed() >= this.introMs, g.hint.shown, g.repair?.assistLevel, g.crisisAt, g.result?.stars].join('|');
   }
 
   private online(pid: string): boolean {
@@ -269,9 +306,7 @@ export class Room {
 
   private holderOf(role: RoleId): string | null {
     const r = this.round!;
-    for (const pid of r.participants) if (r.roles.get(pid)!.includes(role)) return pid;
-    const parent = SPLIT_FROM[role];
-    return parent ? this.holderOf(parent) : null;
+    return Room.holderIn(r.participants, r.roles, role);
   }
 
   /** 操作者：持有該職能者在線就是他，否則交給第一位在線的參與者（不讓離線卡死）。 */
@@ -323,11 +358,14 @@ export class Room {
     }
   }
 
-  /** 回傳 true 表示是新動作（已執行或被規則拒絕），false 表示重複送出被忽略。 */
-  act(pid: string, actId: string, a: Action): boolean {
+  /**
+   * 執行一個動作。重複送出（同一個 id）會被忽略並回傳 null；
+   * 被規則擋下時回傳 Rejection（原因＋下一步），讓按的那支手機知道發生什麼事。
+   */
+  act(pid: string, actId: string, a: Action): Rejection | null {
     const p = this.get(pid);
     if (!p) throw new Error('找不到玩家');
-    if (p.seenActs.includes(actId)) return false;
+    if (p.seenActs.includes(actId)) return null;
     p.seenActs.push(actId);
     if (p.seenActs.length > 300) p.seenActs.shift();
     const r = this.round;
@@ -342,7 +380,83 @@ export class Room {
     }
     r.actors.push({ kind: a.type, playerId: pid, at });
     this.touch();
-    return true;
+    if (r.game.rejections > before.rejections && r.game.lastRejection) {
+      return { action: a.type, reasons: r.game.lastRejection.reasons.map((code) => ({ code, text: this.advice(code, pid, at) })) };
+    }
+    return null;
+  }
+
+  /** 操作者的稱呼：自己就說「你」，別人就說「暱稱（職能）」。 */
+  private whoDoes(role: RoleId, pid: string): string {
+    const op = this.operatorOf(role);
+    if (op === pid) return '你';
+    return ` ${this.nick(op)}（${ROLES[role].name}）`;
+  }
+
+  /** 拒絕原因＋下一步（不直接給答案）。at：局內經過毫秒。 */
+  advice(code: string, pid: string, at = this.elapsed(), ev?: Evaluation): string {
+    const r = this.round!;
+    const g = r.game;
+    const seed = seedOf(g);
+    ev ??= evaluate(g);
+    const route = g.plan.route;
+    const routeName = (id: RouteId) => `${id}線`;
+    switch (code) {
+      case 'NO_ROUTE':
+        return `還沒選路線：請${this.whoDoes('nav', pid)}選一條`;
+      case 'OVERWEIGHT':
+        return `超重 ${ev.overweight} kg，請${this.whoDoes('supply', pid)}放下一樣`;
+      case 'ROAD_CLOSED': {
+        const others = (['紅', '藍', '綠'] as RouteId[]).filter((id) => id !== route && seed.crisis.closed !== id).map(routeName);
+        return `${route ? seed.routes[route].label : '這條路'}斷了，請${this.whoDoes('nav', pid)}改選${others.join('或')}`;
+      }
+      case 'TOO_LATE': {
+        const travel = ev.travel ?? 0;
+        const safe = ev.safeWindow ?? seed.flood;
+        const head = `${route ? routeName(route) : '這條路'}要 ${travel} 分鐘，洪水 ${safe} 分鐘就到，來不及`;
+        const b = seed.breakthrough;
+        if (b.kind === 'floodgate' && route === b.route && !g.floodgate && g.crisisAt !== null) {
+          return `${head}：找找有沒有辦法拖住洪水，或請${this.whoDoes('nav', pid)}換一條更快的路`;
+        }
+        return `${head}：請${this.whoDoes('nav', pid)}換一條更快的路`;
+      }
+      case 'GREEN_NOT_LOCKABLE': {
+        const travel = seed.routes['綠'].travel;
+        return `綠線要 ${travel} 分鐘，洪水 ${seed.flood} 分鐘就到，現在還來不及：請${this.whoDoes('nav', pid)}先選一條更快的路`;
+      }
+      case 'NO_NEEDS':
+        return `車上沒有村子需要的東西：問問${this.whoDoes('comms', pid)}各村要什麼，再請${this.whoDoes('supply', pid)}裝上`;
+      case 'NOT_POWERED':
+        return `還在停電：先幫工程師 ${this.nick(this.operatorOf('eng'))} 修好電力`;
+      case 'NOT_RELEASED': {
+        const b = seed.breakthrough;
+        const item = b.kind === 'query' ? displayName(seed, b.item) : '這樣物資';
+        return `${item}還沒發放，現在還不能裝上車`;
+      }
+      case 'TOO_EARLY': {
+        const sec = Math.max(1, Math.ceil((g.lockOpensAt - at) / 1000));
+        return `先花 1 分鐘認識隊友、交換情報；再 ${sec} 秒就能鎖定。方案可以先排`;
+      }
+      default:
+        return reasonText(code);
+    }
+  }
+
+  /** 開局「下一步」：去找誰、問什麼。 */
+  private nextSteps(pid: string): View['nextSteps'] {
+    const r = this.round!;
+    const out: View['nextSteps'] = [];
+    const used = new Set<string>([pid]);
+    for (const role of r.roles.get(pid) ?? []) {
+      for (const ask of ASKS[role]) {
+        const to = Room.holderIn(r.participants, r.roles, ask.to);
+        if (!to || used.has(to)) continue;
+        used.add(to);
+        out.push({ verb: ask.verb, nickname: this.nick(to), text: ask.text });
+        break;
+      }
+    }
+    return out.slice(0, 2);
   }
 
   thank(from: string, to: string | null): void {
@@ -366,7 +480,7 @@ export class Room {
     const elapsed = this.elapsed();
     let phase: ViewPhase = 'lobby';
     if (r && g && participant) {
-      phase = g.phase === 'planning' && elapsed < INTRO_MS ? 'intro' : g.phase;
+      phase = g.phase === 'planning' && elapsed < this.introMs ? 'intro' : g.phase;
     } else if (r && g && (g.phase === 'settled' || g.phase === 'ended')) {
       phase = 'lobby';
     }
@@ -417,11 +531,14 @@ export class Room {
       repair: null,
       breakthrough: null,
       result: null,
+      operators: null,
+      nextSteps: [],
     };
     if (!r || !g || !participant) return v;
 
     const seed = seedOf(g);
     const ev = evaluate(g);
+    const shownReasons = ev.reasons.filter((x) => !(g.phase === 'planning' && x === 'NOT_POWERED'));
     const editable = g.phase === 'planning' || g.phase === 'replanning';
     v.round = {
       no: r.no,
@@ -431,7 +548,8 @@ export class Room {
       startedAt: r.startedAt,
       elapsedMs: elapsed,
       timeLimitMs: TIME_UP_AT,
-      introMs: INTRO_MS,
+      introMs: this.introMs,
+      lockOpensAt: r.startedAt + g.lockOpensAt,
     };
     const routeView = (id: RouteId) => ({
       id,
@@ -456,10 +574,26 @@ export class Room {
       overweight: ev.overweight,
       safeWindow: ev.safeWindow,
       reachable: ev.reachable,
-      reasons: ev.reasons.filter((x) => !(g.phase === 'planning' && x === 'NOT_POWERED')).map((x) => reasonText(x, ev.overweight)),
+      reasons: shownReasons.map((x) => reasonText(x, ev.overweight)),
+      reasonCodes: shownReasons,
+      advice: shownReasons.map((x) => this.advice(x, pid, elapsed, ev)),
       locked: g.locked,
-      lastRejection: g.lastRejection ? { at: g.lastRejection.at, reasons: g.lastRejection.reasons.map((x) => reasonText(x, ev.overweight)) } : null,
+      // at 換成伺服器時間（原本是局內毫秒，前端拿去和時鐘比，永遠過期）
+      lastRejection: g.lastRejection
+        ? {
+            at: r.startedAt + g.lastRejection.at,
+            action: g.lastRejection.action,
+            reasons: g.lastRejection.reasons.map((x) => reasonText(x, ev.overweight)),
+          }
+        : null,
     };
+    v.operators = {
+      route: this.nick(this.operatorOf('nav')),
+      items: this.nick(this.operatorOf('supply')),
+      comms: this.nick(this.operatorOf('comms')),
+      repair: this.nick(this.operatorOf('eng')),
+    };
+    v.nextSteps = this.nextSteps(pid);
     v.can.route = editable && this.operatorOf('nav') === pid;
     v.can.items = editable && this.operatorOf('supply') === pid;
     v.can.lock = g.phase === 'planning';
@@ -473,10 +607,20 @@ export class Room {
       if (!present.has(split) && mine.has(parent)) mine.add(split);
     }
     const powered = g.phase === 'replanning' || g.phase === 'settled' || (g.phase === 'ended' && !!g.repair?.doneAt);
+    // 拆分職能不在場（例如 6 人以下的倉儲管理）時，標籤顯示原職能，不出現玩家沒聽過的職能名稱
+    const roleLabel = (role: RoleId) => (present.has(role) ? ROLES[role].name : ROLES[SPLIT_FROM[role] ?? role].name);
     v.clues = CLUES[r.seedId]
-      .filter((c) => mine.has(c.role))
+      .filter((c) => (c.breakthrough ? r.btHolders.get(c.breakthrough) === pid : mine.has(c.role)))
       .filter((c) => c.when === 'start' || (c.when === 'crisis' && g.crisisAt !== null) || (c.when === 'power' && powered))
-      .map((c) => ({ title: c.title, text: c.text.replace('{channel}', g.channel), role: ROLES[c.role].name, breakthrough: c.breakthrough }));
+      .map((c) => {
+        const moved = !!c.breakthrough && !mine.has(c.role);
+        return {
+          title: c.title,
+          text: c.text.replace('{channel}', g.channel),
+          role: moved ? `${roleLabel(c.role)}・由你保管` : roleLabel(c.role),
+          breakthrough: c.breakthrough,
+        };
+      });
 
     if (g.hint.shown && g.phase === 'planning' && this.holderOf(HINT_ROLE[r.seedId]) === pid) v.hint = seed.hintText;
 

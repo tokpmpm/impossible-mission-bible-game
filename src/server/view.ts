@@ -29,7 +29,15 @@ export type ServerMessage =
   | { t: 'welcome'; playerId: string; token: string; code: string }
   | { t: 'state'; view: View }
   | { t: 'ack'; id: string }
+  /** 只送給按的那支手機：這個動作被規則擋下了，附原因與下一步。 */
+  | ({ t: 'rejected'; id: string } & Rejection)
   | { t: 'error'; msg: string };
+
+export interface Rejection {
+  action: Action['type'];
+  /** code：規則代碼（OVERWEIGHT、TOO_EARLY…）；text：原因＋下一步，例「超重 2 kg，請 大衛（補給）放下一樣」。 */
+  reasons: { code: string; text: string }[];
+}
 
 export type ViewPhase = 'lobby' | 'intro' | 'planning' | 'blackout' | 'replanning' | 'settled' | 'ended';
 
@@ -57,6 +65,7 @@ export interface View {
     elapsedMs: number;
     timeLimitMs: number; // 480000
     introMs: number; // 60000
+    lockOpensAt: number; // 伺服器時間；之前可以排方案但不能鎖定
   };
   /** 全隊共用的方案摘要 */
   plan: null | {
@@ -69,10 +78,17 @@ export interface View {
     overweight: number;
     safeWindow: number | null;
     reachable: number; // 可送達村數
-    reasons: string[]; // 中文，空＝可以出發／鎖定
+    reasons: string[]; // 中文短句，空＝可以出發／鎖定
+    reasonCodes: string[]; // 同上，規則代碼（前端用來決定哪一塊要閃、要不要顯示故事時間）
+    advice: string[]; // 同上，原因＋下一步（依看的人換成「你」或隊友暱稱）
     locked: boolean;
-    lastRejection: null | { at: number; reasons: string[] };
+    /** 最近一次被擋下的鎖定／出發（at 為伺服器時間），讓其他隊友也知道剛剛有人按了。 */
+    lastRejection: null | { at: number; action: Action['type']; reasons: string[] };
   };
+  /** 各操作的負責人暱稱：按了不是自己的按鈕時，告訴他該去找誰。 */
+  operators: null | { route: string; items: string; comms: string; repair: string };
+  /** 開局下一步：例 { verb: '問', nickname: '大衛', text: '車子最多能載多重？' } */
+  nextSteps: { verb: '問' | '告訴' | '找'; nickname: string; text: string }[];
   /** 我能做的操作（只是入口分工；資訊大家都能看） */
   can: {
     start: boolean;
