@@ -45,8 +45,17 @@
 | [tools/verify_seeds.py](tools/verify_seeds.py) | 窮舉試算兩個種子的可解性與分星 |
 | [AGENTS.md](AGENTS.md) | Codex 等後續開發者工作準則 |
 
+## 部署到網路（Cloudflare，任何網路都能玩）
+需要 Cloudflare 帳號。部署後會得到 `https://impossible-mission.<你的子網域>.workers.dev`，手機用行動網路掃 QR Code 就能加入（docs/adr/0005）。
+
+```bash
+npx wrangler deploy
+```
+
+第一次會要求登入或設定 `CLOUDFLARE_API_TOKEN`（Edit Cloudflare Workers 權限）。本機模擬 Cloudflare：`npm run dev:worker`。
+
 ## 在現場跑原型（未經真人試玩）
-需要 Node.js 22.18 以上，以及一台和手機連到**同一個 Wi-Fi** 的電腦。
+不想部署時的替代做法：需要 Node.js 22.18 以上，以及一台和手機連到**同一個 Wi-Fi** 的電腦。
 
 ```bash
 npm install

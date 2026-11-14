@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const PORT = process.env.PORT || '3100';
-const server = spawn(process.execPath, ['src/server/main.ts'], { cwd: root, env: { ...process.env, PORT }, stdio: 'ignore' });
+// E2E_EXTERNAL=1：不自己開伺服器，直接測 PORT 上已在跑的伺服器（例如 wrangler dev）。
+const server = process.env.E2E_EXTERNAL ? null : spawn(process.execPath, ['src/server/main.ts'], { cwd: root, env: { ...process.env, PORT }, stdio: 'ignore' });
 const run = (env) =>
   new Promise((resolve) => {
     const c = spawn(process.execPath, ['e2e/play.cjs'], { cwd: root, env: { ...process.env, PORT, ...env }, stdio: 'inherit' });
@@ -20,6 +21,6 @@ try {
   }
   for (const [N, W] of [['3', '390'], ['6', '360'], ['10', '320']]) failed += (await run({ N, W, TAG: `n${N}-` })) ? 1 : 0;
 } finally {
-  server.kill();
+  server?.kill();
 }
 process.exit(failed ? 1 : 0);

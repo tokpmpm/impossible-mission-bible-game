@@ -1,0 +1,17 @@
+# Cloudflare Workers 部署設定（ADR-0005）。部署：npx wrangler deploy
+name = "impossible-mission"
+main = "src/worker/index.ts"
+compatibility_date = "2025-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+[[durable_objects.bindings]]
+name = "HUB"
+class_name = "GameHub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["GameHub"]
