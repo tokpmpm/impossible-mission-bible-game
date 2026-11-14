@@ -476,3 +476,17 @@ test('開局下一步有名字和問題；6 人以下不出現拆分職能名稱
     await srv.close();
   }
 });
+
+test('心跳：送 ping 會收到 pong（讓雲端伺服器在大家聊天、沒人點手機時保持清醒）', async () => {
+  const srv = await startServer({ port: 0, publicUrl: 'http://test.local', tickMs: 20 });
+  try {
+    const ws = new WebSocket(`ws://localhost:${srv.port}/ws`);
+    await new Promise((r) => ws.once('open', r));
+    const got = new Promise<string>((r) => ws.once('message', (d) => r(String(d))));
+    ws.send(JSON.stringify({ t: 'ping' }));
+    assert.deepEqual(JSON.parse(await got), { t: 'pong' });
+    ws.close();
+  } finally {
+    await srv.close();
+  }
+});

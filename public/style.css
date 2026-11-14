@@ -569,6 +569,11 @@ cite { display: block; margin-top: 4px; font-style: normal; color: var(--gold-2)
 .fold > :last-child { margin-bottom: 16px; }
 .route.not-mine, .chip.item.not-mine { opacity: 0.8; }
 
+/* 大廳：非房主只顯示小卡，QR Code 收起來 */
+.joined { text-align: center; }
+.small-code strong { font-size: 1.8rem; }
+.invite > summary { cursor: pointer; color: var(--muted); font-size: 0.9rem; min-height: 44px; display: flex; align-items: center; justify-content: center; }
+
 /* 大廳「怎麼玩」 */
 .howto { border-color: var(--gold); }
 .howto-list { margin: 0; padding-left: 1.4em; display: grid; gap: 6px; font-weight: 600; }

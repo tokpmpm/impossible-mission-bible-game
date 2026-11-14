@@ -12,7 +12,9 @@ export type ClientMessage =
   | { t: 'act'; id: string; ev: Action } // id：手機產生的唯一代號，重送不會重複執行
   | { t: 'thank'; to: string | null }
   | { t: 'next' } // 房主：下一局（換另一個種子）
-  | { t: 'leave' };
+  | { t: 'leave' }
+  /** 心跳：每 20 秒一次。雲端伺服器一段時間沒收到訊息會被關掉、房間跟著消失，這樣能讓它保持清醒。 */
+  | { t: 'ping' };
 
 export type Action =
   | { type: 'selectRoute'; route: '紅' | '藍' | '綠' }
@@ -31,7 +33,8 @@ export type ServerMessage =
   | { t: 'ack'; id: string }
   /** 只送給按的那支手機：這個動作被規則擋下了，附原因與下一步。 */
   | ({ t: 'rejected'; id: string } & Rejection)
-  | { t: 'error'; msg: string };
+  | { t: 'error'; msg: string }
+  | { t: 'pong' };
 
 export interface Rejection {
   action: Action['type'];

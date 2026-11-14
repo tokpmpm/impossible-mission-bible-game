@@ -257,7 +257,8 @@ function guideLine(phase) {
 }
 
 function lockOpen(v) {
-  return !!v.round && now() >= v.round.lockOpensAt;
+  // 以伺服器說「認識隊友時間結束」為準（phase 不再是 intro），手機時鐘快一點也不會誤報可以鎖定
+  return !!v.round && v.phase !== 'intro';
 }
 
 /** 底部固定列：提示（被擋下／不是你的按鈕）＋常駐狀態＋主按鈕。 */
@@ -372,15 +373,24 @@ function renderLobby(v) {
   }
   return `${renderTopbar(v)}
   <main class="screen lobby">
-    <section class="card join-card">
+    ${
+      v.me.isHost
+        ? `<section class="card join-card">
       <div class="big-code"><span class="tb-label">房號</span><strong>${esc(v.code)}</strong></div>
       ${v.qrSvg ? `<div class="qr">${v.qrSvg}</div>` : ''}
       <p class="join-url">${esc(v.joinUrl)}</p>
-      <p class="muted small">用手機相機掃描，或輸入房號加入。入房不計時。</p>
-    </section>
+      <p class="muted small">請大家用手機相機掃描，或輸入房號加入。入房不計時。</p>
+    </section>`
+        : `<section class="card joined">
+      <div class="big-code small-code"><span class="tb-label">你已加入房間</span><strong>${esc(v.code)}</strong></div>
+      <details class="invite"><summary>還有人要加入？點這裡顯示 QR Code</summary>
+        ${v.qrSvg ? `<div class="qr">${v.qrSvg}</div>` : ''}<p class="join-url">${esc(v.joinUrl)}</p>
+      </details>
+    </section>`
+    }
     <section class="card howto">
       <h2>怎麼玩</h2>
-      <p class="muted small">房主可以直接念給大家聽：</p>
+      ${v.me.isHost ? '<p class="muted small">你是房主，可以直接念給大家聽：</p>' : ''}
       <ol class="howto-list">
         <li>我們是救援隊，要在 8 分鐘內把物資送到三個村。</li>
         <li>每個人手機上只看得到一部分情報，要開口問隊友、互相看手機。</li>

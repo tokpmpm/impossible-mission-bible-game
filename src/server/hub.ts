@@ -106,6 +106,8 @@ export class Hub {
   private handle(conn: Conn, msg: ClientMessage): void {
     const room = conn.roomCode ? this.rooms.get(conn.roomCode) : undefined;
     switch (msg.t) {
+      case 'ping':
+        return this.send(conn, { t: 'pong' });
       case 'create': {
         const code = this.newCode();
         const r = new Room(code, { introMs: this.introMs });
