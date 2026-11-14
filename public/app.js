@@ -28,7 +28,7 @@ const ui = {
   left: false,
   busy: false,
   homeMode: params.get('room') ? 'join' : 'create',
-  nick: '',
+  nick: (params.get('nick') || '').slice(0, 12),
   code: (params.get('room') || '').toUpperCase().slice(0, 8),
   introTab: 'me',
   zoom: false,
@@ -87,10 +87,18 @@ function toast(msg) {
 
 // ───────── 連線 ─────────
 
+let autoSent = false;
+
 const conn = createConnection({
   onStatus(s) {
     ui.status = s;
     renderStatus();
+    // ?auto=1（單機試玩）：沒有 session 時自動用 nick 建立或加入房間
+    if (s === 'open' && params.get('auto') && !autoSent && !loadSession() && ui.nick) {
+      autoSent = true;
+      if (ui.code) conn.send({ t: 'join', code: ui.code, nickname: ui.nick });
+      else conn.send({ t: 'create', nickname: ui.nick });
+    }
   },
   onWelcome() {
     ui.left = false;
@@ -237,6 +245,7 @@ function renderHome() {
       }</button>
       <p class="muted small">入房不計時；人到齊、房主按開始後才開始 8 分鐘。</p>
     </form>
+    <p class="muted small" style="text-align:center">手機不夠？<a href="/solo.html" style="color:inherit">用一台電腦同時扮演 3–10 位玩家</a></p>
   </main>`;
 }
 

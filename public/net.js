@@ -1,7 +1,9 @@
 // WebSocket 連線：自動重連（指數退避，最多 5 秒）、resume、act 去重重送。
 // 協定見 src/server/view.ts。
 
-const STORE_KEY = 'impossible-mission.session';
+// ?seat=N：單機試玩（solo.html）時，同一個瀏覽器裡每一格各自是一位玩家。
+const SEAT = new URLSearchParams(location.search).get('seat');
+const STORE_KEY = 'impossible-mission.session' + (SEAT ? '.' + SEAT.replace(/[^0-9a-z]/gi, '') : '');
 
 export function loadSession() {
   try {
