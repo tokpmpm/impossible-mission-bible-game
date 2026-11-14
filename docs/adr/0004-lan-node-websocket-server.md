@@ -1,6 +1,6 @@
 # 原型用自架的區域網路伺服器，不用 Supabase
 
-Status: accepted（2026-11-14，使用者選擇）
+Status: superseded by ADR-0005（部署方式）；Node 版仍可在本機或區域網路使用
 
 第一個可玩原型用一支 Node 伺服器（WebSocket＋靜態檔）在主持人的電腦上執行，手機連同一個 Wi-Fi 掃 QR Code 加入。房間狀態只在伺服器記憶體裡，伺服器是唯一權威，規則交給 src/engine。
 

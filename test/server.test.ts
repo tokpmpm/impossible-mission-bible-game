@@ -13,6 +13,7 @@ class Phone {
   code = '';
   errors: string[] = [];
   acks: string[] = [];
+  rejections: Extract<ServerMessage, { t: 'rejected' }>[] = [];
   private waiters: (() => void)[] = [];
   private url: string;
   constructor(url: string) {
@@ -27,6 +28,7 @@ class Phone {
       if (m.t === 'welcome') Object.assign(this, { playerId: m.playerId, token: m.token, code: m.code });
       if (m.t === 'error') this.errors.push(m.msg);
       if (m.t === 'ack') this.acks.push(m.id);
+      if (m.t === 'rejected') this.rejections.push(m);
       this.waiters.splice(0).forEach((w) => w());
     });
     await new Promise((r) => this.ws.once('open', r));
@@ -55,8 +57,9 @@ class Phone {
   }
 }
 
-async function setup(n: number) {
-  const srv = await startServer({ port: 0, publicUrl: 'http://test.local', tickMs: 20 });
+// introMs 預設 0：大部分測試要馬上鎖定；「前 60 秒不能鎖定」另外測
+async function setup(n: number, introMs = 0) {
+  const srv = await startServer({ port: 0, publicUrl: 'http://test.local', tickMs: 20, introMs });
   const url = `ws://localhost:${srv.port}/ws`;
   const host = await new Phone(url).open();
   host.send({ t: 'create', nickname: '房主' });
@@ -97,7 +100,7 @@ for (const n of [3, 6, 10]) {
       assert.equal(host.view!.qrSvg?.startsWith('<svg'), true);
       assert.equal(host.view!.can.start, true);
       host.send({ t: 'start' });
-      await Promise.all(phones.map((p) => p.until((v) => v.phase === 'intro')));
+      await Promise.all(phones.map((p) => p.until((v) => v.phase === 'planning')));
 
       // F02／F03：每人都有職能、至少一條開局線索；職能涵蓋六種核心能力
       const allRoles = phones.flatMap((p) => p.view!.me.roles.map((r) => r.id));
@@ -116,6 +119,7 @@ for (const n of [3, 6, 10]) {
       for (const item of ['藥品', '飲水', '毛毯']) supply.act({ type: 'setItem', item, on: true });
       await host.until((v) => v.plan?.reachable === 3);
       assert.equal(host.view!.plan!.weight, 7);
+      assert.equal(host.view!.plan!.showReach, false); // 危機前畫面不顯示可送幾村
 
       // 非導航員不能選路線
       const notNav = phones.find((p) => p !== nav)!;
@@ -125,6 +129,8 @@ for (const n of [3, 6, 10]) {
       host.act({ type: 'lock' });
       await Promise.all(phones.map((p) => p.until((v) => v.phase === 'blackout')));
       assert.ok(host.view!.crisis?.title.includes('吊橋'));
+      assert.equal(host.view!.crisis!.reachBefore, 3); // 停電時揭曉：原本能送 3 村
+      assert.equal(host.view!.plan!.showReach, true);
 
       // F07：符號數、排除線索、每位非工程師都有事
       const sym = { 3: 2, 6: 4, 10: 4 }[n]!;
@@ -149,8 +155,11 @@ for (const n of [3, 6, 10]) {
       // 突破口三段線索分別在觀測、通訊、工程手機上
       const bt = phones.flatMap((p) => p.view!.clues.filter((c) => c.breakthrough).map((c) => c.breakthrough));
       assert.deepEqual([...bt].sort(), [1, 2, 3]);
-      const engineerClue = eng.view!.clues.find((c) => c.breakthrough === 3)!;
-      const channel = engineerClue.text.match(/(\d{3})/)![1];
+      // 三段在三支不同的手機上（3 人局通訊＋工程同一人時，第 3 段會轉給別人）
+      const btPhones = phones.filter((p) => p.view!.clues.some((c) => c.breakthrough));
+      assert.equal(btPhones.length, 3);
+      const channelClue = phones.flatMap((p) => p.view!.clues).find((c) => c.breakthrough === 3)!;
+      const channel = channelClue.text.match(/(\d{3})/)![1];
       const comms = who(phones, (v) => v.can.floodgate);
       comms.act({ type: 'floodgate', channel: '000' });
       await comms.until((v) => v.breakthrough!.floodgateWrongCount === 1);
@@ -172,7 +181,7 @@ for (const n of [3, 6, 10]) {
       assert.deepEqual(Object.keys(host.view!.result!.thanks[0]).sort(), ['from', 'to']);
 
       host.send({ t: 'next' });
-      await Promise.all(phones.map((p) => p.until((v) => v.phase === 'intro' && v.round?.seedId === 'seed 002')));
+      await Promise.all(phones.map((p) => p.until((v) => v.phase === 'planning' && v.round?.seedId === 'seed 002')));
       assert.equal(host.view!.round!.firstRound, false);
     } finally {
       phones.forEach((p) => p.close());
@@ -185,7 +194,7 @@ test('seed 002（第二局）：落石載重降為 5、詢問北村井水、淨�
   const { srv, phones, host } = await setup(4);
   try {
     host.send({ t: 'start' });
-    await host.until((v) => v.phase === 'intro');
+    await host.until((v) => v.phase === 'planning');
     host.act({ type: 'lock' }); // 沒排方案不能鎖
     await host.until((v) => !!v.plan?.lastRejection);
     // 快轉：第一局直接用合法方案鎖定並結算
@@ -201,7 +210,7 @@ test('seed 002（第二局）：落石載重降為 5、詢問北村井水、淨�
     host.act({ type: 'depart' });
     await host.until((v) => v.phase === 'settled');
     host.send({ t: 'next' });
-    await Promise.all(phones.map((p) => p.until((v) => v.round?.seedId === 'seed 002' && v.phase === 'intro')));
+    await Promise.all(phones.map((p) => p.until((v) => v.round?.seedId === 'seed 002' && v.phase === 'planning')));
 
     const nav2 = who(phones, (v) => v.can.route);
     const sup2 = who(phones, (v) => v.can.items);
@@ -255,14 +264,14 @@ test('F18：斷線重連回到原角色；房主離線會移交；重送同一�
   const { srv, url, phones, host } = await setup(3);
   try {
     host.send({ t: 'start' });
-    await Promise.all(phones.map((p) => p.until((v) => v.phase === 'intro')));
+    await Promise.all(phones.map((p) => p.until((v) => v.phase === 'planning')));
     const victim = phones[1];
     const rolesBefore = victim.view!.me.roles.map((r) => r.id);
     victim.close();
     await host.until((v) => v.players.some((p) => p.id === victim.playerId && !p.connected));
     const again = await new Phone(url).open();
     again.send({ t: 'resume', playerId: victim.playerId, token: victim.token });
-    await again.until((v) => v.phase === 'intro');
+    await again.until((v) => v.phase === 'planning');
     assert.deepEqual(again.view!.me.roles.map((r) => r.id), rolesBefore);
     phones[1] = again;
 
@@ -296,7 +305,7 @@ test('F19：偏好全跳過或多人同選隨性派，都一定有人持有排�
       await host.until((v) => v.players.length === 4);
       await new Promise((r) => setTimeout(r, 100));
       host.send({ t: 'start' });
-      await Promise.all(phones.map((p) => p.until((v) => v.phase === 'intro')));
+      await Promise.all(phones.map((p) => p.until((v) => v.phase === 'planning')));
       const holders = phones.filter((p) => p.view!.preferenceHint?.startsWith('你持有'));
       assert.equal(holders.length, 1, JSON.stringify(prefs));
       assert.equal(holders[0].view!.me.roles.some((r) => r.id === 'eng'), false);
@@ -312,7 +321,7 @@ test('F02／F03：3–10 每種人數，每人都有職能、開局線索；停�
     const { srv, phones, host } = await setup(n);
     try {
       host.send({ t: 'start' });
-      await Promise.all(phones.map((p) => p.until((v) => v.phase === 'intro')));
+      await Promise.all(phones.map((p) => p.until((v) => v.phase === 'planning')));
       for (const p of phones) {
         assert.ok(p.view!.me.roles.length >= 1, `${n} 人`);
         assert.ok(p.view!.clues.length >= 1, `${n} 人：${p.view!.me.roles.map((r) => r.name)} 沒有開局線索`);
@@ -334,5 +343,153 @@ test('F02／F03：3–10 每種人數，每人都有職能、開局線索；停�
       phones.forEach((p) => p.close());
       await srv.close();
     }
+  }
+});
+
+test('前 60 秒不能鎖定：按的人收到 rejected（原因＋還剩幾秒），別人沒收到；時間到就能鎖', async () => {
+  const { srv, phones, host } = await setup(3, 600);
+  try {
+    host.send({ t: 'start' });
+    await Promise.all(phones.map((p) => p.until((v) => v.phase === 'intro')));
+    assert.ok(host.view!.round!.lockOpensAt > host.view!.round!.startedAt);
+    const nav = who(phones, (v) => v.can.route);
+    const supply = who(phones, (v) => v.can.items);
+    nav.act({ type: 'selectRoute', route: '紅' });
+    for (const item of ['藥品', '飲水', '毛毯']) supply.act({ type: 'setItem', item, on: true });
+    await host.until((v) => v.plan?.reachable === 3); // 認識隊友時間也能排方案
+    const id = host.act({ type: 'lock' });
+    await host.until(() => host.rejections.length === 1);
+    const rej = host.rejections[0];
+    assert.equal(rej.id, id);
+    assert.equal(rej.action, 'lock');
+    assert.equal(rej.reasons[0].code, 'TOO_EARLY');
+    assert.match(rej.reasons[0].text, /認識隊友.*秒/);
+    assert.equal(host.view!.phase, 'intro');
+    for (const p of phones) if (p !== host) assert.equal(p.rejections.length, 0);
+    await host.until((v) => v.phase === 'planning', 3000);
+    host.act({ type: 'lock' });
+    await host.until((v) => v.phase === 'blackout');
+    assert.equal(host.rejections.length, 1);
+  } finally {
+    phones.forEach((p) => p.close());
+    await srv.close();
+  }
+});
+
+test('被擋下的回饋：超重寫出幾公斤與該找誰；按的人是補給就說「你」；道路封閉附改選路線', async () => {
+  const { srv, phones, host } = await setup(4);
+  try {
+    host.send({ t: 'start' });
+    await Promise.all(phones.map((p) => p.until((v) => v.phase === 'planning')));
+    const nav = who(phones, (v) => v.can.route);
+    const supply = who(phones, (v) => v.can.items);
+    const other = phones.find((p) => p !== supply)!;
+    const supplyNick = supply.view!.me.nickname;
+    // 沒選路線
+    other.act({ type: 'lock' });
+    await other.until(() => other.rejections.length === 1);
+    assert.ok(other.rejections[0].reasons.some((r) => r.code === 'NO_ROUTE' && r.text.includes(nav === other ? '請你' : nav.view!.me.nickname)));
+    nav.act({ type: 'selectRoute', route: '紅' });
+    for (const item of ['藥品', '飲水', '毛毯', '食物']) supply.act({ type: 'setItem', item, on: true });
+    await host.until((v) => v.plan?.overweight === 2);
+    other.act({ type: 'lock' });
+    await other.until(() => other.rejections.length === 2);
+    assert.equal(other.rejections[1].reasons[0].text, `超重 2 kg，請 ${supplyNick}（補給）放下一樣`);
+    supply.act({ type: 'lock' });
+    await supply.until(() => supply.rejections.length === 1);
+    assert.equal(supply.rejections[0].reasons[0].text, '超重 2 kg，請你放下一樣');
+    // view 也帶著同樣的下一步，所有人都看得到；負責人暱稱也在 view 裡
+    assert.ok(other.view!.plan!.advice[0].startsWith('超重 2 kg'));
+    assert.deepEqual(other.view!.plan!.reasonCodes, ['OVERWEIGHT']);
+    assert.equal(other.view!.operators!.items, supplyNick);
+    assert.equal(other.view!.operators!.route, nav.view!.me.nickname);
+    // 別人也看得到「剛剛被擋下」，時間是伺服器時間（不是局內毫秒）
+    const lr = host.view!.plan!.lastRejection!;
+    assert.equal(lr.action, 'lock');
+    assert.ok(Math.abs(lr.at - host.view!.serverNow) < 5000);
+    supply.act({ type: 'setItem', item: '食物', on: false });
+    await host.until((v) => v.plan?.reasons.length === 0);
+    host.act({ type: 'lock' });
+    await repair(phones);
+    const before = host.rejections.length;
+    host.act({ type: 'depart' });
+    await host.until(() => host.rejections.length === before + 1);
+    const road = host.rejections[before];
+    assert.equal(road.action, 'depart');
+    assert.equal(road.reasons[0].code, 'ROAD_CLOSED');
+    assert.match(road.reasons[0].text, /紅線・吊橋斷了，請.*改選藍線或綠線/);
+    nav.act({ type: 'selectRoute', route: '綠' });
+    await host.until((v) => v.plan?.reasonCodes.includes('TOO_LATE') ?? false);
+    assert.match(host.view!.plan!.advice[0], /綠線要 6 分鐘，洪水 5 分鐘就到.*拖住洪水/);
+  } finally {
+    phones.forEach((p) => p.close());
+    await srv.close();
+  }
+});
+
+test('開局下一步有名字和問題；6 人以下不出現拆分職能名稱；3 人 seed 002 突破口也分在三支手機', async () => {
+  for (const n of [3, 6]) {
+    const { srv, phones, host } = await setup(n);
+    try {
+      host.send({ t: 'start' });
+      await Promise.all(phones.map((p) => p.until((v) => v.phase === 'planning')));
+      const nicks = phones.map((p) => p.view!.me.nickname);
+      for (const p of phones) {
+        const steps = p.view!.nextSteps;
+        assert.ok(steps.length >= 1, `${n} 人：${p.view!.me.roles.map((r) => r.name)} 沒有下一步`);
+        for (const st of steps) {
+          assert.ok(nicks.includes(st.nickname) && st.nickname !== p.view!.me.nickname);
+          assert.ok(st.text.length > 2);
+        }
+        for (const c of p.view!.clues) assert.ok(!/倉儲管理|村民聯絡|備援觀察|道路偵察/.test(c.role), `${n} 人出現 ${c.role}`);
+      }
+    } finally {
+      phones.forEach((p) => p.close());
+      await srv.close();
+    }
+  }
+  // 3 人第二局（seed 002）：醫護＋補給同一人，突破口第 1、2 段原本會在同一支手機
+  const { srv, phones, host } = await setup(3);
+  try {
+    host.send({ t: 'start' });
+    await Promise.all(phones.map((p) => p.until((v) => v.phase === 'planning')));
+    const nav = who(phones, (v) => v.can.route);
+    const supply = who(phones, (v) => v.can.items);
+    nav.act({ type: 'selectRoute', route: '藍' });
+    supply.act({ type: 'setItem', item: '藥品', on: true });
+    await host.until((v) => v.plan?.reachable === 1);
+    host.act({ type: 'lock' });
+    await repair(phones);
+    host.act({ type: 'depart' });
+    await host.until((v) => v.phase === 'settled');
+    host.send({ t: 'next' });
+    await Promise.all(phones.map((p) => p.until((v) => v.round?.seedId === 'seed 002' && v.phase === 'planning')));
+    const nav2 = who(phones, (v) => v.can.route);
+    const sup2 = who(phones, (v) => v.can.items);
+    nav2.act({ type: 'selectRoute', route: '藍' });
+    sup2.act({ type: 'setItem', item: '藥品', on: true });
+    await host.until((v) => v.plan?.reachable === 1);
+    host.act({ type: 'lock' });
+    await repair(phones);
+    const counts = phones.map((p) => p.view!.clues.filter((c) => c.breakthrough).length);
+    assert.deepEqual(counts.sort(), [1, 1, 1]);
+    assert.ok(phones.some((p) => p.view!.clues.some((c) => c.role.includes('由你保管'))));
+  } finally {
+    phones.forEach((p) => p.close());
+    await srv.close();
+  }
+});
+
+test('心跳：送 ping 會收到 pong（讓雲端伺服器在大家聊天、沒人點手機時保持清醒）', async () => {
+  const srv = await startServer({ port: 0, publicUrl: 'http://test.local', tickMs: 20 });
+  try {
+    const ws = new WebSocket(`ws://localhost:${srv.port}/ws`);
+    await new Promise((r) => ws.once('open', r));
+    const got = new Promise<string>((r) => ws.once('message', (d) => r(String(d))));
+    ws.send(JSON.stringify({ t: 'ping' }));
+    assert.deepEqual(JSON.parse(await got), { t: 'pong' });
+    ws.close();
+  } finally {
+    await srv.close();
   }
 });

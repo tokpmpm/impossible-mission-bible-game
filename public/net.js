@@ -1,7 +1,9 @@
 // WebSocket 連線：自動重連（指數退避，最多 5 秒）、resume、act 去重重送。
 // 協定見 src/server/view.ts。
 
-const STORE_KEY = 'impossible-mission.session';
+// ?seat=N：單機試玩（solo.html）時，同一個瀏覽器裡每一格各自是一位玩家。
+const SEAT = new URLSearchParams(location.search).get('seat');
+const STORE_KEY = 'impossible-mission.session' + (SEAT ? '.' + SEAT.replace(/[^0-9a-z]/gi, '') : '');
 
 export function loadSession() {
   try {
@@ -46,6 +48,7 @@ export function newId() {
  *   onWelcome: (w: any) => void,
  *   onError: (msg: string, ctx: {duringResume: boolean}) => void,
  *   onStatus: (status: 'connecting'|'open'|'closed') => void,
+ *   onRejected?: (r: {id: string, action: string, reasons: {code: string, text: string}[]}) => void,
  * }} handlers
  */
 export function createConnection(handlers) {
@@ -107,6 +110,9 @@ export function createConnection(handlers) {
       } else if (msg.t === 'state') {
         resuming = false;
         handlers.onState(msg.view);
+      } else if (msg.t === 'rejected') {
+        // 只有按的那支手機會收到：這個動作被規則擋下了
+        if (handlers.onRejected) handlers.onRejected(msg);
       } else if (msg.t === 'ack') {
         pendingActs.delete(msg.id);
       } else if (msg.t === 'error') {
@@ -139,6 +145,9 @@ export function createConnection(handlers) {
       connect();
     }
   });
+
+  // 心跳：大家在聊天、沒人點手機時，雲端伺服器也要定期收到訊息，否則可能被關掉，房間就消失了
+  setInterval(() => rawSend({ t: 'ping' }), 20000);
 
   connect();
 

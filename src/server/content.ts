@@ -41,10 +41,12 @@ export type ClueWhen = 'start' | 'crisis' | 'power';
 
 export interface Clue {
   role: RoleId;
-  when: ClueWhen; // start＝開局就有；crisis＝危機後；power＝恢復供電後（突破口）
+  when: ClueWhen; // start＝開局就有；crisis＝危機後；power＝恢復供電後（突破口；標題刻意不寫「突破口」，讓三星保持隱藏）
   title: string;
   text: string;
   breakthrough?: 1 | 2 | 3; // 突破口第幾段
+  /** 恢復供電後就用不到的線索（講停電怎麼修的），之後收起來，畫面才放得下新線索。 */
+  untilPower?: boolean;
 }
 
 export const CLUES: Record<SeedId, Clue[]> = {
@@ -56,13 +58,13 @@ export const CLUES: Record<SeedId, Clue[]> = {
     { role: 'liaison', when: 'start', title: '優先順序', text: '北村的毛毯明天補送也可以；東村、西村今晚就要。' },
     { role: 'medic', when: 'start', title: '急迫', text: '東村有病人，藥品今晚一定要送到。' },
     { role: 'observer', when: 'start', title: '天候', text: '洪水第 5 分鐘會淹到低窪路段，路程要少於 5 分鐘才來得及。西村的水源被洪水污染了，今晚急需飲水。' },
-    { role: 'eng', when: 'start', title: '備援電力', text: '如果停電，你要依隊友的描述選出正確的符號。電力恢復後，備援面板會顯示一些重要資訊。' },
-    { role: 'backup', when: 'start', title: '修復面板', text: '修復時，每一格的選項都很像。先用排除線索刪掉不可能的，再請隊友描述。' },
+    { role: 'eng', when: 'start', untilPower: true, title: '備援電力', text: '如果停電，你要依隊友的描述選出正確的符號。電力恢復後，備援面板會顯示一些重要資訊。' },
+    { role: 'backup', when: 'start', untilPower: true, title: '修復面板', text: '修復時，每一格的選項都很像。先用排除線索刪掉不可能的，再請隊友描述。' },
     { role: 'scout', when: 'start', title: '路況', text: '吊橋年久失修，暴雨裡晃得厲害；隧道入口很暗，沒有燈進不去；山路本身穩，怕的是洪水。' },
     { role: 'scout', when: 'crisis', title: '路況', text: '吊橋斷了，紅線不能走。隧道還通，但燈具比繩子重。山路本身安全，問題只在洪水。' },
-    { role: 'observer', when: 'power', title: '突破口①', text: '上游有一座分洪閘門。開啟後，綠線山路的安全時間可以從第 5 分鐘延到第 7 分鐘。', breakthrough: 1 },
-    { role: 'comms', when: 'power', title: '突破口②', text: '你的面板有「啟動分洪閘門」，但需要輸入授權頻道。', breakthrough: 2 },
-    { role: 'eng', when: 'power', title: '突破口③', text: '備援面板恢復了：授權頻道是 {channel}。', breakthrough: 3 },
+    { role: 'observer', when: 'power', title: '新消息', text: '上游有一座分洪閘門。開啟後，綠線山路的安全時間可以從第 5 分鐘延到第 7 分鐘。', breakthrough: 1 },
+    { role: 'comms', when: 'power', title: '面板', text: '你的面板有「啟動分洪閘門」，但需要輸入授權頻道。', breakthrough: 2 },
+    { role: 'eng', when: 'power', title: '備援面板', text: '備援面板恢復了：授權頻道是 {channel}。', breakthrough: 3 },
   ],
   'seed 002': [
     { role: 'nav', when: 'start', title: '路線', text: '紅線吊橋 3 分鐘，要帶長繩；藍線隧道 4 分鐘，要帶頭燈；綠線山路 6 分鐘，不用工具。' },
@@ -72,13 +74,13 @@ export const CLUES: Record<SeedId, Clue[]> = {
     { role: 'liaison', when: 'start', title: '優先順序', text: '北村的水車明天早上會到；東村、西村今晚就要。' },
     { role: 'medic', when: 'start', title: '急迫', text: '西村有傷患，藥品今晚一定要送到。' },
     { role: 'observer', when: 'start', title: '天候', text: '洪水第 5 分鐘會淹到低窪路段；綠線山路今晚怎樣都來不及。東村倉庫進水，今晚急需食物。' },
-    { role: 'eng', when: 'start', title: '備援電力', text: '如果停電，你要依隊友的描述選出正確的符號。' },
-    { role: 'backup', when: 'start', title: '修復面板', text: '修復時，每一格的選項都很像。先用排除線索刪掉不可能的，再請隊友描述。' },
+    { role: 'eng', when: 'start', untilPower: true, title: '備援電力', text: '如果停電，你要依隊友的描述選出正確的符號。' },
+    { role: 'backup', when: 'start', untilPower: true, title: '修復面板', text: '修復時，每一格的選項都很像。先用排除線索刪掉不可能的，再請隊友描述。' },
     { role: 'scout', when: 'start', title: '路況', text: '山上一直有小石頭滾下來，開車要小心；紅線、藍線目前都通。' },
     { role: 'scout', when: 'crisis', title: '路況', text: '落石沒有擋住路，紅線、藍線都還能走；是車子被砸凹了，載重變小。' },
-    { role: 'medic', when: 'power', title: '突破口①', text: '淨水錠一盒 1 kg，能把井水處理成可以喝的水。', breakthrough: 1 },
-    { role: 'supply', when: 'power', title: '突破口②', text: '倉庫有淨水錠，但清單註明：「確認當地有可用水源才發放」。', breakthrough: 2 },
-    { role: 'comms', when: 'power', title: '突破口③', text: '電力恢復了，你可以向一個村發一則詢問——只有一次機會，先聽聽隊友怎麼說。', breakthrough: 3 },
+    { role: 'medic', when: 'power', title: '新消息', text: '淨水錠一盒 1 kg，能把井水處理成可以喝的水。', breakthrough: 1 },
+    { role: 'supply', when: 'power', title: '倉庫清單', text: '倉庫有淨水錠，但清單註明：「確認當地有可用水源才發放」。', breakthrough: 2 },
+    { role: 'comms', when: 'power', title: '對外聯絡', text: '電力恢復了，你可以向一個村發一則詢問——只有一次機會，先聽聽隊友怎麼說。', breakthrough: 3 },
   ],
 };
 
@@ -120,3 +122,41 @@ export const PREFERENCES = {
   either: '都可以',
 } as const;
 export type Preference = keyof typeof PREFERENCES;
+
+/**
+ * 開局「下一步」：依線索互補關係，告訴每個人該去找誰、問什麼（暫定，ADR-0003 第 25 條）。
+ * 依序挑第一個「不是自己」的對象；每個職能最多給一句，不直接給答案。
+ */
+export const ASKS: Record<RoleId, { to: RoleId; verb: '問' | '告訴' | '找'; text: string }[]> = {
+  nav: [
+    { to: 'observer', verb: '問', text: '洪水第幾分鐘會到？' },
+    { to: 'store', verb: '問', text: '工具各多重？' },
+  ],
+  supply: [
+    { to: 'comms', verb: '問', text: '各村需要什麼？' },
+    { to: 'medic', verb: '問', text: '哪一村今晚最急？' },
+  ],
+  comms: [
+    { to: 'supply', verb: '問', text: '車子最多能載多重？' },
+    { to: 'nav', verb: '問', text: '有哪幾條路、各要多久？' },
+  ],
+  eng: [
+    { to: 'nav', verb: '問', text: '有哪幾條路、各要帶什麼工具？' },
+    { to: 'supply', verb: '問', text: '車子最多能載多重？' },
+  ],
+  medic: [
+    { to: 'supply', verb: '告訴', text: '哪一村今晚一定要送到' },
+    { to: 'comms', verb: '告訴', text: '哪一村今晚一定要送到' },
+  ],
+  observer: [
+    { to: 'nav', verb: '告訴', text: '洪水第幾分鐘會到' },
+    { to: 'supply', verb: '告訴', text: '洪水第幾分鐘會到、哪一村急需什麼' },
+  ],
+  scout: [{ to: 'nav', verb: '告訴', text: '每條路的路況' }],
+  liaison: [{ to: 'supply', verb: '告訴', text: '哪一村可以明天再補送' }],
+  store: [
+    { to: 'nav', verb: '告訴', text: '每種工具多重' },
+    { to: 'supply', verb: '告訴', text: '工具也算在車子的載重裡' },
+  ],
+  backup: [{ to: 'eng', verb: '找', text: '停電時你們要一起看修復面板，先打聲招呼' }],
+};
