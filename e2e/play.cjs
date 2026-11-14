@@ -13,7 +13,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const pages = [];
   const errs = [];
   for (let i = 0; i < N; i++) {
-    const ctx = await browser.newContext({ viewport: { width: W, height: 844 }, deviceScaleFactor: 1, ignoreHTTPSErrors: !!proxy });
+    const ctx = await browser.newContext({ viewport: { width: W, height: 844 }, deviceScaleFactor: Number(process.env.DSF || 1), ignoreHTTPSErrors: !!proxy });
     const p = await ctx.newPage();
     p.on('pageerror', (e) => errs.push(`p${i}: ${e.message}`));
     p.on('console', (m) => { if (m.type() === 'error') errs.push(`p${i} console: ${m.text()}`); });
@@ -39,8 +39,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     await pages[i].click('button[type=submit]');
     await pages[i].waitForSelector('.big-code');
   }
-  await pages[1].click('[data-action=pref][data-value=casual]');
-  await sleep(200);
+  await pages[1].click('[data-action=pref][data-value=flashlight]');
+  await pages[2].click('[data-action=pref][data-value=snack]');
+  await sleep(300);
+  // 背包公開：房主的隊員名單上看得到別人帶了什麼
+  const bags = await host.textContent('.players');
+  if (!bags.includes('手電筒') || !bags.includes('零食')) errs.push('大廳名單沒有顯示背包物品：' + bags.trim().slice(0, 80));
   await shot(host, '02-lobby-host');
   await shot(pages[1], '03-lobby-guest');
   await host.click('[data-action=start]');
@@ -183,6 +187,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const dep = await findPage('[data-action=depart]');
   await dep.click('[data-action=depart]');
   await pages[0].waitForSelector('.result-hero');
+  // 出發後先逐村揭曉
+  await dep.waitForSelector('.reveal', { timeout: 3000 });
+  await sleep(2600);
+  await shot(dep, '15a-reveal');
+  await dep.waitForSelector('.reveal', { state: 'detached', timeout: 6000 });
+  const moments = await pages[0].textContent('.result');
+  if (!moments.includes('零食')) errs.push('結尾沒有點名背包裡的零食');
+  if (!/林前 12:\d+/.test(moments) || !moments.includes('你知道嗎')) errs.push('結尾缺經文或小知識');
   await sleep(300);
   await pages[1].click('[data-action=thank]');
   await sleep(300);

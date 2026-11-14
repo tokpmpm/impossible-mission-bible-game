@@ -15,7 +15,12 @@ import { SEEDS, VILLAGES, cargoItems, displayName, type RouteId, type SeedId } f
 import { describeSymbol, makeEliminationClues, makeSlots, parseSymbol, rng } from '../engine/symbols.ts';
 import {
   ASKS,
+  CAMEOS,
   CLUES,
+  ENG_ASKS_WITH_STORE,
+  FACTS,
+  QUESTIONS,
+  TIPS,
   HINT_ROLE,
   PREFERENCES,
   QUERY_QUESTIONS,
@@ -55,7 +60,8 @@ interface Round {
   slotHolders: string[]; // 第 i 格符號在誰手上
   clueHolders: Map<string, string>; // 排除線索
   prefHolderId: string | null;
-  prefByCasual: boolean;
+  /** 手電筒是玩家自己帶的（true）還是倉庫配給的（false）。 */
+  prefByItem: boolean;
   actors: { kind: string; playerId: string; at: number }[];
   thanks: Map<string, string>;
   queryReply: string | null;
@@ -207,8 +213,8 @@ export class Room {
 
   private startRound(participants: string[], seedId: SeedId): void {
     const n = participants.length;
-    const order = this.shuffle(participants);
     const bundles = ROLE_BUNDLES[n];
+    const order = this.rotatedOrder(participants, bundles);
     const roles = new Map<string, RoleId[]>();
     order.forEach((pid, i) => roles.set(pid, bundles[i]));
     const engineerId = order.find((pid) => roles.get(pid)!.includes('eng'))!;
@@ -222,8 +228,9 @@ export class Room {
     const clueHolders = new Map<string, string>();
     nonEng.slice(k).forEach((pid, i) => clueHolders.set(pid, clueTexts[i] ?? '正確的符號都在選項裡，仔細聽隊友描述。'));
 
-    const casual = this.shuffle(nonEng.filter((pid) => this.get(pid)?.pref === 'casual'));
-    const prefHolderId = casual[0] ?? nonEng[Math.floor(this.random() * nonEng.length)] ?? null;
+    // 手電筒：從自己帶手電筒的非工程師抽一位；沒有就由倉庫配給一位非工程師（公開顯示是誰，不用暗中找人）
+    const carriers = this.shuffle(nonEng.filter((pid) => this.get(pid)?.pref === 'flashlight'));
+    const prefHolderId = carriers[0] ?? nonEng[Math.floor(this.random() * nonEng.length)] ?? null;
     const channel = String(100 + Math.floor(this.random() * 900));
     const grayOrder = slots.map((s) => this.shuffle(s.options));
 
@@ -242,13 +249,31 @@ export class Room {
       slotHolders,
       clueHolders,
       prefHolderId,
-      prefByCasual: casual.length > 0,
+      prefByItem: carriers.length > 0,
       actors: [],
       thanks: new Map(),
       queryReply: null,
       btHolders,
     };
     this.touch();
+  }
+
+  /**
+   * 職能分派：第二局起盡量讓每個人拿到和上一局不同的職能，才會跟不同的人說話（ADR-0003 第 35 條）。
+   * 試幾種洗牌，挑「和上一局同職能的人」最少的那一種。
+   */
+  private rotatedOrder(participants: string[], bundles: RoleId[][]): string[] {
+    const prev = this.round?.roles;
+    let best = this.shuffle(participants);
+    if (!prev) return best;
+    const same = (order: string[]) => order.filter((pid, i) => prev.get(pid)?.[0] === bundles[i][0]).length;
+    let bestSame = same(best);
+    for (let t = 0; t < 30 && bestSame > 0; t++) {
+      const o = this.shuffle(participants);
+      const k = same(o);
+      if (k < bestSame) [best, bestSame] = [o, k];
+    }
+    return best;
   }
 
   /** 職能持有者（含拆分職能回到原職能）。 */
@@ -447,8 +472,9 @@ export class Room {
     const r = this.round!;
     const out: View['nextSteps'] = [];
     const used = new Set<string>([pid]);
+    const storePresent = r.participants.some((p) => r.roles.get(p)!.includes('store'));
     for (const role of r.roles.get(pid) ?? []) {
-      for (const ask of ASKS[role]) {
+      for (const ask of role === 'eng' && storePresent ? ENG_ASKS_WITH_STORE : ASKS[role]) {
         const to = Room.holderIn(r.participants, r.roles, ask.to);
         if (!to || used.has(to)) continue;
         used.add(to);
@@ -507,6 +533,7 @@ export class Room {
           nickname: p.nickname,
           connected: p.connected,
           isHost: p.id === this.hostId,
+          pref: p.pref,
           roles: r && r.participants.includes(p.id) ? r.roles.get(p.id)!.map((x) => ROLES[x].name) : [],
         })),
       phase,
@@ -527,6 +554,7 @@ export class Room {
       clues: [],
       hint: null,
       preferenceHint: null,
+      tip: null,
       crisis: null,
       repair: null,
       breakthrough: null,
@@ -563,7 +591,10 @@ export class Room {
       route: g.plan.route ? routeView(g.plan.route) : null,
       routes: (['紅', '藍', '綠'] as RouteId[]).map(routeView),
       items: g.plan.items.map((i) => displayName(seed, i)),
-      itemChoices: cargoItems(seed).map((i) => ({
+      // 尚未發放的物資（淨水錠）不出現在物資列：不先劇透突破口，發放時才「冒出來」
+      itemChoices: cargoItems(seed)
+        .filter((i) => !(b.kind === 'query' && b.item === i && !g.released))
+        .map((i) => ({
         id: i,
         name: displayName(seed, i),
         on: g.plan.items.includes(i),
@@ -605,6 +636,8 @@ export class Room {
     const present = new Set(r.participants.flatMap((p) => r.roles.get(p)!));
     const mine = new Set<RoleId>(myRoles);
     for (const [split, parent] of Object.entries(SPLIT_FROM) as [RoleId, RoleId][]) {
+      // 備援觀察的「修復面板」只是停電小撇步，和工程自己的線索重複；不在場時不轉給工程，省一條（2026-11-15）
+      if (split === 'backup') continue;
       if (!present.has(split) && mine.has(parent)) mine.add(split);
     }
     const powered = g.phase === 'replanning' || g.phase === 'settled' || (g.phase === 'ended' && !!g.repair?.doneAt);
@@ -628,11 +661,15 @@ export class Room {
     if (g.hint.shown && g.phase === 'planning' && this.holderOf(HINT_ROLE[r.seedId]) === pid) v.hint = seed.hintText;
 
     const prefHolder = this.effectivePrefHolder();
-    if (!finished) {
-      if (prefHolder === pid) v.preferenceHint = '你持有一次「排除兩個錯誤符號」的能力。停電時可以用來幫工程師。';
-      else if (r.prefByCasual && prefHolder === r.prefHolderId) v.preferenceHint = '找出隊上的「隨性派」：其中一位持有一次「排除兩個錯誤符號」的能力。';
-      else if (prefHolder) v.preferenceHint = `${this.nick(prefHolder)} 持有一次「排除兩個錯誤符號」的能力。`;
+    if (!finished && prefHolder) {
+      const own = r.prefByItem && prefHolder === r.prefHolderId;
+      if (prefHolder === pid) v.preferenceHint = own ? '你帶了手電筒：停電時可以照亮面板一次，幫工程師灰掉兩個錯誤選項。' : '倉庫配給你一支手電筒：停電時可以照亮面板一次，幫工程師灰掉兩個錯誤選項。';
+      else v.preferenceHint = own ? `帶手電筒的 ${this.nick(prefHolder)} 可以照亮面板一次。` : `倉庫配給 ${this.nick(prefHolder)} 一支手電筒，可以照亮面板一次。`;
     }
+    // 老智慧：規劃開始、停電、電來了各一句（不說教，只當隊伍小提示）
+    if (g.phase === 'planning') v.tip = { ...TIPS.planning };
+    else if (g.phase === 'blackout') v.tip = { ...TIPS.blackout };
+    else if (g.phase === 'replanning') v.tip = { ...TIPS.replanning };
 
     if (g.crisisAt !== null) {
       let extra: string | null = null;
@@ -702,44 +739,65 @@ export class Room {
     const served = g.result?.served ?? [];
     const titles = { 3: '三村都送到了！', 2: '任務成功', 1: '送出了一部分救援', 0: '這次沒來得及出發' } as const;
     const nextSeed: SeedId = r.seedId === 'seed 001' ? 'seed 002' : 'seed 001';
-    const questions = ['剛剛你發現哪位隊友原來很擅長什麼？', '剛才哪一刻你最需要別人的幫忙？'];
+    const k = r.no - 1;
     return {
       stars,
       title: titles[stars],
       served: [...served],
       unserved: VILLAGES.filter((v) => !served.includes(v)),
       cause: g.result?.cause ?? 'ended',
-      recap: this.recap(),
-      question: questions[(r.no - 1) % questions.length],
+      moments: this.moments(),
+      verse: this.verse(),
+      fact: FACTS[k % FACTS.length],
+      question: QUESTIONS[k % QUESTIONS.length],
       thanks: [...r.thanks.entries()].map(([from, to]) => ({ from: this.nick(from), to: this.nick(to) })),
       myThanks: r.thanks.get(pid) ?? null,
       nextSeedTitle: SEEDS[nextSeed].title,
     };
   }
 
-  /** 只陳述系統記錄到的事，配上經節位置（docs/05）。最多兩條。 */
-  recap(): { verse: string; ref: string; event: string }[] {
+  /** 這局真的發生的事（系統紀錄＋背包物品出場），有名字，最多 4 條。不虛構互助、不評誰最重要。 */
+  moments(): string[] {
     const r = this.round!;
     const g = r.game;
-    const out: { verse: string; ref: string; event: string }[] = [];
-    const chain = r.seedId === 'seed 001' ? ['觀測員', '通訊員', '工程師'] : ['醫護員', '補給員', '通訊員'];
-    const breakthroughDone = r.seedId === 'seed 001' ? g.floodgate : g.released;
-    if (breakthroughDone) {
-      out.push({ ref: '林前 12:14', verse: VERSES[14], event: `這局的突破口從${chain[0]}開始，經過${chain[1]}與${chain[2]}才完成。` });
-    }
+    const out: string[] = [];
     const restored = g.log.find((l) => l.kind === 'power_restored');
     if (restored) {
       const engPick = [...r.actors].reverse().find((a) => a.kind === 'repairPick');
       const eng = this.nick(engPick?.playerId ?? r.engineerId);
-      out.push({ ref: '林前 12:21', verse: VERSES[21], event: `停電時，工程師 ${eng} 看不到符號，靠 ${g.repair!.slots.length} 位隊友的描述修好了電力。` });
+      const helpers = [...new Set(r.slotHolders)].map((p) => this.nick(p)).join('、');
+      out.push(`停電時，${eng} 看不到符號，靠 ${helpers} 的描述修好了電。`);
     }
     const elim = r.actors.find((a) => a.kind === 'useEliminate');
-    if (out.length < 2 && elim) {
-      out.push({ ref: '林前 12:25', verse: VERSES[25], event: `${this.nick(elim.playerId)} 把自己的排除能力用來幫工程師。` });
+    if (elim) out.push(`${this.nick(elim.playerId)} 用手電筒照亮了面板。`);
+    const btDone = r.seedId === 'seed 001' ? g.floodgate : g.released;
+    if (btDone) {
+      const names = [1, 2, 3].map((i) => this.nick(r.btHolders.get(i)));
+      out.push(
+        r.seedId === 'seed 001'
+          ? `${names[0]} 想起上游有閘門、${names[2]} 找到頻道、${names[1]} 開了閘門：山路來得及了。`
+          : `${names[0]} 知道淨水錠、${names[1]} 知道倉庫有貨、${names[2]} 問對了北村：三村都顧到了。`,
+      );
     }
-    if (out.length < 2) {
-      out.push({ ref: '林前 12:27', verse: VERSES[27], event: `這局的突破口線索從${chain[0]}開始；每個人手上都有別人需要的一塊。` });
+    // 背包物品出場：每種最多一位，依加入順序
+    for (const item of ['snack', 'raincoat', 'whistle'] as const) {
+      const p = this.players.find((x) => r.participants.includes(x.id) && x.pref === item);
+      if (p && out.length < 4) out.push(CAMEOS[item].replace('{name}', p.nickname));
     }
-    return out.slice(0, 2);
+    return out;
+  }
+
+  /** 一句經文配一件這局真的發生的事（林前 12 章）；兩局輪替不同經節。 */
+  verse(): { text: string; ref: string; link: string } {
+    const r = this.round!;
+    const g = r.game;
+    const restored = !!g.log.find((l) => l.kind === 'power_restored');
+    const btDone = r.seedId === 'seed 001' ? g.floodgate : g.released;
+    const opts: { text: string; ref: string; link: string }[] = [];
+    if (restored) opts.push({ ref: '林前 12:21', text: VERSES[21], link: '剛才工程師沒辦法說「我用不著你們」——沒有大家的描述，電修不好。' });
+    if (btDone) opts.push({ ref: '林前 12:14', text: VERSES[14], link: '三村都送到，靠的是三個人手上的三段線索接起來。' });
+    if ((g.result?.stars ?? 0) >= 2) opts.push({ ref: '林前 12:26', text: VERSES[26], link: '救援成功，是全隊一起的。' });
+    opts.push({ ref: '林前 12:27', text: VERSES[27], link: '這局每個人手上，都有別人需要的一塊。' });
+    return opts[(r.no - 1) % opts.length];
   }
 }

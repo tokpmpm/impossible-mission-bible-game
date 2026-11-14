@@ -57,7 +57,8 @@ export interface View {
     roles: { id: RoleId; name: string; icon: string; job: string }[];
     spectator: boolean; // 開局後才加入，等下一局
   };
-  players: { id: string; nickname: string; connected: boolean; isHost: boolean; roles: string[] }[];
+  /** pref：背包裡多塞的東西（公開，大廳顯示在名字旁邊）。 */
+  players: { id: string; nickname: string; connected: boolean; isHost: boolean; pref: Preference | null; roles: string[] }[];
   phase: ViewPhase;
   round: null | {
     no: number;
@@ -110,7 +111,9 @@ export interface View {
   /** 我手上的線索（依階段解鎖） */
   clues: { title: string; text: string; role: string; when: 'start' | 'crisis' | 'power'; breakthrough?: number }[];
   hint: string | null; // 2:15 方向提示（只顯示在持有者手機）
-  preferenceHint: string | null; // 例如「找隊上的隨性派」
+  preferenceHint: string | null; // 手電筒：例如「帶手電筒的 小明 可以照亮面板一次。」
+  /** 老智慧：此刻的一句短經文（和合本）＋出處，當隊伍小提示。 */
+  tip: null | { text: string; ref: string };
   crisis: null | { title: string; text: string; at: number; cause: 'lock' | 'timeout'; extra: string | null; reachBefore: number };
   repair: null | {
     startedAt: number; // 伺服器時間
@@ -143,8 +146,10 @@ export interface View {
     served: string[];
     unserved: string[];
     cause: 'depart' | 'time_up' | 'ended';
-    recap: { verse: string; ref: string; event: string }[]; // 真實事件配經節
-    question: string; // 可自願回答的破冰問題
+    moments: string[]; // 這局真的發生的事（有名字），含背包物品出場
+    verse: { text: string; ref: string; link: string }; // 一句林前 12 章＋對應的真實事件
+    fact: string; // 「你知道嗎？」一行小知識
+    question: string; // 可跳過的輕鬆問題
     thanks: { from: string; to: string }[]; // 只顯示誰謝了誰，不計票
     myThanks: string | null; // 我謝了誰（playerId）
     nextSeedTitle: string;

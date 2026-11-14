@@ -694,3 +694,37 @@ cite { display: block; margin-top: 4px; font-style: normal; color: var(--gold-2)
 
 .bo-reveal { margin: 0; text-align: center; font-weight: 700; }
 .bo-reveal strong { font-size: 1.6rem; color: var(--gold-2); }
+
+/* ───────── 2026-11-15 夜間改版：背包、老智慧、停電精簡、出發揭曉、結算 ───────── */
+.bag { font-size: 0.85rem; color: var(--gold-2); background: rgba(242, 193, 78, 0.12); border-radius: 999px; padding: 1px 10px; white-space: nowrap; }
+.screen.lobby { padding-bottom: 120px; }
+.num { color: var(--gold-2); font-weight: 800; }
+.tip { margin: 6px 0 0; font-size: 0.82rem; line-height: 1.45; color: var(--muted); }
+.tip.in-banner { width: 100%; border-top: 1px dashed rgba(242, 193, 78, 0.35); padding-top: 4px; }
+.tip-k { display: inline-block; font-size: 0.72rem; font-weight: 700; color: var(--gold-ink); background: var(--gold); border-radius: 999px; padding: 0 7px; margin-right: 6px; }
+.tip cite { font-style: normal; margin-left: 6px; color: var(--gold); white-space: nowrap; }
+.banner.crisis .tip { color: #ffe2d8; }
+.bo-tip { text-align: center; }
+.bo-order { margin: 0; font-size: 0.9rem; color: #c9d1e8; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
+.bo-order .ord b { color: var(--gold-2); }
+.bo-card.torch { border-color: var(--gold); }
+.bo-pref { color: var(--gold-2); font-size: 0.92rem; margin: 0; }
+.reveal { position: fixed; inset: 0; z-index: 20; background: #060c1c; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 18px; padding: 24px; }
+.reveal-k { font-size: 1.4rem; font-weight: 800; color: var(--gold-2); margin: 0; }
+.reveal-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; width: min(320px, 100%); }
+.reveal-list li { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-radius: 14px; border: 2px solid #263150; font-size: 1.2rem; opacity: 0; animation: pop 0.45s ease-out forwards; animation-delay: var(--d); }
+.reveal-list li.ok { border-color: var(--ok); color: var(--ok); }
+.reveal-list li.miss { color: var(--muted); }
+@keyframes pop { from { opacity: 0; transform: scale(0.85); } to { opacity: 1; transform: none; } }
+.vil-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: 6px; }
+.moments { margin: 0; padding-left: 1.2em; display: grid; gap: 8px; line-height: 1.5; }
+.verse-card blockquote { margin: 8px 0 0; padding: 8px 12px; border-left: 4px solid var(--gold); background: var(--bg-2); border-radius: 8px; font-size: 0.95rem; line-height: 1.6; }
+.verse-card cite { display: block; font-style: normal; color: var(--gold); font-size: 0.85rem; margin-top: 2px; }
+.verse-link { margin: 0; font-weight: 700; }
+.fact { margin: 10px 0 0; font-size: 0.88rem; color: var(--muted); line-height: 1.55; }
+.ask-q { margin: 12px 0 0; color: var(--muted); font-size: 0.92rem; }
+@media (prefers-reduced-motion: reduce) {
+  .reveal-list li { animation: none; opacity: 1; }
+}
+.tip-pop { position: fixed; top: 60px; left: 50%; transform: translateX(-50%); width: min(528px, calc(100% - 24px)); z-index: 8; text-align: left; font: inherit; font-size: 0.9rem; line-height: 1.5; color: var(--text, #f4f1e8); background: #1b2a4d; border: 2px solid var(--gold); border-radius: 14px; padding: 10px 14px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); cursor: pointer; }
+.tip-pop cite { font-style: normal; margin-left: 6px; color: var(--gold); white-space: nowrap; }

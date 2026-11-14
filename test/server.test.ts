@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import WebSocket from 'ws';
 import { startServer } from '../src/server/main.ts';
 import type { ServerMessage, View, Action } from '../src/server/view.ts';
+import { Room } from '../src/server/room.ts';
 
 class Phone {
   ws!: WebSocket;
@@ -172,8 +173,11 @@ for (const n of [3, 6, 10]) {
       for (const p of phones) p.act({ type: 'depart' });
       await Promise.all(phones.map((p) => p.until((v) => v.phase === 'settled')));
       for (const p of phones) assert.equal(p.view!.result!.stars, 3);
-      assert.ok(host.view!.result!.recap.length >= 1);
-      assert.ok(host.view!.result!.recap.every((r) => r.ref.startsWith('林前 12:')));
+      // 結尾：一句林前 12 章配一件真的事、一行小知識、有名字的「這局發生的事」
+      const res = host.view!.result!;
+      assert.ok(res.verse.ref.startsWith('林前 12:'));
+      assert.ok(res.verse.link.length > 0 && res.fact.length > 0 && res.question.length > 0);
+      assert.ok(res.moments.some((m) => m.includes('修好了電')), res.moments.join('／'));
 
       // F20：感謝卡只顯示誰謝了誰
       phones[1].send({ t: 'thank', to: phones[0].playerId });
@@ -232,7 +236,9 @@ test('seed 002（第二局）：落石載重降為 5、詢問北村井水、淨�
     host.act({ type: 'depart' });
     await host.until((v) => v.phase === 'settled');
     assert.equal(host.view!.result!.stars, 3);
-    assert.equal(host.view!.result!.recap[0].ref, '林前 12:14');
+    // 第二局換一句經文（不重複第一局的 12:21）
+    assert.equal(host.view!.result!.verse.ref, '林前 12:14');
+    assert.ok(host.view!.result!.moments.some((m) => m.includes('問對了北村')));
   } finally {
     phones.forEach((p) => p.close());
     await srv.close();
@@ -297,8 +303,8 @@ test('F18：斷線重連回到原角色；房主離線會移交；重送同一�
   }
 });
 
-test('F19：偏好全跳過或多人同選隨性派，都一定有人持有排除能力', async () => {
-  for (const prefs of [[null, null, null, null], ['casual', 'casual', 'casual', 'casual'], ['planner', 'either', 'planner', null]]) {
+test('F19：背包全跳過、全帶手電筒、沒人帶手電筒，都恰有一位非工程師拿著手電筒', async () => {
+  for (const prefs of [[null, null, null, null], ['flashlight', 'flashlight', 'flashlight', 'flashlight'], ['snack', 'raincoat', 'whistle', null]]) {
     const { srv, phones, host } = await setup(4);
     try {
       phones.forEach((p, i) => p.send({ t: 'pref', value: prefs[i] }));
@@ -306,9 +312,15 @@ test('F19：偏好全跳過或多人同選隨性派，都一定有人持有排�
       await new Promise((r) => setTimeout(r, 100));
       host.send({ t: 'start' });
       await Promise.all(phones.map((p) => p.until((v) => v.phase === 'planning')));
-      const holders = phones.filter((p) => p.view!.preferenceHint?.startsWith('你持有'));
+      const holders = phones.filter((p) => /^(你帶了手電筒|倉庫配給你一支手電筒)/.test(p.view!.preferenceHint ?? ''));
       assert.equal(holders.length, 1, JSON.stringify(prefs));
       assert.equal(holders[0].view!.me.roles.some((r) => r.id === 'eng'), false);
+      // 公開：其他人看到的是名字，不用暗中找人；自己帶的寫「帶手電筒的」，沒人帶寫「倉庫配給」
+      const others = phones.filter((p) => p !== holders[0]);
+      const expect = prefs[0] === 'flashlight' ? '帶手電筒的 ' : '倉庫配給 ';
+      for (const o of others) assert.ok(o.view!.preferenceHint!.startsWith(expect + holders[0].view!.me.nickname), o.view!.preferenceHint!);
+      // 大廳／名單上看得到每個人背包帶了什麼
+      assert.deepEqual(host.view!.players.map((p) => p.pref), prefs);
     } finally {
       phones.forEach((p) => p.close());
       await srv.close();
@@ -491,5 +503,20 @@ test('心跳：送 ping 會收到 pong（讓雲端伺服器在大家聊天、沒
     ws.close();
   } finally {
     await srv.close();
+  }
+});
+
+test('角色輪替：第二局盡量每個人都換到不同職能（3／6／10 人）', () => {
+  for (const n of [3, 6, 10]) {
+    for (const seed of [1, 2, 3, 4, 5]) {
+      const room = new Room('ROTA', { seed, introMs: 0 });
+      const ids = Array.from({ length: n }, (_, i) => room.addPlayer('p' + i).id);
+      room.start(room.hostId!);
+      const first = new Map(ids.map((id) => [id, room.round!.roles.get(id)![0]]));
+      room.round!.game = { ...room.round!.game, phase: 'settled' };
+      room.next(room.hostId!);
+      const same = ids.filter((id) => room.round!.roles.get(id)![0] === first.get(id)).length;
+      assert.equal(same, 0, `${n} 人 seed ${seed}：${same} 人職能沒換`);
+    }
   }
 });
