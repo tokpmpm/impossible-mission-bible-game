@@ -146,6 +146,9 @@ export function createConnection(handlers) {
     }
   });
 
+  // 心跳：大家在聊天、沒人點手機時，雲端伺服器也要定期收到訊息，否則可能被關掉，房間就消失了
+  setInterval(() => rawSend({ t: 'ping' }), 20000);
+
   connect();
 
   return {

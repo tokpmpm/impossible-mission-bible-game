@@ -119,6 +119,7 @@ for (const n of [3, 6, 10]) {
       for (const item of ['藥品', '飲水', '毛毯']) supply.act({ type: 'setItem', item, on: true });
       await host.until((v) => v.plan?.reachable === 3);
       assert.equal(host.view!.plan!.weight, 7);
+      assert.equal(host.view!.plan!.showReach, false); // 危機前畫面不顯示可送幾村
 
       // 非導航員不能選路線
       const notNav = phones.find((p) => p !== nav)!;
@@ -128,6 +129,8 @@ for (const n of [3, 6, 10]) {
       host.act({ type: 'lock' });
       await Promise.all(phones.map((p) => p.until((v) => v.phase === 'blackout')));
       assert.ok(host.view!.crisis?.title.includes('吊橋'));
+      assert.equal(host.view!.crisis!.reachBefore, 3); // 停電時揭曉：原本能送 3 村
+      assert.equal(host.view!.plan!.showReach, true);
 
       // F07：符號數、排除線索、每位非工程師都有事
       const sym = { 3: 2, 6: 4, 10: 4 }[n]!;
@@ -473,6 +476,20 @@ test('開局下一步有名字和問題；6 人以下不出現拆分職能名稱
     assert.ok(phones.some((p) => p.view!.clues.some((c) => c.role.includes('由你保管'))));
   } finally {
     phones.forEach((p) => p.close());
+    await srv.close();
+  }
+});
+
+test('心跳：送 ping 會收到 pong（讓雲端伺服器在大家聊天、沒人點手機時保持清醒）', async () => {
+  const srv = await startServer({ port: 0, publicUrl: 'http://test.local', tickMs: 20 });
+  try {
+    const ws = new WebSocket(`ws://localhost:${srv.port}/ws`);
+    await new Promise((r) => ws.once('open', r));
+    const got = new Promise<string>((r) => ws.once('message', (d) => r(String(d))));
+    ws.send(JSON.stringify({ t: 'ping' }));
+    assert.deepEqual(JSON.parse(await got), { t: 'pong' });
+    ws.close();
+  } finally {
     await srv.close();
   }
 });
