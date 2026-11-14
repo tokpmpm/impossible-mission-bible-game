@@ -612,12 +612,14 @@ export class Room {
     v.clues = CLUES[r.seedId]
       .filter((c) => (c.breakthrough ? r.btHolders.get(c.breakthrough) === pid : mine.has(c.role)))
       .filter((c) => c.when === 'start' || (c.when === 'crisis' && g.crisisAt !== null) || (c.when === 'power' && powered))
+      .filter((c) => !(c.untilPower && powered))
       .map((c) => {
         const moved = !!c.breakthrough && !mine.has(c.role);
         return {
           title: c.title,
           text: c.text.replace('{channel}', g.channel),
           role: moved ? `${roleLabel(c.role)}・由你保管` : roleLabel(c.role),
+          when: c.when,
           breakthrough: c.breakthrough,
         };
       });

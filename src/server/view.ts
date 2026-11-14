@@ -106,7 +106,7 @@ export interface View {
     next: boolean;
   };
   /** 我手上的線索（依階段解鎖） */
-  clues: { title: string; text: string; role: string; breakthrough?: number }[];
+  clues: { title: string; text: string; role: string; when: 'start' | 'crisis' | 'power'; breakthrough?: number }[];
   hint: string | null; // 2:15 方向提示（只顯示在持有者手機）
   preferenceHint: string | null; // 例如「找隊上的隨性派」
   crisis: null | { title: string; text: string; at: number; cause: 'lock' | 'timeout'; extra: string | null };

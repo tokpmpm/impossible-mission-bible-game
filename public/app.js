@@ -220,10 +220,15 @@ function renderTopbar(v) {
         <button class="btn small ghost" data-action="leave-cancel">留下</button>
         <button class="btn small danger" data-action="leave-yes">離開</button></div>`
     : `<button class="btn small ghost" data-action="leave">離開</button>`;
-  return `<header class="topbar">
+  // 遊戲進行中：倒數放在頂端同一列，省下一整塊空間
+  const live = v.round && ['intro', 'planning', 'replanning'].includes(v.phase);
+  const cd = live
+    ? `<div class="tb-cd" role="timer"><span class="tb-label">剩下</span><strong data-cd="round">${mmss(v.round.startedAt + v.round.timeLimitMs - now())}</strong></div>`
+    : '';
+  return `<header class="topbar ${live ? 'live' : ''}">
     <div class="tb-room"><span class="tb-label">房號</span><strong>${esc(v.code)}</strong></div>
-    <div class="tb-me"><span class="tb-nick">${esc(v.me.nickname)}</span>${roleChips(v)}</div>
-    ${leave}
+    <div class="tb-me"><span class="tb-nick">${esc(v.me.nickname)}</span>${live ? '' : roleChips(v)}</div>
+    ${cd}${leave}
   </header>`;
 }
 
@@ -287,10 +292,15 @@ function statusLine(v) {
     const route = p.route ? `${p.route.id}線${p.route.closed ? '（斷了）' : ''}` : '還沒選路線';
     main = `<span>${esc(route)}</span><span class="sl-sep">｜</span><span>${p.weight}／${p.cap} kg${over ? ' 超重' : ''}</span><span class="sl-sep">｜</span><span>可送 ${p.reachable} 村</span>`;
   }
-  const sub =
-    planning && !open && v.round
-      ? `<div class="status-sub">認識隊友中，<strong data-cd="lock">${mmss(v.round.lockOpensAt - now())}</strong> 後才能鎖定（方案可以先排）</div>`
-      : '';
+  let sub = '';
+  if (planning && !open && v.round) {
+    sub = `<div class="status-sub">認識隊友中，<strong data-cd="lock">${mmss(v.round.lockOpensAt - now())}</strong> 後才能鎖定（方案可以先排）</div>`;
+  } else if (!okNow && p.advice && p.advice.length) {
+    const rej = p.lastRejection;
+    const recent = rej && now() - rej.at < 20000 && ACTION_LABEL[rej.action];
+    const more = p.advice.length > 1 ? `（還有 ${p.advice.length - 1} 件）` : '';
+    sub = `<div class="status-sub advice">${recent ? `剛剛按了「${ACTION_LABEL[rej.action]}」，還不行：` : '還差：'}${esc(p.advice[0])}${more}</div>`;
+  }
   return `<div class="status-line ${over ? 'bad' : ''} ${okNow ? 'ok' : ''}" data-block="status" data-lock-open="${open ? '1' : '0'}" aria-live="polite">
     <div class="sl-main">${main}</div>${sub}</div>`;
 }
@@ -410,123 +420,27 @@ function renderLobby(v) {
   </main>`;
 }
 
-// ───────── 開局介紹 ─────────
+// ───────── 規劃／重新規劃（含開局 60 秒）：一個畫面看完，不切分頁、不用捲來捲去 ─────────
 
 function renderIntro(v) {
-  const r = v.round;
-  const tabs = `<div class="seg" role="tablist">
-    <button role="tab" aria-selected="${ui.introTab === 'me'}" class="seg-btn ${ui.introTab === 'me' ? 'on' : ''}" data-action="intro-tab" data-tab="me">你是誰</button>
-    <button role="tab" aria-selected="${ui.introTab === 'plan'}" class="seg-btn ${ui.introTab === 'plan' ? 'on' : ''}" data-action="intro-tab" data-tab="plan">共享方案</button>
-  </div>`;
-  const introLeft = r ? `<p class="intro-cd">認識隊友 <strong data-cd="intro">${mmss(r.startedAt + r.introMs - now())}</strong></p>` : '';
-  if (ui.introTab === 'plan') {
-    const lock = v.can.lock ? actionBar(v, `<button class="btn primary block" data-action="lock">鎖定方案</button>`) : '';
-    return `${renderTopbar(v)}${timerBar(v, '開局')}<main class="screen planning">${guideLine('intro')}${tabs}${planningBody(v)}${lock}</main>`;
+  return renderPlanning(v);
+}
+
+/** 頂端一條提示：只放此刻最重要的一件事。 */
+function banners(v) {
+  const out = [];
+  if (v.hint) out.push(`<div class="banner hint" role="status"><span aria-hidden="true">💡</span> ${esc(v.hint)}</div>`);
+  if (v.phase === 'replanning' && v.crisis) {
+    out.push(`<div class="banner crisis"><strong>${esc(v.crisis.title)}</strong> 電來了，重新排方案！</div>`);
   }
-  const roles = v.me.roles
-    .map(
-      (ro) => `<div class="role-hero"><div class="role-icon" aria-hidden="true">${esc(ro.icon)}</div>
-      <div><div class="role-name">${esc(ro.name)}</div><div class="role-job">${esc(ro.job)}</div></div></div>`,
-    )
-    .join('');
-  return `${renderTopbar(v)}${timerBar(v, '開局')}
-  <main class="screen intro">
-    ${guideLine('intro')}
-    ${tabs}
-    ${introLeft}
-    ${nextStepCard(v)}
-    <section class="card">
-      <h2 class="eyebrow">你是誰</h2>
-      ${roles || '<p class="muted">（你這局沒有職能）</p>'}
-    </section>
-    <section class="card">
-      <h2 class="eyebrow">我知道什麼</h2>
-      ${clueCards(v)}
-    </section>
-    ${v.preferenceHint ? `<div class="note">${esc(v.preferenceHint)}</div>` : ''}
-    <div class="action-bar"><button class="btn primary block" data-action="zoom">放大讓隊友看</button></div>
-  </main>`;
-}
-
-function nextStepCard(v) {
-  const steps = v.nextSteps || [];
-  const items = steps.length
-    ? steps
-        .map((st) => `<li><span class="ns-verb">去${esc(st.verb)}</span> <strong class="ns-nick">${esc(st.nickname)}</strong>：${esc(st.text)}</li>`)
-        .join('')
-    : '<li>找一位隊友，交換暱稱與情報。</li>';
-  return `<section class="card next-step">
-      <h2 class="eyebrow">下一步</h2>
-      <ul class="next-list lead">${items}</ul>
-      <p class="muted small">也把你知道的告訴對方；可以按「放大讓隊友看」。</p>
-    </section>`;
-}
-
-// ───────── 規劃／重新規劃 ─────────
-
-function routeLine(id, closed) {
-  const st = ROUTE_STYLE[id] || ROUTE_STYLE['紅'];
-  return `<svg class="route-line" viewBox="0 0 120 24" aria-hidden="true">
-    <circle cx="8" cy="12" r="5" class="rl-end"/>
-    <path d="M14 12 C40 0, 70 24, 104 12" class="rl-path" ${st.dash ? `stroke-dasharray="${st.dash}"` : ''}/>
-    <path d="M104 4 l8 8 -8 8" class="rl-end-arrow"/>
-    ${closed ? '<path d="M48 2 L72 22 M72 2 L48 22" class="rl-x"/>' : ''}
-  </svg>`;
-}
-
-function planSummary(v) {
-  const p = v.plan;
-  if (!p) return '';
-  const route = p.route
-    ? `<span class="rmark ${ROUTE_STYLE[p.route.id]?.cls || ''}" aria-hidden="true">${ROUTE_STYLE[p.route.id]?.mark || ''}</span> ${esc(p.route.label)}${
-        p.route.closed ? ' <span class="tag warn">封閉</span>' : ''
-      }`
-    : '<span class="muted">還沒選路線</span>';
-  const tool = p.route ? (p.route.tool ? `工具：${esc(p.route.tool)}（跟著路線上車）` : '這條路不用工具') : '';
-  const items = p.items.length ? p.items.map(esc).join('、') : '<span class="muted">還沒裝物資</span>';
-  const pct = Math.min(100, Math.round((p.weight / Math.max(1, p.cap)) * 100));
-  const over = p.overweight > 0;
-  // 「故事時間」只在來不及時出現，平常不佔版面
-  const tooLate = (p.reasonCodes || []).includes('TOO_LATE');
-  const travel = p.route ? p.route.travel : null;
-  const story = tooLate
-    ? `<div class="story" data-block="story">
-        <span class="story-tag">故事時間</span>
-        <span>路程 <strong>${travel ?? '—'}</strong> 分鐘</span>
-        <span class="vs">≧</span>
-        <span>洪水 <strong>${p.safeWindow ?? '—'}</strong> 分鐘就到</span>
-        <small>路程要少於洪水抵達時間才來得及（和房間倒數無關）</small>
-      </div>`
-    : '';
-  return `<section class="card summary" aria-live="polite">
-    <div class="sum-head"><h2>共享方案</h2>${p.locked && v.phase !== 'replanning' ? '<span class="tag gold">已鎖定</span>' : ''}</div>
-    <div class="reach"><span class="reach-n">${p.reachable}</span><span class="reach-d">／3 村</span><span class="reach-l">目前可送達</span></div>
-    <dl class="sum-list">
-      <div><dt>路線</dt><dd>${route}${tool ? `<div class="muted small">${tool}</div>` : ''}</dd></div>
-      <div><dt>物資</dt><dd>${items}</dd></div>
-    </dl>
-    <div class="load ${over ? 'over' : ''}">
-      <div class="load-row"><span>載重</span><strong>${p.weight}／${p.cap} kg${over ? `（超重 ${p.overweight} kg）` : ''}</strong></div>
-      <div class="load-bar"><span style="width:${pct}%"></span></div>
-    </div>
-    ${story}
-  </section>`;
-}
-
-/** 還要處理的事（原因＋下一步）。剛剛有人按鈕被擋下，標題會說出來，讓沒按的人也知道。 */
-function adviceBlock(v, phase) {
-  const p = v.plan;
-  if (!p || !p.advice || !p.advice.length) return '';
-  const rej = p.lastRejection;
-  const recent = rej && now() - rej.at < 20000 && ACTION_LABEL[rej.action];
-  const head = recent
-    ? `剛剛有人按了「${ACTION_LABEL[rej.action]}」，還不行：`
-    : phase === 'replanning'
-      ? '出發前還要處理：'
-      : '鎖定前還要處理：';
-  return `<div class="notice ${recent ? 'soft' : ''}"><strong>${esc(head)}</strong><ul>${p.advice
-    .map((r) => `<li>${esc(r)}</li>`)
-    .join('')}</ul></div>`;
+  if ((v.phase === 'intro' || v.phase === 'planning') && (v.nextSteps || []).length) {
+    const steps = v.nextSteps
+      .slice(0, 1) // 一次只給一件事，聊完再看線索
+      .map((st) => `<span class="ns">去${esc(st.verb)} <strong class="ns-nick">${esc(st.nickname)}</strong>：${esc(st.text)}</span>`)
+      .join('');
+    out.push(`<div class="banner next-step"><span class="banner-k">下一步</span>${steps}</div>`);
+  }
+  return out.slice(0, 2).join('');
 }
 
 function routeButtons(v) {
@@ -535,16 +449,14 @@ function routeButtons(v) {
     .map((r) => {
       const st = ROUTE_STYLE[r.id] || {};
       const sel = p.route && p.route.id === r.id;
+      const [name, place] = String(r.label).split('・');
       // 不再 disabled：不是你負責的也能按，按了會告訴你該找誰
-      return `<button class="route ${st.cls || ''} ${sel ? 'sel' : ''} ${r.closed ? 'closed' : ''} ${v.can.route ? '' : 'not-mine'}" data-action="route" data-route="${esc(
-        r.id,
-      )}" ${v.can.route ? 'data-mine="1"' : ''} aria-pressed="${sel}">
-        <div class="route-top"><span class="rmark ${st.cls || ''}" aria-hidden="true">${st.mark || ''}</span><span class="route-label">${esc(r.label)}</span>
-        ${sel ? '<span class="tag gold">✓ 已選</span>' : ''}${r.closed ? '<span class="tag warn">✕ 封閉</span>' : ''}</div>
-        ${routeLine(r.id, r.closed)}
-        <div class="route-meta"><span>路程 <strong>${r.travel}</strong> 故事分鐘</span><span>${
-          r.tool ? `需要：${esc(r.tool)}` : '不需工具'
-        }</span></div>
+      return `<button class="rt ${st.cls || ''} ${sel ? 'sel' : ''} ${r.closed ? 'closed' : ''}" data-action="route" data-route="${esc(r.id)}" ${
+        v.can.route ? 'data-mine="1"' : ''
+      } aria-pressed="${sel}">
+        <span class="rt-top"><span class="rmark ${st.cls || ''}" aria-hidden="true">${st.mark || ''}</span><b>${esc(name)}</b>${sel ? '<span class="rt-ok">✓</span>' : ''}</span>
+        <span class="rt-sub">${esc(place || '')}・${r.travel} 分</span>
+        <span class="rt-sub">${r.closed ? '✕ 封閉' : r.tool ? `帶${esc(r.tool)}` : '不用工具'}</span>
       </button>`;
     })
     .join('');
@@ -553,35 +465,72 @@ function routeButtons(v) {
 function itemButtons(v) {
   return v.plan.itemChoices
     .map(
-      (it) => `<button class="chip item ${it.on ? 'on' : ''} ${it.locked ? 'locked' : ''} ${v.can.items ? '' : 'not-mine'}" data-action="item" data-item="${esc(
-        it.id,
-      )}" data-on="${it.on ? '0' : '1'}" ${it.locked ? 'data-locked="1"' : ''} ${v.can.items ? 'data-mine="1"' : ''} aria-pressed="${it.on}">
-        <span class="chk" aria-hidden="true">${it.on ? '✓' : it.locked ? '…' : '＋'}</span>${esc(it.name)}${
-          it.locked ? '<small>尚未發放</small>' : ''
-        }</button>`,
+      (it) => `<button class="chip item ${it.on ? 'on' : ''} ${it.locked ? 'locked' : ''}" data-action="item" data-item="${esc(it.id)}" data-on="${
+        it.on ? '0' : '1'
+      }" ${it.locked ? 'data-locked="1"' : ''} ${v.can.items ? 'data-mine="1"' : ''} aria-pressed="${it.on}">
+        <span class="chk" aria-hidden="true">${it.on ? '✓' : it.locked ? '…' : '＋'}</span>${esc(it.name)}${it.locked ? '<small>未發放</small>' : ''}</button>`,
     )
     .join('');
 }
 
-/** 自己負責的操作：完整展開、放在最上面。 */
-function myRouteCard(v) {
-  return `<section class="card mine" data-block="route"><h2>選路線 <span class="tag gold">你負責</span></h2>
-    <p class="muted small">點一條試試看，下面的狀態會即時更新。</p><div class="routes">${routeButtons(v)}</div></section>`;
-}
-function myItemsCard(v) {
-  return `<section class="card mine" data-block="items"><h2>裝物資 <span class="tag gold">你負責</span></h2>
-    <p class="muted small">點一下裝上或放下。各村要什麼、車子能載多重，問隊友。</p><div class="chips">${itemButtons(v)}</div></section>`;
+/** 全隊共用的方案板：每個人看到的一樣，自己負責的那一列標「你負責」。 */
+function planBoard(v) {
+  const p = v.plan;
+  if (!p) return '';
+  const ops = v.operators || {};
+  const who = (mine, nick) => (mine ? '<span class="tag gold">你負責</span>' : `<span class="who">${esc(nick || '隊友')} 負責</span>`);
+  const tooLate = (p.reasonCodes || []).includes('TOO_LATE');
+  const story = tooLate
+    ? `<div class="story" data-block="story">路程 <strong>${p.route ? p.route.travel : '—'}</strong> 分，洪水 <strong>${
+        p.safeWindow ?? '—'
+      }</strong> 分就到——來不及（故事時間，和房間倒數無關）</div>`
+    : '';
+  return `<section class="card board">
+    <div class="board-row ${v.can.route ? 'mine' : ''}" data-block="route">
+      <div class="row-head"><span class="row-k">路線</span>${who(v.can.route, ops.route)}</div>
+      <div class="rt-grid">${routeButtons(v)}</div>
+    </div>
+    <div class="board-row ${v.can.items ? 'mine' : ''}" data-block="items">
+      <div class="row-head"><span class="row-k">物資</span>${who(v.can.items, ops.items)}<span class="load-k ${p.overweight > 0 ? 'over' : ''}">${p.weight}／${p.cap} kg</span></div>
+      <div class="chips tight">${itemButtons(v)}</div>
+    </div>
+    ${story}
+  </section>`;
 }
 
-/** 別人負責的操作：收成一行，可以展開看。 */
-function foldCard(v, key, label, value, who) {
-  const open = ui.folds.has(key);
-  const body = key === 'route' ? `<div class="routes">${routeButtons(v)}</div>` : `<div class="chips">${itemButtons(v)}</div>`;
-  return `<details class="card fold" data-fold="${key}" data-block="${key}" ${open ? 'open' : ''}>
-    <summary><span class="fold-k">${esc(label)}</span><span class="fold-v">${value}</span><span class="fold-who">${esc(who)} 負責</span></summary>
-    <p class="muted small">由 ${esc(who)} 操作；你可以在旁邊出主意。</p>
-    ${body}
-  </details>`;
+/** 我知道的：你是誰＋線索，全部攤開、字小一點但不收合。 */
+function clueBox(v) {
+  const roles = v.me.roles.map((r) => `${esc(r.icon)}<strong>${esc(r.name)}</strong>`).join('・');
+  // 偏好能力只在停電時有用，留到停電畫面再講，規劃時不佔版面
+  // 危機後：新線索放最上面，開局就知道的舊線索字小一點（都還在，不收起來）
+  const fresh = v.crisis ? v.clues.filter((c) => c.when !== 'start') : [];
+  const old = v.crisis ? v.clues.filter((c) => c.when === 'start') : v.clues;
+  const items = [
+    ...fresh.map((c) => `<li class="new"><strong>${esc(c.title)}</strong> ${esc(c.text)}</li>`),
+    ...old.map((c) => `<li class="${v.crisis ? 'old' : ''}"><strong>${esc(c.title)}</strong> ${esc(c.text)}</li>`),
+  ];
+  return `<section class="card clues">
+    <div class="sum-head"><span class="me-line">你是 ${roles || '隊員'}</span><button class="btn tiny ghost" data-action="zoom">🔍 放大</button></div>
+    <ul class="clue-list">${items.join('') || '<li class="muted">目前還沒有線索。</li>'}</ul>
+  </section>`;
+}
+
+function planningBody(v) {
+  const bt = breakthroughCard(v);
+  return `${banners(v)}${bt}${planBoard(v)}${clueBox(v)}`;
+}
+
+function renderPlanning(v) {
+  let action = '';
+  if ((v.phase === 'planning' || v.phase === 'intro') && v.can.lock) {
+    action = `<button class="btn primary block" data-action="lock">鎖定方案</button>`;
+  } else if (v.phase === 'replanning' && v.can.depart) {
+    action = `<button class="btn primary block" data-action="depart">出發！</button>`;
+  }
+  return `${renderTopbar(v)}
+  <main class="screen planning">${planningBody(v)}
+    ${action ? actionBar(v, action) : ''}
+  </main>`;
 }
 
 function breakthroughCard(v) {
@@ -589,24 +538,23 @@ function breakthroughCard(v) {
   if (!b || v.phase !== 'replanning') return '';
   if (b.kind === 'floodgate') {
     if (b.done) {
-      return `<section class="card bt done"><h2>分洪閘門已啟動</h2><p>上游的水被引開了，綠線的安全窗變長了。</p></section>`;
+      return `<div class="banner ok">分洪閘門已啟動：上游的水被引開了，洪水會晚一點到。</div>`;
     }
     if (!v.can.floodgate) return '';
     const wrong = Date.now() < ui.floodWrongUntil;
-    return `<section class="card bt">
-      <h2>啟動分洪閘門</h2>
-      <p class="muted small">需要輸入授權頻道。可以問問隊友誰知道。</p>
+    return `<section class="card bt compact">
+      <div class="bt-k">分洪閘門・要輸入授權頻道，誰知道？</div>
       <form class="row" data-form="floodgate">
         <label class="sr" for="in-channel">授權頻道</label>
         <input id="in-channel" data-model="channel" value="${esc(ui.channel)}" autocomplete="off" placeholder="授權頻道" required>
-        <button class="btn secondary" type="submit">啟動分洪閘門</button>
+        <button class="btn secondary" type="submit">啟動</button>
       </form>
       ${wrong ? '<p class="soft-warn" role="status">頻道沒有對上，再問問隊友，可以再試。</p>' : ''}
     </section>`;
   }
   // seed 002：詢問
   if (b.queryReply) {
-    return `<section class="card bt done"><h2>詢問的回覆</h2><p class="reply">${esc(b.queryReply)}</p></section>`;
+    return `<div class="banner ok">${esc(b.queryReply)}</div>`;
   }
   if (!v.can.query || b.queryUsed) return '';
   const vill = VILLAGES.map(
@@ -628,72 +576,12 @@ function breakthroughCard(v) {
         <div class="row"><button class="btn ghost" data-action="q-cancel">再想想</button><button class="btn secondary" data-action="q-send">確定送出</button></div></div>`
     : `<button class="btn secondary block" data-action="q-ask" ${ready ? '' : 'disabled'}>送出詢問（只有一次）</button>`;
   return `<section class="card bt">
-    <h2>向一個村發詢問</h2>
+    <h2>對外聯絡：向一個村發詢問</h2>
     <p class="muted small">只有一次機會，先聽聽隊友怎麼說。</p>
     <div class="label">問哪個村</div><div class="chips">${vill}</div>
     <div class="label">問什麼</div><div class="chips">${qs}</div>
     ${send}
   </section>`;
-}
-
-function planningBody(v) {
-  const phase = v.phase;
-  const p = v.plan;
-  const ops = v.operators || {};
-  const hint = v.hint ? `<div class="hint" role="status"><span aria-hidden="true">💡</span> ${esc(v.hint)}</div>` : '';
-  const pref = v.preferenceHint && phase !== 'intro' ? `<div class="note">${esc(v.preferenceHint)}</div>` : '';
-  const crisisNote =
-    phase === 'replanning' && v.crisis
-      ? `<div class="notice"><strong>${esc(v.crisis.title)}</strong> 電力恢復了。重新看看方案吧，已裝的物資都還在。</div>`
-      : '';
-  // 1. 我能做的事放最上面
-  const bt = breakthroughCard(v);
-  const btMine = v.can.floodgate || v.can.query;
-  const mine = [btMine ? bt : '', v.can.route ? myRouteCard(v) : '', v.can.items ? myItemsCard(v) : ''].join('');
-  const noOps = !mine.trim()
-    ? `<section class="card mine"><h2>你這階段沒有要按的按鈕</h2><p>你的情報就是關鍵：把下面的線索說給負責的隊友聽。</p>${
-        phase === 'intro' || phase === 'planning' ? nextStepInline(v) : ''
-      }</section>`
-    : '';
-  // 2. 別人負責的收成一行
-  const routeVal = p && p.route ? esc(p.route.label) + (p.route.closed ? '（封閉）' : '') : '<span class="muted">還沒選</span>';
-  const itemVal = p && p.items.length ? p.items.map(esc).join('、') : '<span class="muted">還沒裝</span>';
-  const folds = [
-    !v.can.route && p ? foldCard(v, 'route', '路線', routeVal, ops.route || '導航') : '',
-    !v.can.items && p ? foldCard(v, 'items', '物資', itemVal, ops.items || '補給') : '',
-  ].join('');
-  return `${hint}${crisisNote}
-    ${mine}${noOps}
-    <section class="card"><div class="sum-head"><h2>我的線索</h2><button class="btn small ghost" data-action="zoom">放大</button></div>${clueCards(
-      v,
-    )}</section>
-    ${planSummary(v)}
-    ${adviceBlock(v, phase)}
-    ${btMine ? '' : bt}
-    ${folds}
-    ${pref}`;
-}
-
-function nextStepInline(v) {
-  const steps = v.nextSteps || [];
-  if (!steps.length) return '';
-  return `<ul class="next-list">${steps
-    .map((st) => `<li><span class="ns-verb">去${esc(st.verb)}</span> <strong class="ns-nick">${esc(st.nickname)}</strong>：${esc(st.text)}</li>`)
-    .join('')}</ul>`;
-}
-
-function renderPlanning(v) {
-  const label = v.phase === 'planning' ? '規劃' : '重新規劃';
-  let action = '';
-  if (v.phase === 'planning' && v.can.lock) {
-    action = `<button class="btn primary block" data-action="lock">鎖定方案</button>`;
-  } else if (v.phase === 'replanning' && v.can.depart) {
-    action = `<button class="btn primary block" data-action="depart">出發！</button>`;
-  }
-  return `${renderTopbar(v)}${timerBar(v, label)}
-  <main class="screen planning">${guideLine(v.phase)}${planningBody(v)}
-    ${action ? actionBar(v, action) : ''}
-  </main>`;
 }
 
 // ───────── 停電 ─────────
@@ -713,12 +601,12 @@ function renderBlackout(v) {
         .map((s) => {
           const show = ui.holding === String(s.slot);
           return `<section class="bo-card">
-          <h2>你手上有第 ${s.slot + base} 格的符號</h2>
-          <p>描述給工程師 <strong>${esc(r.engineerNickname)}</strong> 聽。</p>
-          <button class="hold ${show ? 'show' : ''}" data-hold="${s.slot}" aria-label="按住顯示第 ${s.slot + base} 格符號">
+          <h2>第 ${s.slot + base} 格的符號在你手上</h2>
+          <p>按住看清楚，用說的讓工程師 <strong>${esc(r.engineerNickname)}</strong> 找出來。</p>
+          <button class="hold ${show ? 'show' : ''}" data-hold="${s.slot}" ${show ? `data-sym="${esc(s.id)}"` : ''} aria-label="按住顯示第 ${s.slot + base} 格符號">
             ${show ? holdInner(v, s.slot) : HOLD_COVER}
           </button>
-          <p class="muted small">放開就會藏起來。說說外形、有幾個缺口、開口朝哪。</p>
+          <p class="muted small">放開就藏起來。像什麼形狀？缺口在哪？開口朝哪邊？</p>
         </section>`;
         })
         .join('');
@@ -726,6 +614,9 @@ function renderBlackout(v) {
     if (r.myEliminationClue) {
       body += `<section class="bo-card"><h2>你的排除線索</h2><p class="lead">${esc(r.myEliminationClue)}</p>
         <p class="muted small">告訴工程師 ${esc(r.engineerNickname)}，幫他刪掉不可能的選項。</p></section>`;
+    }
+    if (!v.can.eliminate && !r.panel && v.preferenceHint) {
+      body += `<p class="bo-pref">${esc(v.preferenceHint)}</p>`;
     }
     if (v.can.eliminate) {
       body += `<section class="bo-card"><h2>你有排除能力</h2><p class="muted small">可以替工程師目前那一格灰掉兩個錯誤選項。不用也能修好。</p>
@@ -742,25 +633,22 @@ function renderBlackout(v) {
   }
   const assist = r
     ? r.assistLevel > 0
-      ? `<span class="assist on">協助模式已開啟：部分錯誤選項已灰掉</span>`
+      ? `<span class="assist on">協助模式：部分錯誤選項已灰掉，也會顯示文字說明</span>`
       : `<span class="assist">協助模式 <strong data-cd="assist">${mmss(r.assistAt - now())}</strong> 後開啟</span>`
     : '';
+  // 精簡版：一行標題＋一行故事＋一行倒數，把空間留給符號
   return `<div class="blackout ${ui.noFlicker ? 'no-flicker' : ''}" role="alert">
     ${guideLine('blackout')}
-    <div class="bo-top">
-      <span class="bo-code">房號 ${esc(v.code)}・${esc(v.me.nickname)}</span>
-      <button class="btn small ghost" data-action="flicker">${ui.noFlicker ? '開啟閃爍' : '關閉閃爍'}</button>
-    </div>
     <div class="bo-head">
-      <div class="bo-bolt" aria-hidden="true">⚡</div>
-      <h1>停電了</h1>
-      ${c ? `<h2>${esc(c.title)}</h2><p>${esc(c.text)}</p>${c.extra ? `<p class="bo-extra">${esc(c.extra)}</p>` : ''}` : ''}
+      <h1><span class="bo-bolt" aria-hidden="true">⚡</span> 停電了${c ? `・${esc(c.title)}` : ''}</h1>
+      <button class="btn tiny ghost" data-action="flicker" aria-label="${ui.noFlicker ? '開啟閃爍' : '關閉閃爍'}">${ui.noFlicker ? '閃爍：關' : '閃爍：開'}</button>
     </div>
+    ${c ? `<p class="bo-story">${esc(c.text)}${c.extra ? ` <span class="bo-extra">${esc(c.extra)}</span>` : ''}</p>` : ''}
     ${
       r
-        ? `<div class="bo-timer"><div><span class="tb-label">修復倒數</span><strong data-cd="repair">${mmss(
-            r.startedAt + r.limitMs - now(),
-          )}</strong></div><div><span class="tb-label">進度</span><strong>${r.progress}／${total}</strong></div></div>
+        ? `<div class="bo-timer"><span>修復 <strong data-cd="repair">${mmss(r.startedAt + r.limitMs - now())}</strong></span><span>進度 <strong>${
+            r.progress
+          }／${total}</strong></span></div>
           <div class="bo-assist">${assist}</div>`
         : ''
     }
@@ -785,14 +673,14 @@ function engineerPanel(v, base) {
     .map(
       (o) => `<button class="opt ${o.grayed ? 'gray' : ''}" data-action="pick" data-opt="${esc(o.id)}" ${
         o.grayed ? 'disabled aria-disabled="true"' : ''
-      }>${symbolSvg(o.id, { size: 64, title: o.desc })}<span>${esc(o.desc || describeSymbol(o.id))}</span></button>`,
+      }>${symbolSvg(o.id, { size: 64, title: '選項' })}${r.assistLevel > 0 ? `<span>${esc(o.desc || describeSymbol(o.id))}</span>` : ''}</button>`,
     )
     .join('');
   const wrong = Date.now() < ui.wrongUntil;
   return `<section class="bo-card eng">
     <div class="pills">${pills}</div>
     <h2>第 ${cur.index + base} 格：請問 <span class="ask">${esc(cur.askNickname)}</span></h2>
-    <p class="muted small">請隊友描述：外形、幾個缺口、開口朝哪。</p>
+    <p class="muted small">只看得到圖：請隊友形容他的符號，你來找。</p>
     ${wrong ? '<p class="soft-warn" role="status">不是這個，再問問看。</p>' : ''}
     <div class="opts">${opts}</div>
   </section>`;
@@ -1187,7 +1075,11 @@ document.addEventListener(
 function holdInner(v, slot) {
   const s = v && v.repair ? v.repair.mySymbols.find((x) => String(x.slot) === String(slot)) : null;
   if (!s) return '';
-  return `<span class="hold-sym">${symbolSvg(s.id, { size: 150 })}</span><span class="hold-desc">${esc(s.desc || describeSymbol(s.id))}</span>`;
+  // 描述型修復：平常只給圖，要自己想辦法形容；協助模式才附文字
+  const assist = v.repair.assistLevel > 0;
+  return `<span class="hold-sym">${symbolSvg(s.id, { size: 150, title: '你的符號' })}</span>${
+    assist ? `<span class="hold-desc">${esc(s.desc || describeSymbol(s.id))}</span>` : ''
+  }`;
 }
 const HOLD_COVER = '<span class="hold-cover">按住這裡<br>才會顯示符號</span>';
 function setHolding(slot) {
@@ -1197,6 +1089,9 @@ function setHolding(slot) {
     const on = slot != null && el.getAttribute('data-hold') === slot;
     el.classList.toggle('show', on);
     el.innerHTML = on ? holdInner(ui.view, slot) : HOLD_COVER;
+    const s = on && ui.view && ui.view.repair ? ui.view.repair.mySymbols.find((x) => String(x.slot) === String(slot)) : null;
+    if (s) el.setAttribute('data-sym', s.id);
+    else el.removeAttribute('data-sym');
   }
 }
 document.addEventListener('pointerdown', (e) => {

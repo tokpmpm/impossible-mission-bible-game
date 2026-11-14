@@ -44,22 +44,27 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await shot(host, '02-lobby-host');
   await shot(pages[1], '03-lobby-guest');
   await host.click('[data-action=start]');
-  await host.waitForSelector('.role-hero');
+  await host.waitForSelector('.board');
   // 前 60 秒（測試時縮短）不能鎖定：按了會在按鈕上方說明還要等多久
-  await host.click('[data-action=intro-tab][data-tab=plan]');
   await host.click('[data-action=lock]');
   await host.waitForSelector('.bar-note.rejected:has-text("認識隊友")', { timeout: 5000 });
   await shot(host, '04a-lock-too-early');
   await host.click('[data-action=note-close]');
-  await host.click('[data-action=intro-tab][data-tab=me]');
   const steps = await host.textContent('.next-step');
   if (!/去(問|告訴|找)/.test(steps)) errs.push('開局下一步沒有具體對象：' + steps.trim().slice(0, 60));
   for (let i = 0; i < N; i++) await shot(pages[i], `04-intro-p${i}`);
   await host.click('[data-action=zoom]');
   await shot(host, '05-zoom');
   await host.click('[data-action=unzoom]');
-  for (const p of pages) await p.click('[data-action=intro-tab][data-tab=plan]');
   await sleep(200);
+  // 一個畫面看完：規劃畫面不需要往下捲（3、6 人 390／360px 嚴格檢查；320px 窄螢幕只記錄）
+  for (let i = 0; i < N; i++) {
+    const over = await pages[i].evaluate(() => document.documentElement.scrollHeight - window.innerHeight);
+    if (over > 0) {
+      const msg = `p${i} 規劃畫面要往下捲 ${over}px`;
+      if (W >= 360) errs.push(msg); else console.log('提醒：' + msg);
+    }
+  }
   const findPage = async (sel) => {
     for (const p of pages) if (await p.$(sel + ':not([disabled])')) return p;
     return null;
@@ -80,7 +85,6 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   if (!(await nav.$('.status-line.bad'))) errs.push('超重時狀態列沒有變紅');
   // 不是導航的人點路線：不會沒反應，會說要找誰
   const notNav = pages.find((p) => p !== nav);
-  await notNav.click('[data-fold=route] > summary'); // 別人負責的區塊預設收成一行，展開才看得到
   await notNav.click('[data-action=route][data-route=藍]');
   await notNav.waitForSelector('.bar-note:has-text("導航")', { timeout: 3000 });
   await shot(notNav, '06b-not-my-button');
@@ -117,7 +121,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
         await p.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
         await p.mouse.down();
         await sleep(150);
-        desc = (await p.textContent('.hold-desc')).trim();
+        desc = await h.getAttribute('data-sym'); // 畫面上只有圖，測試從屬性讀符號代號
         if (guard === 0) await p.screenshot({ path: OUT + tag+'09-hold-symbol.png' });
         await p.mouse.up();
         await sleep(100);
@@ -129,12 +133,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       for (let wi = 0; wi < (await picks.count()); wi++) {
         const w = picks.nth(wi);
         // 按鈕文字含圖示標題＋描述，用 includes 判斷，確保真的選到錯的
-        if (!(await w.textContent()).includes(desc)) { await w.click(); break; }
+        if ((await w.getAttribute('data-opt')) !== desc) { await w.click(); break; }
       }
       await sleep(250);
       await shot(eng, tag+'11-eng-wrong');
     }
-    const opt = eng.locator(`[data-action=pick]:has-text("${desc}")`);
+    const opt = eng.locator(`[data-action=pick][data-opt="${desc}"]`);
     if (!(await opt.count())) { console.log("no opt for", desc, "ask", ask, "opts", (await eng.locator("[data-action=pick]").allTextContents()).join("/")); break; }
     await opt.first().click();
     // 等工程師畫面換到下一格（或修好）再讀，避免讀到舊的格子
@@ -149,6 +153,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await pages[0].waitForSelector('.blackout', { state: 'detached', timeout: 15000 });
   await sleep(400);
   for (let i = 0; i < N; i++) await shot(pages[i], `12-replan-p${i}`);
+  for (let i = 0; i < N; i++) {
+    const over = await pages[i].evaluate(() => document.documentElement.scrollHeight - window.innerHeight);
+    if (over > 0) {
+      const msg = `p${i} 停電後的規劃畫面要往下捲 ${over}px`;
+      if (W >= 360) errs.push(msg); else console.log('提醒：' + msg);
+    }
+  }
   const fg = await findPage('#in-channel');
   if (fg) {
     await fg.fill('#in-channel', '999');
@@ -184,7 +195,6 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await shot(host, '17-after-next');
   // ── 第二局 seed 002 ──
   await sleep(300);
-  for (const p of pages) await p.click('[data-action=intro-tab][data-tab=plan]');
   await sleep(300);
   const nav2 = await mineOf('route');
   const sup2 = await mineOf('item');
