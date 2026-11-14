@@ -33,7 +33,7 @@ export const ROLE_BUNDLES: Record<number, RoleId[][]> = {
 export const SPLIT_FROM: Partial<Record<RoleId, RoleId>> = {
   scout: 'nav',
   liaison: 'comms',
-  store: 'supply',
+  store: 'eng', // 2026-11-15：8 人以下工具重量交給工程，工程規劃期也有情報（ADR-0003 第 34 條）
   backup: 'eng',
 };
 
@@ -51,14 +51,14 @@ export interface Clue {
 
 export const CLUES: Record<SeedId, Clue[]> = {
   'seed 001': [
-    { role: 'nav', when: 'start', title: '路線', text: '紅線吊橋 3 分鐘，要帶繩子；藍線隧道 4 分鐘，要帶燈具；綠線山路 6 分鐘，不用工具。' },
-    { role: 'store', when: 'start', title: '工具重量', text: '繩子 1 kg、燈具 3 kg。工具也算在車子的載重裡。' },
-    { role: 'supply', when: 'start', title: '物資重量', text: '藥品 1 kg、飲水 2 kg、毛毯 3 kg、食物 2 kg。救援車最多載 7 kg（含工具）。' },
+    { role: 'nav', when: 'start', title: '路線', text: '紅線 3 分鐘（帶繩子）、藍線 4 分鐘（帶燈具）、綠線 6 分鐘（不用工具）。' },
+    { role: 'store', when: 'start', title: '工具重量', text: '繩子 1 kg、燈具 3 kg，也算進載重。' },
+    { role: 'supply', when: 'start', title: '物資重量', text: '藥品 1 kg、飲水 2 kg、毛毯 3 kg、食物 2 kg。車子最多載 7 kg（含工具）。' },
     { role: 'comms', when: 'start', title: '村莊需求', text: '東村要藥品，西村要飲水，北村要毛毯。' },
-    { role: 'liaison', when: 'start', title: '優先順序', text: '北村的毛毯明天補送也可以；東村、西村今晚就要。' },
+    { role: 'liaison', when: 'start', title: '優先順序', text: '北村的毛毯明天補送也行；東村、西村今晚就要。' },
     { role: 'medic', when: 'start', title: '急迫', text: '東村有病人，藥品今晚一定要送到。' },
-    { role: 'observer', when: 'start', title: '天候', text: '洪水第 5 分鐘會淹到低窪路段，路程要少於 5 分鐘才來得及。西村的水源被洪水污染了，今晚急需飲水。' },
-    { role: 'eng', when: 'start', untilPower: true, title: '備援電力', text: '如果停電，你要依隊友的描述選出正確的符號。電力恢復後，備援面板會顯示一些重要資訊。' },
+    { role: 'observer', when: 'start', title: '天候', text: '洪水第 5 分鐘就到，路程要少於 5 分鐘。西村水源被污染，今晚急需飲水。' },
+    { role: 'eng', when: 'start', untilPower: true, title: '備援電力', text: '停電時要靠隊友描述符號；電來了，備援面板會有新資訊。' },
     { role: 'backup', when: 'start', untilPower: true, title: '修復面板', text: '修復時，每一格的選項都很像。先用排除線索刪掉不可能的，再請隊友描述。' },
     { role: 'scout', when: 'start', title: '路況', text: '吊橋年久失修，暴雨裡晃得厲害；隧道入口很暗，沒有燈進不去；山路本身穩，怕的是洪水。' },
     { role: 'scout', when: 'crisis', title: '路況', text: '吊橋斷了，紅線不能走。隧道還通，但燈具比繩子重。山路本身安全，問題只在洪水。' },
@@ -67,14 +67,14 @@ export const CLUES: Record<SeedId, Clue[]> = {
     { role: 'eng', when: 'power', title: '備援面板', text: '備援面板恢復了：授權頻道是 {channel}。', breakthrough: 3 },
   ],
   'seed 002': [
-    { role: 'nav', when: 'start', title: '路線', text: '紅線吊橋 3 分鐘，要帶長繩；藍線隧道 4 分鐘，要帶頭燈；綠線山路 6 分鐘，不用工具。' },
-    { role: 'store', when: 'start', title: '工具重量', text: '長繩 3 kg、頭燈 1 kg。工具也算在車子的載重裡。' },
-    { role: 'supply', when: 'start', title: '物資重量', text: '食物 2 kg、藥品 1 kg、飲水 2 kg、毛毯 3 kg。救援車最多載 6 kg（含工具）。' },
+    { role: 'nav', when: 'start', title: '路線', text: '紅線 3 分鐘（帶長繩）、藍線 4 分鐘（帶頭燈）、綠線 6 分鐘（不用工具）。' },
+    { role: 'store', when: 'start', title: '工具重量', text: '長繩 3 kg、頭燈 1 kg，也算進載重。' },
+    { role: 'supply', when: 'start', title: '物資重量', text: '食物 2 kg、藥品 1 kg、飲水 2 kg、毛毯 3 kg。車子最多載 6 kg（含工具）。' },
     { role: 'comms', when: 'start', title: '村莊需求', text: '東村要食物，西村要藥品，北村要飲水。' },
     { role: 'liaison', when: 'start', title: '優先順序', text: '北村的水車明天早上會到；東村、西村今晚就要。' },
     { role: 'medic', when: 'start', title: '急迫', text: '西村有傷患，藥品今晚一定要送到。' },
-    { role: 'observer', when: 'start', title: '天候', text: '洪水第 5 分鐘會淹到低窪路段；綠線山路今晚怎樣都來不及。東村倉庫進水，今晚急需食物。' },
-    { role: 'eng', when: 'start', untilPower: true, title: '備援電力', text: '如果停電，你要依隊友的描述選出正確的符號。' },
+    { role: 'observer', when: 'start', title: '天候', text: '洪水第 5 分鐘就到，綠線今晚怎樣都來不及。東村倉庫進水，今晚急需食物。' },
+    { role: 'eng', when: 'start', untilPower: true, title: '備援電力', text: '停電時要靠隊友描述符號，你來選。' },
     { role: 'backup', when: 'start', untilPower: true, title: '修復面板', text: '修復時，每一格的選項都很像。先用排除線索刪掉不可能的，再請隊友描述。' },
     { role: 'scout', when: 'start', title: '路況', text: '山上一直有小石頭滾下來，開車要小心；紅線、藍線目前都通。' },
     { role: 'scout', when: 'crisis', title: '路況', text: '落石沒有擋住路，紅線、藍線都還能走；是車子被砸凹了，載重變小。' },
@@ -115,13 +115,46 @@ export const VERSES = {
   26: '若一個肢體受苦，所有的肢體就一同受苦；若一個肢體得榮耀，所有的肢體就一同快樂。',
   27: '你們就是基督的身子，並且各自作肢體。',
 } as const;
+// 以上林前 12 章各節，2026-11-15 依新標點和合本逐字核對字詞（標點為和合本傳統標點）。
 
+/**
+ * 大廳的背包題（2026-11-14 使用者決定：偏好題要跟遊戲有關）。公開、可跳過。
+ * 手電筒在停電時能「照亮面板一次」（排除兩個錯誤符號）；其他物品只在劇情與結尾被點名，不影響規則。
+ */
 export const PREFERENCES = {
-  planner: '旅行規劃派',
-  casual: '隨性派',
-  either: '都可以',
+  flashlight: { name: '手電筒', icon: '🔦' },
+  snack: { name: '零食', icon: '🍪' },
+  raincoat: { name: '雨衣', icon: '🧥' },
+  whistle: { name: '哨子', icon: '📣' },
 } as const;
 export type Preference = keyof typeof PREFERENCES;
+
+/** 背包裡的東西在故事裡出場（只陳述、不影響規則）。{name} 換成暱稱。 */
+export const CAMEOS: Record<Exclude<Preference, 'flashlight'>, string> = {
+  snack: '回程路上，大家分著吃了 {name} 帶的零食。',
+  raincoat: '{name} 把雨衣借給了一位淋濕的村民。',
+  whistle: '{name} 吹了一聲哨子，把大家叫回車上。',
+};
+
+/**
+ * 老智慧：在對應時刻出現的一句短經文，當隊伍小提示（和合本，附出處，不說教）。
+ * 2026-11-15 依新標點和合本逐字核對字詞，標點用和合本傳統標點；節錄處以「……」標示。
+ */
+export const TIPS = {
+  planning: { text: '不先商議，所謀無效；謀士眾多，所謀乃成。', ref: '箴言 15:22' },
+  blackout: { text: '兩個人總比一個人好……若是跌倒，這人可以扶起他的同伴。', ref: '傳道書 4:9–10' },
+  replanning: { text: '三股合成的繩子不容易折斷。', ref: '傳道書 4:12' },
+} as const;
+
+/** 結尾「你知道嗎？」：一行小知識，依局數輪替。只講有出處的背景，不把本關故事說成聖經史實。 */
+export const FACTS = [
+  '保羅寫這封信給哥林多的教會。哥林多是一座有兩個港口、南來北往的商業大城，教會裡的人吵成好幾派（林前 1:11–12）。',
+  '保羅寫信時不在哥林多，是聽說那裡的人在鬧紛爭，才寫信勸他們「不可分黨」（林前 1:10–11）。',
+  '用「身體和肢體」比喻一群人，在當時的希臘羅馬很常見；保羅拿它來說：每個人都不一樣，也都不可少。',
+];
+
+/** 結尾可跳過的輕鬆問題（跟這局有關，不談信仰、不談隱私）。 */
+export const QUESTIONS = ['剛才哪一刻你最緊張？', '下一局你想換帶什麼進背包？為什麼？', '剛才誰說的哪句話最有用？'];
 
 /**
  * 開局「下一步」：依線索互補關係，告訴每個人該去找誰、問什麼（暫定，ADR-0003 第 25 條）。
@@ -140,9 +173,10 @@ export const ASKS: Record<RoleId, { to: RoleId; verb: '問' | '告訴' | '找'; 
     { to: 'supply', verb: '問', text: '車子最多能載多重？' },
     { to: 'nav', verb: '問', text: '有哪幾條路、各要多久？' },
   ],
+  // 8 人以下工程兼管工具重量（SPLIT_FROM.store）；9–10 人有倉儲時改用 ENG_ASKS_WITH_STORE
   eng: [
-    { to: 'nav', verb: '問', text: '有哪幾條路、各要帶什麼工具？' },
-    { to: 'supply', verb: '問', text: '車子最多能載多重？' },
+    { to: 'nav', verb: '告訴', text: '每種工具多重' },
+    { to: 'supply', verb: '告訴', text: '工具也算進車子的載重' },
   ],
   medic: [
     { to: 'supply', verb: '告訴', text: '哪一村今晚一定要送到' },
@@ -160,3 +194,9 @@ export const ASKS: Record<RoleId, { to: RoleId; verb: '問' | '告訴' | '找'; 
   ],
   backup: [{ to: 'eng', verb: '找', text: '停電時你們要一起看修復面板，先打聲招呼' }],
 };
+
+/** 9–10 人有倉儲管理時，工程手上沒有工具重量，改去問別人。 */
+export const ENG_ASKS_WITH_STORE: (typeof ASKS)['eng'] = [
+  { to: 'nav', verb: '問', text: '有哪幾條路、各要帶什麼工具？' },
+  { to: 'supply', verb: '問', text: '車子最多能載多重？' },
+];
