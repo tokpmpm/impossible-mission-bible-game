@@ -2,16 +2,18 @@ const { chromium } = require('playwright');
 // 瀏覽器端對端：N 支模擬手機玩完 seed 001 與 seed 002 兩局。由 e2e/run.mjs 啟動（會先開伺服器）。
 const OUT = (process.env.SHOTS || require('os').tmpdir() + '/im-shots') + '/' + (process.env.TAG || '');
 require('fs').mkdirSync(require('path').dirname(OUT + 'x'), { recursive: true });
-const BASE = 'http://localhost:' + (process.env.PORT || 3100);
+// BASE_URL：直接測已部署的網址（例如 https://impossible-mission.xxx.workers.dev）
+const BASE = process.env.BASE_URL || 'http://localhost:' + (process.env.PORT || 3100);
 const N = Number(process.env.N || 3);
 const W = Number(process.env.W || 390);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 (async () => {
-  const browser = await chromium.launch();
+  const proxy = process.env.BASE_URL && process.env.HTTPS_PROXY ? { server: process.env.HTTPS_PROXY } : undefined;
+  const browser = await chromium.launch(proxy ? { proxy } : {});
   const pages = [];
   const errs = [];
   for (let i = 0; i < N; i++) {
-    const ctx = await browser.newContext({ viewport: { width: W, height: 844 }, deviceScaleFactor: 1 });
+    const ctx = await browser.newContext({ viewport: { width: W, height: 844 }, deviceScaleFactor: 1, ignoreHTTPSErrors: !!proxy });
     const p = await ctx.newPage();
     p.on('pageerror', (e) => errs.push(`p${i}: ${e.message}`));
     p.on('console', (m) => { if (m.type() === 'error') errs.push(`p${i} console: ${m.text()}`); });

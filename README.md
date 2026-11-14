@@ -46,6 +46,8 @@
 | [AGENTS.md](AGENTS.md) | Codex 等後續開發者工作準則 |
 
 ## 部署到網路（Cloudflare，任何網路都能玩）
+目前網址：https://impossible-mission.next-calendar.workers.dev （2026-11-14 部署；只有模擬手機測過，未經真人試玩）
+
 需要 Cloudflare 帳號。部署後會得到 `https://impossible-mission.<你的子網域>.workers.dev`，手機用行動網路掃 QR Code 就能加入（docs/adr/0005）。
 
 ```bash
