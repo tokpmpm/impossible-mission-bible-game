@@ -1,0 +1,197 @@
+/* 第一關「保羅海難」插畫動畫（搭配 public/art.js）。
+   原則：元素靜止時就是「最終狀態」，keyframes 只描述從哪裡來；
+   所以 prefers-reduced-motion 關掉動畫後，畫面自然停在最終狀態。
+   所有選擇器都限定在 .art（art.js 產生的 SVG）底下，不影響全域。 */
+
+.art { display: inline-block; vertical-align: middle; overflow: visible; }
+.art.art-scene,
+.art.art-card,
+.art.art-meal,
+.art.art-landing { display: block; width: 100%; height: auto; max-width: 100%; overflow: hidden; }
+.art.art-darkness { display: block; width: 100%; height: 100%; overflow: hidden; }
+.art.art-scene { border-radius: 14px; }
+
+/* ── 共用：浪往左流動（位移量＝波長，無縫循環） ── */
+@keyframes art-drift-48 { from { transform: translateX(0); } to { transform: translateX(-48px); } }
+@keyframes art-drift-60 { from { transform: translateX(0); } to { transform: translateX(-60px); } }
+@keyframes art-drift-30 { from { transform: translateX(0); } to { transform: translateX(-30px); } }
+.art .waves-back { animation: art-drift-48 7s linear infinite; }
+.art .waves-front { animation: art-drift-60 5s linear infinite; }
+.art.sky-storm .waves-back,
+.art.sky-dark .waves-back { animation-duration: 3.2s; }
+.art.sky-storm .waves-front,
+.art.sky-dark .waves-front { animation-duration: 2.2s; }
+.art .waves-landing { animation: art-drift-30 4s linear infinite; }
+
+/* ── 船隨浪搖擺：calm 小、storm 大 ── */
+.art .ship { transform-box: view-box; transform-origin: 180px 120px; }
+@keyframes art-rock-calm {
+  0%, 100% { transform: rotate(-1.2deg) translateY(0); }
+  50% { transform: rotate(1.2deg) translateY(1.5px); }
+}
+@keyframes art-rock-storm {
+  0%, 100% { transform: rotate(-4.5deg) translateY(-2px); }
+  25% { transform: rotate(0deg) translateY(3px); }
+  50% { transform: rotate(4.5deg) translateY(-1px); }
+  75% { transform: rotate(0deg) translateY(3px); }
+}
+.art .rock-calm { animation: art-rock-calm 6s ease-in-out infinite; }
+.art .rock-storm { animation: art-rock-storm 3.2s ease-in-out infinite; }
+
+/* ── 天空：雲飄、雨、閃電 ── */
+@keyframes art-clouds { from { transform: translateX(-8px); } to { transform: translateX(8px); } }
+.art .clouds { animation: art-clouds 9s ease-in-out infinite alternate; }
+
+@keyframes art-rain { from { transform: translate(0, 0); } to { transform: translate(-10px, 40px); } }
+.art .rain { animation: art-rain 0.45s linear infinite; }
+.art.sky-dark .rain { animation-duration: 0.6s; }
+
+/* 偶爾閃電：大部分時間看不到，週期末閃兩下 */
+@keyframes art-lightning {
+  0%, 88%, 91%, 93.5%, 100% { opacity: 0; }
+  89%, 92.5% { opacity: 1; }
+}
+.art .lightning { opacity: 0; animation: art-lightning 7s linear infinite 1.5s; }
+
+/* 停電遮罩：很暗的閃電，更少出現 */
+@keyframes art-dim-lightning {
+  0%, 93%, 95%, 100% { opacity: 0; }
+  94% { opacity: 1; }
+}
+.art .dim-lightning { animation: art-dim-lightning 11s linear infinite 3s; }
+
+/* ── 漂浮的東西：半沉、隨浪上下 ── */
+.art .bob { transform-box: fill-box; transform-origin: 50% 70%; animation: art-bob 2.6s ease-in-out infinite; }
+.art .float-item:nth-of-type(2n) .bob { animation-delay: -1.1s; animation-duration: 3s; }
+@keyframes art-bob {
+  0%, 100% { transform: translateY(0) rotate(-7deg); }
+  50% { transform: translateY(2.5px) rotate(7deg); }
+}
+
+/* ── 剛丟進海裡：沿拋物線從甲板飛到漂浮位置（約 0.8 秒）＋水花 ──
+   外層管水平（等速）、內層管垂直（先上後下），合起來就是拋物線。
+   --fx/--fy 是「甲板位置 − 漂浮位置」，終點是 0，所以靜止時就停在漂浮位置。 */
+@keyframes art-fly-x { from { transform: translateX(var(--fx, 0px)); } to { transform: translateX(0); } }
+@keyframes art-fly-y {
+  0% { transform: translateY(var(--fy, 0px)); animation-timing-function: cubic-bezier(0.2, 0.7, 0.4, 1); }
+  35% { transform: translateY(calc(var(--fy, 0px) - 30px)); animation-timing-function: cubic-bezier(0.6, 0, 0.9, 0.5); }
+  100% { transform: translateY(0); }
+}
+.art .just-thrown { animation: art-fly-x 0.8s linear both; }
+.art .just-thrown .jt-y { animation: art-fly-y 0.8s both; }
+.art .appear-late { animation: art-appear-late 0.8s linear both; }
+@keyframes art-appear-late { 0%, 80% { opacity: 0; } 100% { opacity: 1; } }
+
+.art .splash > g { transform-box: fill-box; transform-origin: 50% 100%; }
+.art .splash { animation: art-splash-fade 1.1s ease-out both; }
+.art .splash > g { animation: art-splash-grow 1.1s ease-out both; }
+@keyframes art-splash-fade {
+  0%, 65% { opacity: 0; }
+  75% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@keyframes art-splash-grow {
+  0%, 65% { transform: scale(0.3); }
+  85% { transform: scale(1); }
+  100% { transform: scale(1.15); }
+}
+/* 單獨使用的水花圖 */
+.art.art-splash .splash { animation-duration: 0.6s; animation-name: art-splash-solo; }
+.art.art-splash .splash > g { animation-duration: 0.6s; animation-name: art-splash-solo-grow; }
+@keyframes art-splash-solo { 0% { opacity: 0; } 25% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes art-splash-solo-grow { 0% { transform: scale(0.3); } 60% { transform: scale(1); } 100% { transform: scale(1.15); } }
+
+/* ── 剛撈回：從海面跳回甲板 ── */
+.art .just-rescued { animation: art-fly-x 0.7s ease-out both; }
+.art .just-rescued .jr-y { animation: art-hop-y 0.7s both; }
+@keyframes art-hop-y {
+  0% { transform: translateY(var(--fy, 0px)); animation-timing-function: cubic-bezier(0.2, 0.7, 0.4, 1); }
+  55% { transform: translateY(-22px); animation-timing-function: cubic-bezier(0.6, 0, 0.9, 0.5); }
+  100% { transform: translateY(0); }
+}
+
+/* ── 超重：甲板上的海水晃動、警告三角閃爍 ── */
+.art .deck-water { animation: art-slosh 1.4s ease-in-out infinite alternate; }
+@keyframes art-slosh { from { opacity: 0.6; transform: translateX(-2px); } to { opacity: 1; transform: translateX(2px); } }
+.art .overload-warn { animation: art-warn 1s ease-in-out infinite alternate; }
+@keyframes art-warn { from { opacity: 0.65; } to { opacity: 1; } }
+
+/* ── 上岸三件事：亮起時發一次光 ── */
+.art.need-lit { animation: art-need-lit 0.9s ease-out 1; transform-origin: 50% 50%; }
+@keyframes art-need-lit {
+  0% { transform: scale(0.7); filter: drop-shadow(0 0 0 rgba(242, 193, 78, 0)); }
+  45% { transform: scale(1.22); filter: drop-shadow(0 0 10px rgba(255, 217, 122, 0.95)); }
+  100% { transform: scale(1); filter: drop-shadow(0 0 0 rgba(242, 193, 78, 0)); }
+}
+
+/* 故事卡：風線輕輕流動 */
+.art .card-wind { stroke-dasharray: 60 14; animation: art-card-wind 1.6s linear infinite; }
+@keyframes art-card-wind { from { stroke-dashoffset: 74; } to { stroke-dashoffset: 0; } }
+
+/* ── 吃飯（擘餅）：約 2.5 秒 ── */
+.art-meal .meal-hands { animation: art-meal-hands 0.4s ease-out both; }
+@keyframes art-meal-hands { from { opacity: 0; transform: translateY(12px); } }
+.art-meal .meal-half { transform-box: view-box; transform-origin: 120px 100px; }
+.art-meal .meal-half-l { transform: translate(-9px, 1px) rotate(-9deg); animation: art-meal-break-l 0.6s ease-out 0.4s both; }
+.art-meal .meal-half-r { transform: translate(9px, 1px) rotate(9deg); animation: art-meal-break-r 0.6s ease-out 0.4s both; }
+@keyframes art-meal-break-l { from { transform: none; } }
+@keyframes art-meal-break-r { from { transform: none; } }
+.art-meal .meal-crumb { animation: art-meal-crumb 0.6s ease-out both; }
+@keyframes art-meal-crumb { from { opacity: 0; transform: translate(var(--cx, 0px), var(--cy, 0px)); } }
+.art-meal .meal-head { transform-box: fill-box; transform-origin: center; animation: art-meal-head 0.45s ease-out both; }
+@keyframes art-meal-head { from { opacity: 0.22; transform: scale(0.8); } 60% { opacity: 1; transform: scale(1.15); } }
+
+/* ── 上岸：約 4 秒 ── */
+/* 船駛向沙灘，45% 撞上沙洲，船頭卡住 */
+.art-landing .land-ship { transform-box: view-box; transform-origin: 226px 150px; animation: art-land-ship 4s both; }
+@keyframes art-land-ship {
+  0% { transform: translate(-170px, -10px); animation-timing-function: ease-out; }
+  44% { transform: translate(-4px, 0); }
+  48% { transform: translate(2px, 0) rotate(3deg); }
+  54% { transform: rotate(-2deg); }
+  60% { transform: rotate(1deg); }
+  100% { transform: none; }
+}
+/* 船尾在擱淺後被浪打壞：完整船尾消失，碎木板散開 */
+.art-landing .stern-intact { animation: art-land-stern 4s both; }
+@keyframes art-land-stern { 0%, 52% { opacity: 1; } 56%, 100% { opacity: 0; } }
+.art-landing .land-debris { animation: art-land-debris 4s ease-out both; }
+@keyframes art-land-debris {
+  0%, 52% { opacity: 0; transform: translate(var(--dx, 0px), var(--dy, 0px)); }
+  56% { opacity: 1; }
+  100% { transform: none; }
+}
+.art-landing .land-splash { animation: art-land-splash 4s ease-out both; }
+.art-landing .land-splash > g { transform-box: fill-box; transform-origin: 50% 100%; }
+@keyframes art-land-splash { 0%, 46% { opacity: 0; } 52% { opacity: 1; } 66%, 100% { opacity: 0; } }
+
+/* 人：從船邊的水裡（橫躺＝游水／抱著木板）一路漂到岸上站起來。沒有人往下沉。 */
+.art-landing .land-person { transform-box: fill-box; transform-origin: 50% 70%; animation: art-land-swim 4s both; }
+.art-landing .land-person.slow { animation-name: art-land-swim-slow; }
+@keyframes art-land-swim {
+  0%, 52% { opacity: 0; transform: translate(var(--sx), var(--sy)) rotate(-80deg); }
+  57% { opacity: 1; transform: translate(var(--sx), var(--sy)) rotate(-80deg); }
+  80% { transform: translate(calc(var(--sx) * 0.12), calc(var(--sy) * 0.12)) rotate(-80deg); }
+  90%, 100% { opacity: 1; transform: none; }
+}
+@keyframes art-land-swim-slow {
+  0%, 52% { opacity: 0; transform: translate(var(--sx), var(--sy)) rotate(-80deg); }
+  57% { opacity: 1; transform: translate(var(--sx), var(--sy)) rotate(-80deg); }
+  70% { transform: translate(calc(var(--sx) * 0.7), calc(var(--sy) * 0.7)) rotate(-80deg); }
+  90% { transform: translate(calc(var(--sx) * 0.1), calc(var(--sy) * 0.1)) rotate(-80deg); }
+  97%, 100% { opacity: 1; transform: none; }
+}
+/* 岸上生起一堆火（28:2） */
+.art-landing .land-fire { transform-box: fill-box; transform-origin: 50% 100%; animation: art-land-fire 4s ease-out both; }
+@keyframes art-land-fire { 0%, 86% { opacity: 0; transform: scale(0.2); } 100% { opacity: 1; transform: none; } }
+.art-landing .flame { transform-box: fill-box; transform-origin: 50% 100%; animation: art-flicker 0.7s ease-in-out 4s infinite alternate; }
+@keyframes art-flicker { from { transform: scale(1, 1); } to { transform: scale(0.92, 1.1); } }
+
+/* ── 減少動態：全部停住，停在最終狀態 ── */
+@media (prefers-reduced-motion: reduce) {
+  .art,
+  .art * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
