@@ -124,7 +124,7 @@ for (const n of [3, 6, 10]) {
       const sup = who(phones, (v) => v.can.items);
       const cap = who(phones, (v) => v.can.lock);
       // 沒按鈕的人有一句任務
-      for (const p of phones.filter((x) => x !== sup && x !== cap)) assert.match(p.view!.myTask ?? '', /告訴/);
+      for (const p of phones.filter((x) => x !== sup && x !== cap)) assert.ok(/告訴/.test(p.view!.myTask ?? '') || p.view!.nextSteps.length > 0, '沒有按鈕的人要知道找誰');
       // 超重時「決定好了」被擋下，只回給按的人
       cap.act({ type: 'lock' });
       await cap.until(() => cap.rejections.length > 0);
@@ -171,7 +171,7 @@ for (const n of [3, 6, 10]) {
   });
 }
 
-test('故事卡 A1＋B5：危機前麥子丟不掉；補好船後要等天亮才能衝向海灘', async () => {
+test('故事卡 A1＋B5：危機前麥子丟不掉；補好船後錨已拋下、留著糧食不算力氣', async () => {
   const { srv, phones, host } = await setup(4);
   try {
     roomOf(srv, host.code).forceCards = { a: 'A1', b: 'B5' };
@@ -187,10 +187,11 @@ test('故事卡 A1＋B5：危機前麥子丟不掉；補好船後要等天亮才
     cap.act({ type: 'lock' });
     await repair(phones);
     await keepOnly(sup, ['糧食', '纜索']);
+    assert.ok(cap.view!.ship!.items.find((i) => i.id === '錨')!.gone);
+    assert.deepEqual(cap.view!.ship!.needs!.filter((n) => n.lit).map((n) => n.id), ['船身', '天亮']);
     cap.act({ type: 'depart' });
-    await cap.until(() => cap.rejections.length > 0);
-    assert.match(cap.rejections[0].reasons[0].text, /等天亮/);
-    assert.ok(cap.view!.ship!.dawnAt! > Date.now());
+    await Promise.all(phones.map((p) => p.until((v) => v.phase === 'settled')));
+    assert.equal(host.view!.result!.stars, 2);
   } finally {
     phones.forEach((p) => p.close());
     await srv.close();

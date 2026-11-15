@@ -29,6 +29,7 @@ export interface Effective {
   aboard: ItemId[]; // 還可能在船上的東西（扣掉自動離船與吃掉的）
   done: NeedId[]; // 不用帶東西就已顧好的事
   pinned: ItemId[]; // 現在丟不掉的東西
+  eatOnly: NeedId[]; // 只能靠吃飯顧好的事
   cap: number;
 }
 
@@ -37,6 +38,7 @@ export function effective(seed: SeedDef, world: World): Effective {
   const removed = new Set<ItemId>();
   const done = new Set<NeedId>();
   const pinned = new Set<ItemId>();
+  const eatOnly = new Set<NeedId>();
   for (const id of world.cards) {
     const c = CARDS[id];
     if (c.deck === 'B' && !world.crisis) continue;
@@ -44,6 +46,7 @@ export function effective(seed: SeedDef, world: World): Effective {
     for (const i of c.remove ?? []) removed.add(i);
     for (const n of c.done ?? []) done.add(n);
     if (!world.crisis) for (const i of c.pinPre ?? []) pinned.add(i);
+    for (const n of c.eatOnly ?? []) eatOnly.add(n);
   }
   if (world.fed) {
     removed.add(seed.food);
@@ -54,6 +57,7 @@ export function effective(seed: SeedDef, world: World): Effective {
     aboard: ITEMS.filter((i) => !removed.has(i)),
     done: NEEDS.filter((n) => done.has(n)),
     pinned: [...pinned],
+    eatOnly: [...eatOnly],
     cap: world.crisis ? seed.capPost : seed.capPre,
   };
 }
@@ -72,7 +76,7 @@ export function evaluatePlan(seedOrId: SeedDef | SeedId, plan: Plan, world: Worl
   const eff = effective(seed, world);
   const kept = plan.items.filter((i) => eff.aboard.includes(i));
   const weight = kept.reduce((sum, i) => sum + eff.weights[i], 0);
-  const served = NEEDS.filter((n) => eff.done.includes(n) || kept.includes(seed.needs[n]));
+  const served = NEEDS.filter((n) => eff.done.includes(n) || (kept.includes(seed.needs[n]) && !eff.eatOnly.includes(n)));
   const reasons: RejectReason[] = [];
   if (!world.powerOn) reasons.push('NOT_POWERED');
   if (world.dawnOpen === false) reasons.push('WAIT_DAWN');

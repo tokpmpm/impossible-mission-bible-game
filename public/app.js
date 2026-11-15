@@ -455,7 +455,7 @@ function cardChips(v) {
   const chips = ['a', 'b']
     .map((k) => v.cards[k])
     .filter(Boolean)
-    .map((c) => `<button class="card-chip tone-${c.tone}" data-action="card-open" data-card="${c.id}" aria-label="看故事卡：${esc(c.title)}">
+    .map((c) => `<button class="card-chip" data-action="card-open" data-card="${c.id}" aria-label="看故事卡：${esc(c.title)}">
       <span class="cc-art" aria-hidden="true">${art.card(c.id)}</span><span class="cc-t">${esc(c.title)}</span></button>`)
     .join('');
   return chips ? `<div class="card-chips">${chips}</div>` : '';
@@ -692,12 +692,13 @@ function renderZoom(v) {
 
 function cardOverlay(c, deckLabel) {
   return `<div class="ovl card-ovl" role="dialog" aria-modal="true" aria-label="故事卡：${esc(c.title)}">
-    <div class="story-card tone-${c.tone}">
+    <div class="story-card">
       <div class="sc-deck">${esc(deckLabel)}</div>
       <div class="sc-art">${art.card(c.id)}</div>
       <h2>${esc(c.title)}</h2>
       <blockquote>${esc(c.verse)}<cite>${esc(c.ref)}</cite></blockquote>
       <p class="sc-effect"><span>所以這局</span>${esc(c.effect)}</p>
+      <p class="sc-note">卡片效果是遊戲設定；經文記的是事件本身。</p>
       <button class="btn primary block" data-action="card-close">知道了</button>
     </div>
   </div>`;

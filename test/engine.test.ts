@@ -178,19 +178,25 @@ test('風暴卡 B1／B2：補好船時器具、小船自動離船，麥子變輕
   const b2 = afterCrisis({ b: 'B2' });
   assert.ok(!b2.plan.items.includes('小船'));
   const b3 = afterCrisis({ b: 'B3' });
-  assert.equal(evaluate(keep(b3, ['糧食'])).weight, 3);
+  assert.equal(evaluate(keep(b3, ['糧食'])).weight, 4);
+  // 糧食＋纜索（5）不再是兩星解，只剩纜索＋錨
+  assert.deepEqual(evaluate(keep(b3, ['糧食', '纜索'])).reasons, ['OVERWEIGHT']);
   // 黑暗中還沒翻開風暴卡
   const dark = apply(newGame({ b: 'B2' }), { type: 'tick', at: CRISIS_AT });
   assert.ok(dark.plan.items.includes('小船'));
 });
 
-test('風暴卡 B5：補好船 20 秒內還在等天亮', () => {
-  let s = keep(afterCrisis({ b: 'B5' }), ['纜索', '錨']);
-  const t = s.powerAt!;
-  s = apply(s, { type: 'depart', at: t + 10_000 });
-  assert.deepEqual(s.lastRejection?.reasons, ['WAIT_DAWN']);
-  s = apply(s, { type: 'depart', at: t + 20_000 });
-  assert.equal(s.phase, 'settled');
+test('風暴卡 B5：錨已拋下（等天亮顧好、錨離船）；留著糧食不算力氣，要真的吃', () => {
+  let s = afterCrisis({ b: 'B5' });
+  assert.ok(!s.plan.items.includes('錨'));
+  s = keep(s, ['糧食', '纜索']);
+  let ev = evaluate(s);
+  assert.deepEqual(ev.served, ['船身', '天亮']);
+  assert.equal(ev.stars, 2);
+  s = apply(s, { type: 'eat', at: s.now + 1000 });
+  ev = evaluate(s);
+  assert.equal(ev.stars, 3);
+  assert.equal(ev.weight, 1);
 });
 
 test('2:15 方向提示：還沒排到三件才出現一次；A1（危機前不可能三星）不出現', () => {

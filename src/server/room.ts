@@ -504,6 +504,7 @@ export class Room {
     if (phase === 'intro' || phase === 'planning') {
       if (this.operatorOf('supply') === pid) return '你決定丟什麼：按一下東西＝丟進海裡，再按一下撈回來。';
       if (this.operatorOf('nav') === pid) return '大家講好了，就由你按「決定好了」。';
+      if (this.nextSteps(pid).length) return null; // 「下一步」已經說了要找誰
       return `把你知道的告訴 ${this.nick(this.operatorOf('supply'))}（管倉），他負責丟東西。`;
     }
     if (phase === 'replanning') {

@@ -28,9 +28,10 @@ export interface CardDef {
   remove?: ItemId[]; // 自動離船
   done?: NeedId[]; // 已經顧好的事
   pinPre?: ItemId[]; // 危機前丟不掉
+  eatOnly?: NeedId[]; // 這件事只能靠吃飯顧好（留著東西不算）
   crisisShiftMs?: number; // 危機提早（負值）
   repairBonusMs?: number; // 補船多幾毫秒
-  departDelayMs?: number; // 補好船後多久才能衝向海灘
+  departDelayMs?: number; // 補好船後多久才能衝向海灘（目前沒有卡使用，保留給往後的卡）
   publicClue?: boolean; // 突破口第一段線索全隊可見（房間層處理）
 }
 
@@ -57,9 +58,9 @@ export const CARDS: Record<CardId, CardDef> = {
   A5: { id: 'A5', deck: 'A', repairBonusMs: 10_000 },
   B1: { id: 'B1', deck: 'B', remove: ['器具'], weight: { 麥子: -2 } },
   B2: { id: 'B2', deck: 'B', remove: ['小船'] },
-  B3: { id: 'B3', deck: 'B', weight: { 糧食: 1 } },
+  B3: { id: 'B3', deck: 'B', weight: { 糧食: 2 } },
   B4: { id: 'B4', deck: 'B', publicClue: true },
-  B5: { id: 'B5', deck: 'B', departDelayMs: 20_000 },
+  B5: { id: 'B5', deck: 'B', remove: ['錨'], done: ['天亮'], eatOnly: ['力氣'] },
 };
 
 export const DECK_A: CardId[] = ['A1', 'A2', 'A3', 'A4', 'A5'];

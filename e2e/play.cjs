@@ -189,7 +189,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await doRepair('r2-');
   await pages[0].waitForSelector('.blackout', { state: 'detached', timeout: 15000 });
   for (const p of pages) { await p.waitForSelector('.card-ovl', { timeout: 5000 }); await p.click('[data-action=card-close]'); }
-  await setKeep(sup2, ['糧食', '纜索']);
+  await setKeep(sup2, ['纜索', '錨']);
   await sleep(300);
   for (let i = 0; i < N; i++) await shot(pages[i], `r2-12-replan-p${i}`);
   const dep2 = await findPage('[data-action=depart]');

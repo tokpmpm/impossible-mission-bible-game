@@ -1,0 +1,74 @@
+#!/usr/bin/env python3
+"""逐字核對 src/server/content.ts 裡引用的經文（只比字詞，不比標點與空白）。
+
+來源：GitHub brandonmcconnell/bible 的 zh-Hant/cuvt（標示「新標點和合本」，上帝版用字），
+經 raw.githubusercontent.com 下載使徒行傳 27、28 章。需要網路。
+
+用法：python3 tools/verify_verses.py
+節錄處以「……」分段，每段都必須是對應經節連續原文的一部分。
+"""
+import re
+import sys
+import urllib.request
+from pathlib import Path
+
+SRC = 'https://raw.githubusercontent.com/brandonmcconnell/bible/main/zh-Hant/cuvt/acts/{}.mdx'
+CONTENT = Path(__file__).resolve().parent.parent / 'src' / 'server' / 'content.ts'
+
+# （標籤, 在 content.ts 找引文的正規式, 章, 起節, 迄節）
+QUOTES = [
+    ('卡 A1', r"A1: \{.*?verse: '([^']+)'", 27, 10, 11),
+    ('卡 A2', r"A2: \{.*?verse: '([^']+)'", 27, 13, 14),
+    ('卡 A3', r"A3: \{.*?verse: '([^']+)'", 27, 3, 3),
+    ('卡 A4', r"A4: \{.*?verse: '([^']+)'", 27, 17, 17),
+    ('卡 A5', r"A5: \{.*?verse: '([^']+)'", 27, 2, 2),
+    ('卡 B1', r"B1: \{.*?verse: '([^']+)'", 27, 18, 19),
+    ('卡 B2', r"B2: \{.*?verse: '([^']+)'", 27, 30, 32),
+    ('卡 B3', r"B3: \{.*?verse: '([^']+)'", 27, 37, 37),
+    ('卡 B4', r"B4: \{.*?verse: '([^']+)'", 27, 21, 22),
+    ('卡 B5', r"B5: \{.*?verse: '([^']+)'", 27, 28, 29),
+    ('天黑', r"blackout: \{ text: '([^']+)'", 27, 20, 20),
+    ('第十四天', r"replanning: \{ text: '([^']+)'", 27, 27, 27),
+    ('結尾・吃飯', r"fed: \{ text: '([^']+)'", 27, 35, 36),
+    ('結尾・上岸', r"shore: \{ text: '([^']+)'", 27, 44, 44),
+]
+# 前端字幕（public/app.js）
+EXTRA = [
+    ('吃飯字幕', '於是他們都放下心，也就吃了。', 27, 36, 36),
+]
+
+PUNCT = re.compile(r'[\s，。；：、「」『』！？…（）().,;:!?"\'“”‘’—–-]')
+
+
+def norm(s):
+    return PUNCT.sub('', s)
+
+
+def chapter(n):
+    with urllib.request.urlopen(SRC.format(n), timeout=30) as r:
+        t = r.read().decode('utf-8')
+    out = {}
+    parts = re.split(r'<span className="v" id="v(\d+)"[^>]*>', t)
+    for i in range(1, len(parts), 2):
+        txt = re.sub(r'<[^>]+>', '', parts[i + 1])
+        txt = re.sub(r'^\s*#+.*$', '', txt, flags=re.M)
+        out[int(parts[i])] = re.sub(r'\s+', '', txt)
+    return out
+
+
+def main():
+    verses = {27: chapter(27), 28: chapter(28)}
+    content = CONTENT.read_text(encoding='utf-8')
+    items = [(label, re.search(rx, content, re.S).group(1), c, a, b) for label, rx, c, a, b in QUOTES] + EXTRA
+    ok_all = True
+    for label, quote, c, a, b in items:
+        src = norm(''.join(verses[c][n] for n in range(a, b + 1)))
+        bad = [seg for seg in quote.split('……') if norm(seg) and norm(seg) not in src]
+        ref = f'{c}:{a}' + (f'–{b}' if b != a else '')
+        print(f"[{'一致' if not bad else '不一致'}] {label}（徒 {ref}）" + ''.join(f'\n    ✗「{s}」' for s in bad))
+        ok_all &= not bad
+    return 0 if ok_all else 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

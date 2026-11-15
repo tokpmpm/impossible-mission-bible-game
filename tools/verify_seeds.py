@@ -25,7 +25,8 @@ SEEDS = {
 }
 
 # 故事卡：deck A＝起風（開局翻開），deck B＝風暴（補好船後翻開）。
-# weight：重量增減；remove：自動離船；done：已顧好的事；pin_pre：危機前丟不掉；pre_max：危機前預期最高星。
+# weight：重量增減；remove：自動離船；done：已顧好的事；pin_pre：危機前丟不掉；cap：危機後載重增減；
+# eat_only：這件事只能靠吃飯顧好（留著糧食不算）；pre_max：危機前預期最高星。
 # 其他效果（時間、誰看得到線索）不影響可解性，只記在 note。
 CARDS = {
     "A1": dict(deck="A", pin_pre=["麥子"], pre_max=2, note="船主不准丟麥子（危機前）"),
@@ -35,16 +36,17 @@ CARDS = {
     "A5": dict(deck="A", note="補船多 10 秒"),
     "B1": dict(deck="B", remove=["器具"], weight={"麥子": -2}),
     "B2": dict(deck="B", remove=["小船"]),
-    "B3": dict(deck="B", weight={"糧食": 1}),
+    "B3": dict(deck="B", weight={"糧食": 2}),
     "B4": dict(deck="B", note="醫生的吃飯線索全隊可見"),
-    "B5": dict(deck="B", note="補好後 20 秒才能衝向海灘"),
+    "B5": dict(deck="B", remove=["錨"], done=["天亮"], eat_only=["力氣"]),
 }
 
 
 def world(seed, cards, crisis, fed):
     """回傳 (重量表, 船上可選的東西, 已顧好的事, 危機前釘住的東西, 載重)。"""
     w = dict(seed["weights"])
-    removed, done, pinned = set(), set(), set()
+    removed, done, pinned, eat_only = set(), set(), set(), set()
+    cap_delta = 0
     for cid in cards:
         c = CARDS[cid]
         if c["deck"] == "B" and not crisis:
@@ -55,18 +57,20 @@ def world(seed, cards, crisis, fed):
         done |= set(c.get("done", []))
         if not crisis:
             pinned |= set(c.get("pin_pre", []))
+        cap_delta += c.get("cap", 0)
+        eat_only |= set(c.get("eat_only", []))
     if fed:
         removed.add(seed["food"])
         done.add("力氣")
     items = [i for i in seed["weights"] if i not in removed]
-    cap = seed["cap_post"] if crisis else seed["cap_pre"]
-    return w, items, done, pinned, cap
+    cap = (seed["cap_post"] + cap_delta) if crisis else seed["cap_pre"]
+    return w, items, done, pinned, cap, eat_only
 
 
-def evaluate(seed, kept, w, done, cap):
+def evaluate(seed, kept, w, done, cap, eat_only=()):
     """回傳 (星數, 原因)；原因 None＝可以出發。"""
     weight = sum(w[i] for i in kept)
-    served = [n for n, item in seed["needs"].items() if n in done or item in kept]
+    served = [n for n, item in seed["needs"].items() if n in done or (item in kept and n not in eat_only)]
     stars = len(served)
     if weight > cap:
         return stars, "超重"
@@ -74,13 +78,13 @@ def evaluate(seed, kept, w, done, cap):
 
 
 def best(seed, cards, crisis, fed):
-    w, items, done, pinned, cap = world(seed, cards, crisis, fed)
+    w, items, done, pinned, cap, eat_only = world(seed, cards, crisis, fed)
     top = (-1, ())
     for n in range(len(items) + 1):
         for kept in combinations(items, n):
             if not pinned <= set(kept):
                 continue
-            s, reason = evaluate(seed, kept, w, done, cap)
+            s, reason = evaluate(seed, kept, w, done, cap, eat_only)
             if reason is None and s > top[0]:
                 top = (s, kept)
     return top
@@ -90,6 +94,30 @@ def combos():
     a = [k for k, c in CARDS.items() if c["deck"] == "A"]
     b = [k for k, c in CARDS.items() if c["deck"] == "B"]
     return [(x, y) for x in a for y in b]
+
+
+def answers(seed, cards, crisis, fed, stars):
+    """所有能達到 stars 星且可出發的留法（集合）。"""
+    w, items, done, pinned, cap, eat_only = world(seed, cards, crisis, fed)
+    out = set()
+    for n in range(len(items) + 1):
+        for kept in combinations(items, n):
+            if not pinned <= set(kept):
+                continue
+            s, reason = evaluate(seed, kept, w, done, cap, eat_only)
+            if reason is None and s == stars:
+                out.add(kept)
+    return out
+
+
+def changes(name, seed):
+    """每張卡和「沒有卡」相比，有沒有改變危機前三星、危機後兩星或吃飯後三星的留法。"""
+    base = {k: answers(seed, (), *v) for k, v in {"pre": (False, False, 3), "post": (True, False, 2), "fed": (True, True, 3)}.items()}
+    print(f"== {name}：卡片是否改變該怎麼做")
+    for cid in CARDS:
+        diff = [label for label, (k, v) in {"危機前": ("pre", (False, False, 3)), "危機後兩星": ("post", (True, False, 2)), "吃飯後三星": ("fed", (True, True, 3))}.items()
+                if answers(seed, (cid,), *v) != base[k]]
+        print(f"  {cid}：{'改變 ' + '、'.join(diff) if diff else '留法不變（只影響時間或資訊）'}")
 
 
 def check(name, seed):
@@ -122,10 +150,10 @@ def export(path):
     for name, seed in SEEDS.items():
         for cards in combos():
             for scen, (crisis, fed) in scenarios.items():
-                w, items, done, _pinned, cap = world(seed, cards, crisis, fed)
+                w, items, done, _pinned, cap, eat_only = world(seed, cards, crisis, fed)
                 for n in range(len(items) + 1):
                     for kept in combinations(items, n):
-                        s, reason = evaluate(seed, kept, w, done, cap)
+                        s, reason = evaluate(seed, kept, w, done, cap, eat_only)
                         rows.append(dict(seed=name, cards=list(cards), scenario=scen,
                                          kept=list(kept), stars=s, reason=reason))
     with open(path, "w", encoding="utf-8") as f:
@@ -140,4 +168,6 @@ if __name__ == "__main__":
         export(sys.argv[2])
         raise SystemExit(0)
     results = [check(n, s) for n, s in SEEDS.items()]
+    for n, s in SEEDS.items():
+        changes(n, s)
     raise SystemExit(0 if all(results) else 1)

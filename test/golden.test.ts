@@ -34,5 +34,5 @@ test('每一種故事卡組合 × 情境 × 留下的東西：星等與拒絕原
     assert.equal(ev.stars, row.stars, label);
     assert.equal(ev.reasons[0] ? REASON_TEXT[ev.reasons[0]] : null, row.reason, label);
   }
-  assert.ok(golden.rows.length > 3000, `只比對到 ${golden.rows.length} 筆`);
+  assert.ok(golden.rows.length > 2900, `只比對到 ${golden.rows.length} 筆`);
 });
