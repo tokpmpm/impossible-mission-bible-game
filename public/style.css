@@ -728,3 +728,124 @@ cite { display: block; margin-top: 4px; font-style: normal; color: var(--gold-2)
 }
 .tip-pop { position: fixed; top: 60px; left: 50%; transform: translateX(-50%); width: min(528px, calc(100% - 24px)); z-index: 8; text-align: left; font: inherit; font-size: 0.9rem; line-height: 1.5; color: var(--text, #f4f1e8); background: #1b2a4d; border: 2px solid var(--gold); border-radius: 14px; padding: 10px 14px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); cursor: pointer; }
 .tip-pop cite { font-style: normal; margin-left: 6px; color: var(--gold); white-space: nowrap; }
+
+/* ───────── v0.7 保羅海難：船的場景、托盤、故事卡、上岸 ───────── */
+.topbar { position: relative; }
+#hud { position: sticky; top: 0; z-index: 10; background: var(--bg); }
+.stage { max-width: 560px; margin: 0 auto; position: relative; }
+.stage .art-scene { display: block; width: 100%; height: auto; max-height: 34vh; }
+.story { margin: 0; padding: 4px 16px 6px; font-size: 0.8rem; color: var(--muted); display: flex; gap: 8px; justify-content: space-between; align-items: baseline; }
+.story > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.story cite, .bo-story cite, .ovl-cap cite, .saved cite { font-style: normal; color: var(--gold); font-size: 0.78rem; white-space: nowrap; margin-left: 6px; }
+.screen.ship { padding-top: 8px; gap: 10px; }
+.screen.ship.has-bar { padding-bottom: 210px; }
+.role-chip { display: inline-flex; align-items: center; gap: 4px; }
+.role-chip svg { flex: none; }
+.tb-cd { display: flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
+.tb-cd strong { color: var(--gold-2); }
+.tb-cd strong.low { color: var(--red); }
+
+.ship-meta { display: flex; flex-direction: column; gap: 6px; }
+.gauge { display: flex; align-items: center; gap: 8px; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius-s); padding: 6px 10px; }
+.gauge .cells { display: flex; gap: 3px; flex: 1; flex-wrap: wrap; }
+.gauge .cell { width: 16px; height: 16px; border-radius: 4px; border: 2px solid var(--line); }
+.gauge .cell.f { background: var(--gold); border-color: var(--gold); }
+.gauge .cell.over { border-color: var(--red); border-style: dashed; }
+.gauge .cell.f.over { background: var(--red); border-style: solid; }
+.gauge strong { font-size: 1.2rem; font-variant-numeric: tabular-nums; }
+.gauge strong small { font-size: 0.85rem; color: var(--muted); }
+.gauge.bad { border-color: var(--red); }
+.g-over { color: var(--red); font-weight: 800; font-size: 0.9rem; white-space: nowrap; }
+.needs { display: flex; justify-content: space-around; gap: 6px; }
+.need { display: flex; flex-direction: column; align-items: center; font-size: 0.78rem; color: var(--muted); min-width: 64px; }
+.need.lit { color: var(--gold-2); font-weight: 700; }
+.need.unknown svg { opacity: 0.45; }
+.need.big { font-size: 0.95rem; }
+.need.pending { color: var(--warn); }
+.need.pending svg { opacity: 0.6; outline: 2px dashed var(--warn); outline-offset: 2px; border-radius: 50%; }
+.needs-over { margin: 0; text-align: center; color: var(--warn); font-weight: 700; font-size: 0.85rem; }
+@keyframes needPop { from { transform: scale(0.4); opacity: 0; } to { transform: none; opacity: 1; } }
+
+.card-chips { display: flex; gap: 8px; }
+.card-chip { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 4px 8px 4px 4px; border-radius: var(--radius-s); background: var(--bg-2); border: 1px solid var(--line); cursor: pointer; text-align: left; font-size: 0.8rem; min-height: 44px; }
+.card-chip .cc-art .art.art-card { width: 52px; height: auto; display: block; border-radius: 6px; }
+.card-chip .cc-t { overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.25; }
+
+.tray { background: var(--card); border: 1px solid var(--gold); border-radius: var(--radius); padding: 8px; }
+.tray-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.tray-item { position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 4px; border-radius: var(--radius-s); border: 2px solid var(--line); background: var(--bg-2); cursor: pointer; min-height: 92px; touch-action: manipulation; }
+.tray-item.on { border-color: var(--gold); }
+.tray-item.off { opacity: 0.6; background: #0d2a4a; border-style: dashed; border-color: var(--blue); }
+.tray-item.off .ti-pic { transform: translateY(4px) rotate(-8deg); }
+.ti-pic { position: relative; transition: transform 0.25s; }
+.ti-lock { position: absolute; right: -10px; top: -6px; font-size: 0.9rem; }
+.ti-name { font-size: 0.85rem; font-weight: 700; }
+.ti-w { display: flex; gap: 2px; }
+.ti-w i { width: 9px; height: 9px; border-radius: 2px; background: var(--gold); display: block; }
+.tray-item.off .ti-w i { background: var(--blue); }
+.ti-state { position: absolute; top: 4px; left: 6px; font-size: 0.7rem; color: var(--muted); }
+
+.eat-card { display: flex; gap: 10px; align-items: center; background: var(--card); border: 2px solid var(--gold); border-radius: var(--radius); padding: 10px; }
+.eat-card > div:last-child { flex: 1; }
+.eat-card p { margin: 4px 0 0; }
+.my-task { margin: 0; padding: 8px 12px; border-radius: var(--radius-s); background: rgba(242, 193, 78, 0.1); border-left: 4px solid var(--gold); font-weight: 600; }
+.next-step { background: var(--bg-2); border: 2px solid var(--gold); border-radius: var(--radius-s); padding: 8px 12px; }
+.next-step p { margin: 0; }
+.ns-verb { color: var(--gold-2); font-weight: 800; }
+.clues { display: flex; flex-direction: column; gap: 0; }
+.clue { display: flex; gap: 10px; align-items: center; }
+.clue-pic { display: flex; align-items: center; gap: 2px; flex: none; }
+.clue-pic .arrow { color: var(--muted); }
+.clue-body { flex: 1; min-width: 0; }
+.zoom-btn { align-self: center; }
+.banner.fed, .banner.dawn, .banner.crisis-note { display: flex; gap: 6px; align-items: center; }
+.banner.dawn strong { color: var(--gold-2); font-variant-numeric: tabular-nums; }
+.status-sub.ok { color: var(--ok); font-weight: 700; }
+.btn.big { font-size: 1.2rem; min-height: 56px; }
+.btn[aria-disabled="true"] { opacity: 0.55; }
+
+/* 首頁、大廳 */
+.hero-art { max-width: 360px; margin: 0 auto 6px; border-radius: var(--radius); overflow: hidden; }
+.hero-art svg { display: block; width: 100%; height: auto; }
+.pref-chip { display: inline-flex; align-items: center; gap: 6px; }
+.bag { display: inline-flex; align-items: center; gap: 4px; }
+.howto-list.pics { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.howto-list.pics li { display: flex; align-items: center; gap: 10px; }
+
+/* 黑暗 */
+.blackout { position: relative; }
+.bo-bg { position: fixed; inset: 0; z-index: -1; opacity: 0.9; }
+.bo-bg svg { width: 100%; height: 100%; display: block; }
+.bo-story { text-align: center; color: #c9d0e4; font-size: 0.92rem; margin: 0; }
+.bo-card.torch { display: flex; gap: 10px; align-items: flex-start; }
+.bo-card.torch > div { flex: 1; }
+
+/* 疊加層：故事卡、吃飯、上岸 */
+.ovl { position: fixed; inset: 0; z-index: 40; background: rgba(5, 9, 22, 0.86); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 16px; overflow-y: auto; }
+.ovl-cap { color: var(--text); text-align: center; font-weight: 700; margin-top: 8px; }
+.meal-ovl svg, .landing-ovl svg { width: min(100%, 420px); height: auto; }
+.story-card { width: min(100%, 380px); background: linear-gradient(180deg, #213b70, var(--card)); border: 3px solid var(--gold); border-radius: 22px; padding: 14px 16px; box-shadow: var(--shadow); animation: cardFlip 0.7s both; }
+.sc-deck { font-size: 0.8rem; color: var(--gold); letter-spacing: 0.08em; }
+.sc-art svg { width: 100%; height: auto; display: block; border-radius: 12px; margin: 6px 0; }
+.story-card h2 { font-size: 1.25rem; }
+.story-card blockquote { margin: 0 0 8px; font-size: 0.92rem; color: #e3e7f2; line-height: 1.6; }
+.story-card blockquote cite { display: block; font-style: normal; color: var(--gold); font-size: 0.8rem; margin-top: 2px; }
+.sc-effect { background: rgba(242, 193, 78, 0.12); border-radius: var(--radius-s); padding: 8px 10px; font-weight: 700; }
+.sc-note { font-size: 0.75rem; color: var(--muted); margin: 0 0 8px; }
+.sc-effect span { display: block; font-size: 0.75rem; color: var(--gold); font-weight: 600; }
+@keyframes cardFlip { from { transform: perspective(800px) rotateY(90deg) scale(0.9); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* 結尾 */
+.result-needs { display: flex; justify-content: space-around; margin: 8px 0; }
+.saved { text-align: center; font-weight: 700; color: var(--gold-2); margin: 0; }
+.moments { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.moments li { display: flex; gap: 10px; align-items: center; }
+.m-icon { display: flex; gap: 2px; flex: none; }
+.mi-card .art.art-card { width: 46px; height: auto; display: block; border-radius: 5px; }
+.bible-cmp { margin: 10px 0 0; font-size: 0.85rem; color: var(--muted); border-top: 1px dashed var(--line); padding-top: 8px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .story-card, .need.big { animation: none; }
+  .tray-item.off .ti-pic { transition: none; }
+  .bo-head h1, .bo-bolt { animation: none; }
+}

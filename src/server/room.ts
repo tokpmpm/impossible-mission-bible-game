@@ -1,7 +1,11 @@
-// 房間層：玩家、職能分派、線索、修復分派、權限、重連、結尾回顧。伺服器權威；規則交給 src/engine。
+// 房間層：玩家、職能分派、故事卡、線索、補船分派、權限、重連、結尾回顧。伺服器權威；規則交給 src/engine。
 import {
+  activeCards,
+  aboardOf,
   apply,
   createGame,
+  crisisAtFor,
+  dawnOpensAt,
   eliminationClueCount,
   evaluate,
   seedOf,
@@ -11,32 +15,34 @@ import {
   type GameState,
 } from '../engine/game.ts';
 import { REASON_TEXT, evaluatePlan, type Evaluation, type RejectReason } from '../engine/rules.ts';
-import { SEEDS, VILLAGES, cargoItems, displayName, type RouteId, type SeedId } from '../engine/seeds.ts';
+import { CARDS, DECK_A, DECK_B, ITEMS, NEEDS, type CardId, type ItemId, type NeedId, type SeedId } from '../engine/seeds.ts';
 import { describeSymbol, makeEliminationClues, makeSlots, parseSymbol, rng } from '../engine/symbols.ts';
 import {
   ASKS,
+  BIBLE_THROWS,
   CAMEOS,
+  CARD_TEXT,
   CLUES,
-  ENG_ASKS_WITH_STORE,
+  ENDING_VERSES,
   FACTS,
-  QUESTIONS,
-  TIPS,
   HINT_ROLE,
+  HINT_TEXT,
+  OBSERVER_ASKS_WITH_SCOUT,
   PREFERENCES,
-  QUERY_QUESTIONS,
-  QUERY_REPLIES,
+  QUESTIONS,
   ROLE_BUNDLES,
   ROLES,
   SPLIT_FROM,
-  VERSES,
+  STORY,
   type Preference,
   type RoleId,
 } from './content.ts';
-import type { Action, Rejection, View, ViewPhase } from './view.ts';
+import type { Action, CardView, MomentView, Rejection, View, ViewPhase } from './view.ts';
 
 export const INTRO_MS = 60_000;
 export const MIN_PLAYERS = 3;
 export const MAX_PLAYERS = 10;
+export const SEED_ID: SeedId = 'ship 001';
 
 export interface Player {
   id: string;
@@ -57,26 +63,27 @@ interface Round {
   participants: string[];
   roles: Map<string, RoleId[]>;
   engineerId: string;
-  slotHolders: string[]; // 第 i 格符號在誰手上
+  slotHolders: string[]; // 第 i 格記號在誰手上
   clueHolders: Map<string, string>; // 排除線索
   prefHolderId: string | null;
-  /** 手電筒是玩家自己帶的（true）還是倉庫配給的（false）。 */
+  /** 油燈是玩家自己帶的（true）還是倉庫配給的（false）。 */
   prefByItem: boolean;
   actors: { kind: string; playerId: string; at: number }[];
   thanks: Map<string, string>;
-  queryReply: string | null;
-  /** 突破口第 n 段線索在誰手上（同一支手機不會拿到兩段，ADR-0003 第 26 條）。 */
+  /** 突破口第 n 段線索在誰手上（三段在三支手機）。 */
   btHolders: Map<number, string>;
 }
 
 const EXTRA_REASON_TEXT: Record<string, string> = {
-  GREEN_NOT_LOCKABLE: '故事安全窗不足：綠線山路 6 分鐘，洪水第 5 分鐘就到',
   WRONG_PHASE: '現在不能做這個動作',
   TOO_EARLY: '還在認識隊友的時間',
+  PINNED: '船主不准丟',
+  NO_FOOD: '糧食不在船上',
+  ALREADY_FED: '已經吃過了',
 };
 
 function reasonText(r: string, overweight = 0): string {
-  if (r === 'OVERWEIGHT' && overweight > 0) return `超重 ${overweight} kg`;
+  if (r === 'OVERWEIGHT' && overweight > 0) return `超重 ${overweight}`;
   return REASON_TEXT[r as RejectReason] ?? EXTRA_REASON_TEXT[r] ?? r;
 }
 
@@ -85,6 +92,19 @@ function randomId(len = 16): string {
   let s = '';
   for (let i = 0; i < len; i++) s += chars[Math.floor(Math.random() * chars.length)];
   return s;
+}
+
+/** 會改變最佳留法的卡（與 tools/verify_seeds.py 的 changes() 輸出一致，test 有比對）。 */
+export const PLAN_CHANGERS: CardId[] = ['A1', 'A3', 'A4', 'B1', 'B3', 'B5'];
+
+function cardView(id: CardId, alreadyGone: ItemId[] = []): CardView {
+  const v = { id, deck: CARDS[id].deck, ...CARD_TEXT[id] };
+  // 卡片要帶走的東西早就被你們丟了：照實說，不假裝有影響
+  const removes = CARDS[id].remove ?? [];
+  if (removes.length && removes.every((i) => alreadyGone.includes(i))) {
+    v.effect = `${removes.join('、')}你們早就丟進海裡了，這件事沒有再改變什麼。` + (CARDS[id].weight ? '（其他效果照常）' : '');
+  }
+  return v;
 }
 
 export class Room {
@@ -190,14 +210,11 @@ export class Room {
     const ready = this.connectedPlayers();
     if (ready.length < MIN_PLAYERS) throw new Error('至少要 3 人才能開始');
     const participants = ready.slice(0, MAX_PLAYERS).map((p) => p.id);
-    const lastSeed = this.round?.seedId;
-    const seedId: SeedId = lastSeed === 'seed 001' ? 'seed 002' : 'seed 001';
-    this.startRound(participants, seedId);
+    this.startRound(participants);
   }
 
   next(byId: string): void {
     if (byId !== this.hostId) throw new Error('只有房主可以開下一局');
-    // 結束的那局刪掉離開的人
     this.players = this.players.filter((p) => !p.left);
     this.start(byId);
   }
@@ -211,7 +228,36 @@ export class Room {
     return a;
   }
 
-  private startRound(participants: string[], seedId: SeedId): void {
+  /** 抽故事卡：同一個房間盡量不重複最近抽過的。 */
+  private usedCards: CardId[] = [];
+  /** 測試用：指定下一局的故事卡。 */
+  forceCards: { a: CardId; b: CardId } | null = null;
+  private drawCards(): { a: CardId; b: CardId } {
+    if (this.forceCards) {
+      const c = this.forceCards;
+      this.forceCards = null;
+      this.usedCards.push(c.a, c.b);
+      return c;
+    }
+    const pick = (deck: CardId[]) => {
+      const fresh = deck.filter((c) => !this.usedCards.includes(c));
+      const pool = fresh.length ? fresh : deck;
+      return pool[Math.floor(this.random() * pool.length)];
+    };
+    let a = pick(DECK_A);
+    let b = pick(DECK_B);
+    // 首局至少一張會改變最佳留法的卡（tools/verify_seeds.py 的「改變該怎麼做」清單），第一局就感覺得到卡片的作用
+    if (this.roundsPlayed === 0 && !PLAN_CHANGERS.includes(a) && !PLAN_CHANGERS.includes(b)) {
+      const pool = DECK_B.filter((c) => PLAN_CHANGERS.includes(c));
+      b = pool[Math.floor(this.random() * pool.length)];
+    }
+    this.usedCards.push(a, b);
+    // 一疊 5 張：抽滿一輪就重新開始，但不立刻重複上一局
+    if (this.usedCards.length >= 8) this.usedCards = [a, b];
+    return { a, b };
+  }
+
+  private startRound(participants: string[]): void {
     const n = participants.length;
     const bundles = ROLE_BUNDLES[n];
     const order = this.rotatedOrder(participants, bundles);
@@ -226,23 +272,23 @@ export class Room {
     const slotHolders = nonEng.slice(0, k);
     const clueTexts = makeEliminationClues(slots, eliminationClueCount(n), symbolSeed);
     const clueHolders = new Map<string, string>();
-    nonEng.slice(k).forEach((pid, i) => clueHolders.set(pid, clueTexts[i] ?? '正確的符號都在選項裡，仔細聽隊友描述。'));
+    nonEng.slice(k).forEach((pid, i) => clueHolders.set(pid, clueTexts[i] ?? '正確的記號都在選項裡，仔細聽隊友形容。'));
 
-    // 手電筒：從自己帶手電筒的非工程師抽一位；沒有就由倉庫配給一位非工程師（公開顯示是誰，不用暗中找人）
-    const carriers = this.shuffle(nonEng.filter((pid) => this.get(pid)?.pref === 'flashlight'));
+    // 油燈：從自己帶油燈的非木匠抽一位；沒有就由倉庫配給一位非木匠（公開顯示是誰）
+    const carriers = this.shuffle(nonEng.filter((pid) => this.get(pid)?.pref === 'lamp'));
     const prefHolderId = carriers[0] ?? nonEng[Math.floor(this.random() * nonEng.length)] ?? null;
-    const channel = String(100 + Math.floor(this.random() * 900));
     const grayOrder = slots.map((s) => this.shuffle(s.options));
+    const cards = this.drawCards();
 
     const firstRound = this.roundsPlayed === 0;
     this.roundsPlayed++;
-    const btHolders = this.assignBreakthrough(seedId, participants, roles);
+    const btHolders = this.assignBreakthrough(participants, roles);
     this.round = {
       no: this.roundsPlayed,
-      seedId,
+      seedId: SEED_ID,
       startedAt: this.now(),
       firstRound,
-      game: createGame({ seedId, playerCount: n, firstRound, slots, channel, grayOrder, lockOpensAt: this.introMs }),
+      game: createGame({ seedId: SEED_ID, playerCount: n, firstRound, slots, cards, grayOrder, lockOpensAt: this.introMs }),
       participants,
       roles,
       engineerId,
@@ -252,16 +298,12 @@ export class Room {
       prefByItem: carriers.length > 0,
       actors: [],
       thanks: new Map(),
-      queryReply: null,
       btHolders,
     };
     this.touch();
   }
 
-  /**
-   * 職能分派：第二局起盡量讓每個人拿到和上一局不同的職能，才會跟不同的人說話（ADR-0003 第 35 條）。
-   * 試幾種洗牌，挑「和上一局同職能的人」最少的那一種。
-   */
+  /** 職能分派：第二局起盡量讓每個人拿到和上一局不同的職能（ADR-0003 第 35 條）。 */
   private rotatedOrder(participants: string[], bundles: RoleId[][]): string[] {
     const prev = this.round?.roles;
     let best = this.shuffle(participants);
@@ -283,14 +325,12 @@ export class Room {
     return parent ? Room.holderIn(participants, roles, parent) : null;
   }
 
-  /**
-   * 突破口三段線索本來依職能分給三個人；人少時兩段可能落在同一支手機（例：3 人局通訊＋工程）。
-   * 這時把後面那段轉給還沒拿到突破口線索的隊友，確保三段在三支手機上，一定要開口合作。
-   */
-  private assignBreakthrough(seedId: SeedId, participants: string[], roles: Map<string, RoleId[]>): Map<number, string> {
+  /** 突破口三段線索依職能分給三個人；兩段落在同一支手機時，把後面那段轉給還沒拿到的隊友。 */
+  private assignBreakthrough(participants: string[], roles: Map<string, RoleId[]>): Map<number, string> {
     const out = new Map<number, string>();
     const taken = new Set<string>();
-    for (const c of CLUES[seedId].filter((x) => x.breakthrough).sort((a, b) => a.breakthrough! - b.breakthrough!)) {
+    // 第 3 段（伙房，有吃飯按鈕）先排，確保按鈕與線索在同一支手機
+    for (const c of CLUES.filter((x) => x.breakthrough).sort((a, b) => b.breakthrough! - a.breakthrough!)) {
       let holder = Room.holderIn(participants, roles, c.role);
       if (!holder || taken.has(holder)) holder = participants.find((p) => !taken.has(p)) ?? holder;
       if (!holder) continue;
@@ -320,8 +360,8 @@ export class Room {
   private signature(): string {
     const g = this.round?.game;
     if (!g) return '';
-    // 認識隊友時間結束（intro → planning）也要廣播，手機才會換畫面
-    return [g.phase, this.elapsed() >= this.introMs, g.hint.shown, g.repair?.assistLevel, g.crisisAt, g.result?.stars].join('|');
+    const open = dawnOpensAt(g);
+    return [g.phase, this.elapsed() >= this.introMs, g.hint.shown, g.repair?.assistLevel, g.crisisAt, g.result?.stars, open !== null && g.now >= open].join('|');
   }
 
   private online(pid: string): boolean {
@@ -366,26 +406,23 @@ export class Room {
     const r = this.round!;
     if (!r.participants.includes(pid)) return false;
     switch (a.type) {
-      case 'selectRoute':
-        return this.operatorOf('nav') === pid;
       case 'setItem':
         return this.operatorOf('supply') === pid;
       case 'lock':
       case 'depart':
-        return true;
+        return this.operatorOf('nav') === pid;
       case 'repairPick':
         return this.operatorOf('eng') === pid;
       case 'useEliminate':
         return this.effectivePrefHolder() === pid;
-      case 'floodgate':
-      case 'query':
+      case 'eat':
         return this.operatorOf('comms') === pid;
     }
   }
 
   /**
    * 執行一個動作。重複送出（同一個 id）會被忽略並回傳 null；
-   * 被規則擋下時回傳 Rejection（原因＋下一步），讓按的那支手機知道發生什麼事。
+   * 被規則擋下時回傳 Rejection（原因＋下一步）。
    */
   act(pid: string, actId: string, a: Action): Rejection | null {
     const p = this.get(pid);
@@ -395,14 +432,11 @@ export class Room {
     if (p.seenActs.length > 300) p.seenActs.shift();
     const r = this.round;
     if (!r) throw new Error('還沒開始');
-    if (!this.permitted(pid, a)) throw new Error('這個操作在別的隊友手機上，請找他幫忙');
+    if (!this.permitted(pid, a)) throw new Error('這不是你負責的操作');
     const at = this.elapsed();
     const event = { ...a, at } as GameEvent;
     const before = r.game;
     r.game = apply(r.game, event);
-    if (a.type === 'query' && !before.query.used && r.game.query.used) {
-      r.queryReply = QUERY_REPLIES[`${a.village}:${a.question}`] ?? null;
-    }
     r.actors.push({ kind: a.type, playerId: pid, at });
     this.touch();
     if (r.game.rejections > before.rejections && r.game.lastRejection) {
@@ -420,48 +454,27 @@ export class Room {
 
   /** 拒絕原因＋下一步（不直接給答案）。at：局內經過毫秒。 */
   advice(code: string, pid: string, at = this.elapsed(), ev?: Evaluation): string {
-    const r = this.round!;
-    const g = r.game;
-    const seed = seedOf(g);
+    const g = this.round!.game;
     ev ??= evaluate(g);
-    const route = g.plan.route;
-    const routeName = (id: RouteId) => `${id}線`;
     switch (code) {
-      case 'NO_ROUTE':
-        return `還沒選路線：請${this.whoDoes('nav', pid)}選一條`;
       case 'OVERWEIGHT':
-        return `超重 ${ev.overweight} kg，請${this.whoDoes('supply', pid)}放下一樣`;
-      case 'ROAD_CLOSED': {
-        const others = (['紅', '藍', '綠'] as RouteId[]).filter((id) => id !== route && seed.crisis.closed !== id).map(routeName);
-        return `${route ? seed.routes[route].label : '這條路'}斷了，請${this.whoDoes('nav', pid)}改選${others.join('或')}`;
-      }
-      case 'TOO_LATE': {
-        const travel = ev.travel ?? 0;
-        const safe = ev.safeWindow ?? seed.flood;
-        const head = `${route ? routeName(route) : '這條路'}要 ${travel} 分鐘，洪水 ${safe} 分鐘就到，來不及`;
-        const b = seed.breakthrough;
-        if (b.kind === 'floodgate' && route === b.route && !g.floodgate && g.crisisAt !== null) {
-          return `${head}：找找有沒有辦法拖住洪水，或請${this.whoDoes('nav', pid)}換一條更快的路`;
-        }
-        return `${head}：請${this.whoDoes('nav', pid)}換一條更快的路`;
-      }
-      case 'GREEN_NOT_LOCKABLE': {
-        const travel = seed.routes['綠'].travel;
-        return `綠線要 ${travel} 分鐘，洪水 ${seed.flood} 分鐘就到，現在還來不及：請${this.whoDoes('nav', pid)}先選一條更快的路`;
-      }
-      case 'NO_NEEDS':
-        return `車上沒有村子需要的東西：問問${this.whoDoes('comms', pid)}各村要什麼，再請${this.whoDoes('supply', pid)}裝上`;
+        return `超重 ${ev.overweight}：請${this.whoDoes('supply', pid)}再丟一樣`;
       case 'NOT_POWERED':
-        return `還在停電：先幫工程師 ${this.nick(this.operatorOf('eng'))} 修好電力`;
-      case 'NOT_RELEASED': {
-        const b = seed.breakthrough;
-        const item = b.kind === 'query' ? displayName(seed, b.item) : '這樣物資';
-        return `${item}還沒發放，現在還不能裝上車`;
+        return `天太黑了：先幫木匠 ${this.nick(this.operatorOf('eng'))} 補好船`;
+      case 'WAIT_DAWN': {
+        const open = dawnOpensAt(g) ?? at;
+        return `拋了錨，還在等天亮：再 ${Math.max(1, Math.ceil((open - at) / 1000))} 秒`;
       }
       case 'TOO_EARLY': {
         const sec = Math.max(1, Math.ceil((g.lockOpensAt - at) / 1000));
-        return `先花 1 分鐘認識隊友、交換情報；再 ${sec} 秒就能鎖定。方案可以先排`;
+        return `先花 1 分鐘認識隊友、交換情報；再 ${sec} 秒就能決定。東西可以先丟`;
       }
+      case 'PINNED':
+        return '船主不准丟麥子（風暴變大以前）';
+      case 'NO_FOOD':
+        return `糧食已經丟進海裡了：請${this.whoDoes('supply', pid)}先撈回來`;
+      case 'ALREADY_FED':
+        return '大家已經吃過了';
       default:
         return reasonText(code);
     }
@@ -472,9 +485,9 @@ export class Room {
     const r = this.round!;
     const out: View['nextSteps'] = [];
     const used = new Set<string>([pid]);
-    const storePresent = r.participants.some((p) => r.roles.get(p)!.includes('store'));
+    const scoutPresent = r.participants.some((p) => r.roles.get(p)!.includes('scout'));
     for (const role of r.roles.get(pid) ?? []) {
-      for (const ask of role === 'eng' && storePresent ? ENG_ASKS_WITH_STORE : ASKS[role]) {
+      for (const ask of role === 'observer' && scoutPresent ? OBSERVER_ASKS_WITH_SCOUT : ASKS[role]) {
         const to = Room.holderIn(r.participants, r.roles, ask.to);
         if (!to || used.has(to)) continue;
         used.add(to);
@@ -496,6 +509,28 @@ export class Room {
 
   private nick(pid: string | null | undefined): string {
     return (pid && this.get(pid)?.nickname) || '隊友';
+  }
+
+  /** 我這局的任務：沒有按鈕的人也知道自己在做什麼。 */
+  private myTask(pid: string, phase: ViewPhase): string | null {
+    const r = this.round!;
+    const mine = r.roles.get(pid) ?? [];
+    if (phase === 'intro' || phase === 'planning') {
+      if (this.operatorOf('supply') === pid) return '你決定丟什麼：按一下東西＝丟進海裡，再按一下撈回來。';
+      if (this.operatorOf('nav') === pid) return '大家講好了，就由你按「決定好了」。';
+      if (this.nextSteps(pid).length) return null; // 「下一步」已經說了要找誰
+      return `把你知道的告訴 ${this.nick(this.operatorOf('supply'))}（管倉），他負責丟東西。`;
+    }
+    if (phase === 'replanning') {
+      if (this.operatorOf('supply') === pid) return '浪更大了，船只能留 4：再決定一次丟什麼。';
+      if (this.operatorOf('nav') === pid) return '大家都準備好了，就由你按「衝向海灘」。';
+      if (this.operatorOf('comms') === pid) return '你管全船的飯。';
+      const r2 = this.round!;
+      const hasNew = [...r2.btHolders.values()].includes(pid);
+      if (hasNew) return `你有新線索：說給 ${this.nick(this.operatorOf('supply'))}（管倉）和 ${this.nick(this.operatorOf('comms'))}（伙房）聽。`;
+      if (mine.length) return `去問問大家：電來了以後，誰有新發現？`;
+    }
+    return null;
   }
 
   view(pid: string, joinUrl: string, qrSvg: string | null): View {
@@ -528,46 +563,41 @@ export class Room {
       },
       players: this.players
         .filter((p) => !p.left)
-        .map((p) => ({
-          id: p.id,
-          nickname: p.nickname,
-          connected: p.connected,
-          isHost: p.id === this.hostId,
-          pref: p.pref,
-          roles: r && r.participants.includes(p.id) ? r.roles.get(p.id)!.map((x) => ROLES[x].name) : [],
-        })),
+        .map((p) => {
+          const ids = r && r.participants.includes(p.id) ? r.roles.get(p.id)! : [];
+          return { id: p.id, nickname: p.nickname, connected: p.connected, isHost: p.id === this.hostId, pref: p.pref, roles: ids.map((x) => ROLES[x].name), roleIds: ids };
+        }),
       phase,
       round: null,
-      plan: null,
+      story: null,
+      cards: { a: null, b: null },
+      ship: null,
+      myTask: null,
+      nextSteps: [],
       can: {
         start: this.hostId === pid && (!r || finished) && this.connectedPlayers().length >= MIN_PLAYERS,
-        route: false,
         items: false,
         lock: false,
         depart: false,
         repair: false,
         eliminate: false,
-        floodgate: false,
-        query: false,
+        eat: false,
         next: false,
       },
+      eatNeedsFood: false,
       clues: [],
       hint: null,
       preferenceHint: null,
-      tip: null,
       crisis: null,
       repair: null,
-      breakthrough: null,
       result: null,
-      operators: null,
-      nextSteps: [],
     };
     if (!r || !g || !participant) return v;
 
     const seed = seedOf(g);
     const ev = evaluate(g);
-    const shownReasons = ev.reasons.filter((x) => !(g.phase === 'planning' && x === 'NOT_POWERED'));
     const editable = g.phase === 'planning' || g.phase === 'replanning';
+    const powered = g.powerAt !== null;
     v.round = {
       no: r.no,
       seedId: r.seedId,
@@ -578,106 +608,92 @@ export class Room {
       timeLimitMs: TIME_UP_AT,
       introMs: this.introMs,
       lockOpensAt: r.startedAt + g.lockOpensAt,
+      crisisAt: r.startedAt + crisisAtFor(g.cards),
     };
-    const routeView = (id: RouteId) => ({
-      id,
-      label: seed.routes[id].label,
-      travel: seed.routes[id].travel,
-      tool: seed.routes[id].tool ? displayName(seed, seed.routes[id].tool!) : null,
-      closed: g.crisisAt !== null && seed.crisis.closed === id,
-    });
-    const b = seed.breakthrough;
-    v.plan = {
-      route: g.plan.route ? routeView(g.plan.route) : null,
-      routes: (['紅', '藍', '綠'] as RouteId[]).map(routeView),
-      items: g.plan.items.map((i) => displayName(seed, i)),
-      // 尚未發放的物資（淨水錠）不出現在物資列：不先劇透突破口，發放時才「冒出來」
-      itemChoices: cargoItems(seed)
-        .filter((i) => !(b.kind === 'query' && b.item === i && !g.released))
-        .map((i) => ({
-        id: i,
-        name: displayName(seed, i),
-        on: g.plan.items.includes(i),
-        locked: b.kind === 'query' && b.item === i && !g.released,
-      })),
+    const storyKey = phase === 'intro' ? 'intro' : phase === 'planning' ? 'planning' : phase === 'blackout' ? 'blackout' : phase === 'replanning' ? 'replanning' : 'landing';
+    v.story = { ...STORY[storyKey] };
+    const thrownBeforeB = g.planAtCrisis ? ITEMS.filter((i) => !g.planAtCrisis!.items.includes(i)) : [];
+    v.cards = { a: cardView(g.cards.a), b: powered ? cardView(g.cards.b, thrownBeforeB) : null };
+
+    // 船：6 樣東西的狀態
+    const { aboard, pinned, weights } = aboardOf(g);
+    const shownReasons = ev.reasons.filter((x) => !(g.phase === 'planning' && x === 'NOT_POWERED'));
+    const showNeeds = g.crisisAt !== null;
+    const fedEntry = g.log.find((l) => l.kind === 'eat');
+    const fedActor = [...r.actors].reverse().find((a) => a.kind === 'eat' && fedEntry && a.at === fedEntry.at);
+    const dawn = dawnOpensAt(g);
+    v.ship = {
+      items: ITEMS.map((id) => ({ id, weight: weights[id], onShip: g.plan.items.includes(id), gone: !aboard.includes(id), pinned: pinned.includes(id) })),
       weight: ev.weight,
       cap: ev.cap,
       overweight: ev.overweight,
-      safeWindow: ev.safeWindow,
-      reachable: ev.reachable,
-      showReach: g.crisisAt !== null,
+      needs: showNeeds ? NEEDS.map((id) => ({ id, lit: ev.served.includes(id) })) : null,
+      stars: showNeeds ? ev.stars : null,
       reasons: shownReasons.map((x) => reasonText(x, ev.overweight)),
       reasonCodes: shownReasons,
       advice: shownReasons.map((x) => this.advice(x, pid, elapsed, ev)),
       locked: g.locked,
-      // at 換成伺服器時間（原本是局內毫秒，前端拿去和時鐘比，永遠過期）
+      fed: g.fed,
+      fedAt: fedEntry ? r.startedAt + fedEntry.at : null,
+      fedBy: fedActor ? this.nick(fedActor.playerId) : null,
+      dawnAt: dawn !== null ? r.startedAt + dawn : null,
       lastRejection: g.lastRejection
-        ? {
-            at: r.startedAt + g.lastRejection.at,
-            action: g.lastRejection.action,
-            reasons: g.lastRejection.reasons.map((x) => reasonText(x, ev.overweight)),
-          }
+        ? { at: r.startedAt + g.lastRejection.at, action: g.lastRejection.action, reasons: g.lastRejection.reasons.map((x) => reasonText(x, ev.overweight)) }
         : null,
     };
-    v.operators = {
-      route: this.nick(this.operatorOf('nav')),
-      items: this.nick(this.operatorOf('supply')),
-      comms: this.nick(this.operatorOf('comms')),
-      repair: this.nick(this.operatorOf('eng')),
-    };
+    v.myTask = this.myTask(pid, phase);
     v.nextSteps = this.nextSteps(pid);
-    v.can.route = editable && this.operatorOf('nav') === pid;
     v.can.items = editable && this.operatorOf('supply') === pid;
-    v.can.lock = g.phase === 'planning';
-    v.can.depart = g.phase === 'replanning';
+    v.can.lock = g.phase === 'planning' && this.operatorOf('nav') === pid;
+    v.can.depart = g.phase === 'replanning' && this.operatorOf('nav') === pid;
+    v.can.eat = g.phase === 'replanning' && !g.fed && this.operatorOf('comms') === pid;
+    v.eatNeedsFood = v.can.eat && !g.plan.items.includes(seed.food);
     v.can.next = finished && this.hostId === pid;
 
     // 線索：自己的職能，加上不在場的拆分職能
     const present = new Set(r.participants.flatMap((p) => r.roles.get(p)!));
     const mine = new Set<RoleId>(myRoles);
     for (const [split, parent] of Object.entries(SPLIT_FROM) as [RoleId, RoleId][]) {
-      // 備援觀察的「修復面板」只是停電小撇步，和工程自己的線索重複；不在場時不轉給工程，省一條（2026-11-15）
-      if (split === 'backup') continue;
       if (!present.has(split) && mine.has(parent)) mine.add(split);
     }
-    const powered = g.phase === 'replanning' || g.phase === 'settled' || (g.phase === 'ended' && !!g.repair?.doneAt);
-    // 拆分職能不在場（例如 6 人以下的倉儲管理）時，標籤顯示原職能，不出現玩家沒聽過的職能名稱
     const roleLabel = (role: RoleId) => (present.has(role) ? ROLES[role].name : ROLES[SPLIT_FROM[role] ?? role].name);
-    v.clues = CLUES[r.seedId]
-      .filter((c) => (c.breakthrough ? r.btHolders.get(c.breakthrough) === pid : mine.has(c.role)))
-      .filter((c) => c.when === 'start' || (c.when === 'crisis' && g.crisisAt !== null) || (c.when === 'power' && powered))
+    const publicFirst = activeCards(g).some((c) => CARDS[c].publicClue);
+    v.clues = CLUES.filter((c) => {
+      if (c.breakthrough) return r.btHolders.get(c.breakthrough) === pid || (c.breakthrough === 1 && publicFirst);
+      if (c.onlyPresent && !myRoles.includes(c.role)) return false;
+      return mine.has(c.role);
+    })
+      .filter((c) => c.when === 'start' || (c.when === 'power' && powered))
       .filter((c) => !(c.untilPower && powered))
       .map((c) => {
-        const moved = !!c.breakthrough && !mine.has(c.role);
+        const holder = c.breakthrough ? r.btHolders.get(c.breakthrough) : null;
+        const shared = !!c.breakthrough && holder !== pid;
+        const moved = !!c.breakthrough && !shared && !mine.has(c.role);
         return {
           title: c.title,
-          text: c.text.replace('{channel}', g.channel),
-          role: moved ? `${roleLabel(c.role)}・由你保管` : roleLabel(c.role),
+          text: c.text,
+          role: shared ? `${ROLES[c.role].name}・大家都聽到了` : moved ? `${roleLabel(c.role)}・由你保管` : roleLabel(c.role),
           when: c.when,
+          item: c.item,
+          need: c.need,
           breakthrough: c.breakthrough,
+          shared,
         };
       });
 
-    if (g.hint.shown && g.phase === 'planning' && this.holderOf(HINT_ROLE[r.seedId]) === pid) v.hint = seed.hintText;
+    if (g.hint.shown && g.phase === 'planning' && this.holderOf(HINT_ROLE) === pid) v.hint = HINT_TEXT;
 
     const prefHolder = this.effectivePrefHolder();
     if (!finished && prefHolder) {
       const own = r.prefByItem && prefHolder === r.prefHolderId;
-      if (prefHolder === pid) v.preferenceHint = own ? '你帶了手電筒：停電時可以照亮面板一次，幫工程師灰掉兩個錯誤選項。' : '倉庫配給你一支手電筒：停電時可以照亮面板一次，幫工程師灰掉兩個錯誤選項。';
-      else v.preferenceHint = own ? `帶手電筒的 ${this.nick(prefHolder)} 可以照亮面板一次。` : `倉庫配給 ${this.nick(prefHolder)} 一支手電筒，可以照亮面板一次。`;
+      if (prefHolder === pid) v.preferenceHint = own ? '你帶了油燈：黑暗中可以照亮面板一次，幫木匠灰掉兩個錯誤選項。' : '倉庫配給你一盞油燈：黑暗中可以照亮面板一次，幫木匠灰掉兩個錯誤選項。';
+      else v.preferenceHint = own ? `帶油燈的 ${this.nick(prefHolder)} 可以照亮面板一次。` : `倉庫配給 ${this.nick(prefHolder)} 一盞油燈，可以照亮面板一次。`;
     }
-    // 老智慧：規劃開始、停電、電來了各一句（不說教，只當隊伍小提示）
-    if (g.phase === 'planning') v.tip = { ...TIPS.planning };
-    else if (g.phase === 'blackout') v.tip = { ...TIPS.blackout };
-    else if (g.phase === 'replanning') v.tip = { ...TIPS.replanning };
 
     if (g.crisisAt !== null) {
-      let extra: string | null = null;
-      if (seed.crisis.closed && g.planAtCrisis?.route !== seed.crisis.closed) extra = '吊橋斷了，原本唯一能三村全送的路沒了。';
-      if (g.crisisCause === 'timeout') extra = (extra ? extra + ' ' : '') + '時間到了，危機照常發生——別擔心，還有機會。';
-      // 揭曉：危機發生前，你們的方案原本能送到幾村
-      const before = g.planAtCrisis ? evaluatePlan(seed, g.planAtCrisis, { crisis: false, powerOn: true, floodgate: false, released: false }).reachable : 0;
-      v.crisis = { title: seed.crisis.title, text: seed.crisis.text, at: r.startedAt + g.crisisAt, cause: g.crisisCause!, extra, reachBefore: before };
+      // 揭曉：風暴變大前，你們的方案原本顧好幾件
+      const before = g.planAtCrisis ? evaluatePlan(seed, g.planAtCrisis, { crisis: false, powerOn: true, fed: false, cards: [g.cards.a] }).stars : 0;
+      v.crisis = { at: r.startedAt + g.crisisAt, cause: g.crisisCause!, starsBefore: before };
     }
 
     if (g.repair) {
@@ -712,21 +728,6 @@ export class Room {
       v.can.eliminate = g.phase === 'blackout' && !rep.eliminateUsed && prefHolder === pid;
     }
 
-    if (powered) {
-      const done = b.kind === 'floodgate' ? g.floodgate : g.released;
-      v.breakthrough = {
-        kind: b.kind,
-        done,
-        queryUsed: g.query.used,
-        queryReply: r.queryReply,
-        floodgateWrongCount: g.log.filter((l) => l.kind === 'floodgate_wrong').length,
-        questions: (Object.keys(QUERY_QUESTIONS) as (keyof typeof QUERY_QUESTIONS)[]).map((id) => ({ id, text: QUERY_QUESTIONS[id] })),
-      };
-      const commsOp = this.operatorOf('comms') === pid;
-      v.can.floodgate = g.phase === 'replanning' && b.kind === 'floodgate' && !g.floodgate && commsOp;
-      v.can.query = g.phase === 'replanning' && b.kind === 'query' && !g.query.used && commsOp;
-    }
-
     if (finished) v.result = this.resultView(pid);
     return v;
   }
@@ -734,70 +735,64 @@ export class Room {
   private resultView(pid: string): NonNullable<View['result']> {
     const r = this.round!;
     const g = r.game;
-    const seed = seedOf(g);
     const stars = g.result?.stars ?? 0;
-    const served = g.result?.served ?? [];
-    const titles = { 3: '三村都送到了！', 2: '任務成功', 1: '送出了一部分救援', 0: '這次沒來得及出發' } as const;
-    const nextSeed: SeedId = r.seedId === 'seed 001' ? 'seed 002' : 'seed 001';
+    const served = (g.result?.served ?? []) as NeedId[];
+    const titles = { 3: '上岸很順利！', 2: '平安上岸', 1: '上岸了，有點狼狽', 0: '大家還是都上了岸' } as const;
     const k = r.no - 1;
     return {
       stars,
       title: titles[stars],
-      served: [...served],
-      unserved: VILLAGES.filter((v) => !served.includes(v)),
+      lit: { 力氣: served.includes('力氣'), 船身: served.includes('船身'), 天亮: served.includes('天亮') },
       cause: g.result?.cause ?? 'ended',
       moments: this.moments(),
-      verse: this.verse(),
+      bible: BIBLE_THROWS,
+      verse: g.fed ? { ...ENDING_VERSES.fed } : { ...ENDING_VERSES.shore },
       fact: FACTS[k % FACTS.length],
       question: QUESTIONS[k % QUESTIONS.length],
       thanks: [...r.thanks.entries()].map(([from, to]) => ({ from: this.nick(from), to: this.nick(to) })),
       myThanks: r.thanks.get(pid) ?? null,
-      nextSeedTitle: SEEDS[nextSeed].title,
     };
   }
 
-  /** 這局真的發生的事（系統紀錄＋背包物品出場），有名字，最多 4 條。不虛構互助、不評誰最重要。 */
-  moments(): string[] {
+  /** 這局真的發生的事（系統紀錄＋故事卡＋背包物品出場），有名字。不虛構互助、不評誰最重要。 */
+  moments(): MomentView[] {
     const r = this.round!;
     const g = r.game;
-    const out: string[] = [];
+    const out: MomentView[] = [];
+    out.push({ icon: { kind: 'card', ids: [g.cards.a] }, text: `起風時：${CARD_TEXT[g.cards.a].title}（${CARD_TEXT[g.cards.a].ref}）` });
+    // 你們丟了什麼（玩家自己丟的；故事卡帶走的另外算）
+    const finalPlan = g.plan.items;
+    const cardGone = new Set<ItemId>();
+    for (const l of g.log) if (l.kind === 'card') for (const i of l.data!.gone as ItemId[]) cardGone.add(i);
+    const thrown = ITEMS.filter((i) => !finalPlan.includes(i) && !cardGone.has(i) && !(g.fed && i === seedOf(g).food) && !(CARDS[g.cards.a].remove ?? []).includes(i));
+    if (thrown.length) out.push({ icon: { kind: 'item', ids: thrown }, text: `你們把${thrown.join('、')}丟進了海裡。` });
     const restored = g.log.find((l) => l.kind === 'power_restored');
     if (restored) {
       const engPick = [...r.actors].reverse().find((a) => a.kind === 'repairPick');
       const eng = this.nick(engPick?.playerId ?? r.engineerId);
       const helpers = [...new Set(r.slotHolders)].map((p) => this.nick(p)).join('、');
-      out.push(`停電時，${eng} 看不到符號，靠 ${helpers} 的描述修好了電。`);
+      out.push({ icon: { kind: 'role', ids: ['eng'] }, text: `黑暗中，${eng} 靠 ${helpers} 的形容補好了船。` });
+      out.push({ icon: { kind: 'card', ids: [g.cards.b] }, text: `風暴中：${CARD_TEXT[g.cards.b].title}（${CARD_TEXT[g.cards.b].ref}）` });
     }
     const elim = r.actors.find((a) => a.kind === 'useEliminate');
-    if (elim) out.push(`${this.nick(elim.playerId)} 用手電筒照亮了面板。`);
-    const btDone = r.seedId === 'seed 001' ? g.floodgate : g.released;
-    if (btDone) {
-      const names = [1, 2, 3].map((i) => this.nick(r.btHolders.get(i)));
-      out.push(
-        r.seedId === 'seed 001'
-          ? `${names[0]} 想起上游有閘門、${names[2]} 找到頻道、${names[1]} 開了閘門：山路來得及了。`
-          : `${names[0]} 知道淨水錠、${names[1]} 知道倉庫有貨、${names[2]} 問對了北村：三村都顧到了。`,
-      );
+    if (elim) out.push({ icon: { kind: 'pref', ids: ['lamp'] }, text: `${this.nick(elim.playerId)} 用油燈照亮了面板。` });
+    if (g.fed) {
+      const eater = r.actors.find((a) => a.kind === 'eat' && g.log.some((l) => l.kind === 'eat' && l.at === a.at));
+      const names = [1, 2].map((i) => this.nick(r.btHolders.get(i)));
+      out.push({ icon: { kind: 'scene', ids: ['meal'] }, text: `${names[0]} 說吃了才有力氣、${names[1]} 想到吃了船就輕，${this.nick(eater?.playerId)} 召集大家吃飯。` });
     }
-    // 背包物品出場：每種最多一位，依加入順序
-    for (const item of ['snack', 'raincoat', 'whistle'] as const) {
+    const served = (g.result?.served ?? []) as NeedId[];
+    const why: Record<NeedId, string> = {
+      力氣: g.fed ? '' : '力氣沒顧到：這局沒吃上飯，上岸時游得很吃力。',
+      船身: '船身沒顧到：沒留纜索，船尾被浪打得更碎。',
+      天亮: '等天亮沒顧到：沒留錨，夜裡差點撞上礁石。',
+    };
+    for (const n of NEEDS) if (!served.includes(n) && why[n]) out.push({ icon: { kind: 'need', ids: [n] }, text: why[n] });
+    out.push({ icon: { kind: 'scene', ids: ['landing'] }, text: '船擱淺了，大家有的游、有的抱著板子，都上了岸（27:41–44）。' });
+    for (const item of ['coat', 'nuts', 'song'] as const) {
       const p = this.players.find((x) => r.participants.includes(x.id) && x.pref === item);
-      if (p && out.length < 4) out.push(CAMEOS[item].replace('{name}', p.nickname));
+      if (p) out.push({ icon: { kind: 'pref', ids: [item] }, text: CAMEOS[item].replace('{name}', p.nickname) });
     }
     return out;
-  }
-
-  /** 一句經文配一件這局真的發生的事（林前 12 章）；兩局輪替不同經節。 */
-  verse(): { text: string; ref: string; link: string } {
-    const r = this.round!;
-    const g = r.game;
-    const restored = !!g.log.find((l) => l.kind === 'power_restored');
-    const btDone = r.seedId === 'seed 001' ? g.floodgate : g.released;
-    const opts: { text: string; ref: string; link: string }[] = [];
-    if (restored) opts.push({ ref: '林前 12:21', text: VERSES[21], link: '剛才工程師沒辦法說「我用不著你們」——沒有大家的描述，電修不好。' });
-    if (btDone) opts.push({ ref: '林前 12:14', text: VERSES[14], link: '三村都送到，靠的是三個人手上的三段線索接起來。' });
-    if ((g.result?.stars ?? 0) >= 2) opts.push({ ref: '林前 12:26', text: VERSES[26], link: '救援成功，是全隊一起的。' });
-    opts.push({ ref: '林前 12:27', text: VERSES[27], link: '這局每個人手上，都有別人需要的一塊。' });
-    return opts[(r.no - 1) % opts.length];
   }
 }

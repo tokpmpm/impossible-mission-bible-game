@@ -1,108 +1,67 @@
-// 第一關兩個固定種子。數值必須與 tools/verify_seeds.py 的 SEEDS 一致（由 test/golden.test.ts 逐筆比對）。
-// 物品代號沿用腳本（繩子、燈具…），顯示名稱另外對照（seed 002 叫長繩、頭燈）。
+// 第一關「保羅海難」（使徒行傳 27 章）的固定數值與故事卡效果。
+// 數值必須與 tools/verify_seeds.py 的 SEEDS／CARDS 一致（由 test/golden.test.ts 逐筆比對）。
+// 卡片的文字（經文、後果說明）是內容，放在 src/server/content.ts；這裡只放會影響規則的效果。
 
-export type RouteId = '紅' | '藍' | '綠';
-export type Village = '東村' | '西村' | '北村';
-export type SeedId = 'seed 001' | 'seed 002';
-
-export interface RouteDef {
-  label: string;
-  travel: number; // 故事分鐘
-  tool: string | null;
-}
-
-export interface FloodgateBreakthrough {
-  kind: 'floodgate';
-  route: RouteId;
-  value: number; // 啟動後該路線的安全窗（故事分鐘）
-}
-
-export interface QueryBreakthrough {
-  kind: 'query';
-  item: string; // 確認後才發放的物資
-  village: Village; // 可滿足的村
-  question: QueryQuestion; // 正確的問題
-}
-
-export type QueryQuestion = 'well' | 'road' | 'needs';
+export type SeedId = 'ship 001';
+export type ItemId = '糧食' | '纜索' | '錨' | '麥子' | '器具' | '小船';
+export type NeedId = '力氣' | '船身' | '天亮';
+export type CardId = 'A1' | 'A2' | 'A3' | 'A4' | 'A5' | 'B1' | 'B2' | 'B3' | 'B4' | 'B5';
+export type Deck = 'A' | 'B';
 
 export interface SeedDef {
   id: SeedId;
   title: string;
-  cap: number;
-  flood: number;
-  routes: Record<RouteId, RouteDef>;
-  weights: Record<string, number>;
-  displayNames: Record<string, string>;
-  needs: Record<Village, string>;
-  urgent: Village[];
-  crisis: { closed?: RouteId; cap?: number; title: string; text: string };
-  breakthrough: FloodgateBreakthrough | QueryBreakthrough;
-  hintText: string;
+  capPre: number; // 起風時的安全載重
+  capPost: number; // 危機（27:20）後
+  /** 船上的東西與重量；順序就是畫面上的順序。 */
+  weights: Record<ItemId, number>;
+  /** 上岸三件事各靠哪一樣東西。 */
+  needs: Record<NeedId, ItemId>;
+  /** 吃飯（突破口）會吃掉的東西。 */
+  food: ItemId;
 }
 
-export const VILLAGES: Village[] = ['東村', '西村', '北村'];
-export const REGULAR_ROUTES: RouteId[] = ['紅', '藍'];
+export interface CardDef {
+  id: CardId;
+  deck: Deck; // A＝起風（開局翻開）；B＝風暴（補好船時翻開）
+  weight?: Partial<Record<ItemId, number>>; // 重量增減
+  remove?: ItemId[]; // 自動離船
+  done?: NeedId[]; // 已經顧好的事
+  pinPre?: ItemId[]; // 危機前丟不掉
+  eatOnly?: NeedId[]; // 這件事只能靠吃飯顧好（留著東西不算）
+  crisisShiftMs?: number; // 危機提早（負值）
+  repairBonusMs?: number; // 補船多幾毫秒
+  departDelayMs?: number; // 補好船後多久才能衝向海灘（目前沒有卡使用，保留給往後的卡）
+  publicClue?: boolean; // 突破口第一段線索全隊可見（房間層處理）
+}
+
+export const ITEMS: ItemId[] = ['糧食', '纜索', '錨', '麥子', '器具', '小船'];
+export const NEEDS: NeedId[] = ['力氣', '船身', '天亮'];
 
 export const SEEDS: Record<SeedId, SeedDef> = {
-  'seed 001': {
-    id: 'seed 001',
-    title: '吊橋與分洪閘門',
-    cap: 7,
-    flood: 5,
-    routes: {
-      紅: { label: '紅線・吊橋', travel: 3, tool: '繩子' },
-      藍: { label: '藍線・隧道', travel: 4, tool: '燈具' },
-      綠: { label: '綠線・山路', travel: 6, tool: null },
-    },
-    weights: { 繩子: 1, 燈具: 3, 藥品: 1, 飲水: 2, 毛毯: 3, 食物: 2 },
-    displayNames: {},
-    needs: { 東村: '藥品', 西村: '飲水', 北村: '毛毯' },
-    urgent: ['東村', '西村'],
-    crisis: {
-      closed: '紅',
-      title: '吊橋坍塌！',
-      text: '暴雨沖垮了吊橋，紅線不能走了。橋斷了，但阿伯的雞沒事。',
-    },
-    breakthrough: { kind: 'floodgate', route: '綠', value: 7 },
-    hintText: '吊橋用的繩子很輕，好像還裝得下別的。',
-  },
-  'seed 002': {
-    id: 'seed 002',
-    title: '落石與淨水錠',
-    cap: 6,
-    flood: 5,
-    routes: {
-      紅: { label: '紅線・吊橋', travel: 3, tool: '繩子' },
-      藍: { label: '藍線・隧道', travel: 4, tool: '燈具' },
-      綠: { label: '綠線・山路', travel: 6, tool: null },
-    },
-    weights: { 繩子: 3, 燈具: 1, 食物: 2, 藥品: 1, 飲水: 2, 毛毯: 3, 淨水錠: 1 },
-    displayNames: { 繩子: '長繩', 燈具: '頭燈' },
-    needs: { 東村: '食物', 西村: '藥品', 北村: '飲水' },
-    urgent: ['東村', '西村'],
-    crisis: {
-      cap: 5,
-      title: '落石砸中救援車！',
-      text: '路都還在，但車子被砸凹了，載重上限從 6 kg 降到 5 kg。司機說：「車還能開，只是要瘦身。」',
-    },
-    breakthrough: { kind: 'query', item: '淨水錠', village: '北村', question: 'well' },
-    hintText: '隧道只要一盞頭燈，比長繩輕多了。',
+  'ship 001': {
+    id: 'ship 001',
+    title: '保羅海難',
+    capPre: 6,
+    capPost: 4,
+    weights: { 糧食: 2, 纜索: 1, 錨: 3, 麥子: 3, 器具: 2, 小船: 2 },
+    needs: { 力氣: '糧食', 船身: '纜索', 天亮: '錨' },
+    food: '糧食',
   },
 };
 
-export function displayName(seed: SeedDef, item: string): string {
-  return seed.displayNames[item] ?? item;
-}
+export const CARDS: Record<CardId, CardDef> = {
+  A1: { id: 'A1', deck: 'A', pinPre: ['麥子'] },
+  A2: { id: 'A2', deck: 'A', crisisShiftMs: -15_000 },
+  A3: { id: 'A3', deck: 'A', weight: { 糧食: -1 } },
+  A4: { id: 'A4', deck: 'A', remove: ['纜索'], done: ['船身'] },
+  A5: { id: 'A5', deck: 'A', repairBonusMs: 10_000 },
+  B1: { id: 'B1', deck: 'B', remove: ['器具'], weight: { 麥子: -2 } },
+  B2: { id: 'B2', deck: 'B', remove: ['小船'] },
+  B3: { id: 'B3', deck: 'B', weight: { 糧食: 2 } },
+  B4: { id: 'B4', deck: 'B', publicClue: true },
+  B5: { id: 'B5', deck: 'B', remove: ['錨'], done: ['天亮'], eatOnly: ['力氣'] },
+};
 
-export function toolItems(seed: SeedDef): string[] {
-  return Object.values(seed.routes)
-    .map((r) => r.tool)
-    .filter((t): t is string => t !== null);
-}
-
-/** 玩家可挑選的物資（不含工具）。 */
-export function cargoItems(seed: SeedDef): string[] {
-  const tools = new Set(toolItems(seed));
-  return Object.keys(seed.weights).filter((i) => !tools.has(i));
-}
+export const DECK_A: CardId[] = ['A1', 'A2', 'A3', 'A4', 'A5'];
+export const DECK_B: CardId[] = ['B1', 'B2', 'B3', 'B4', 'B5'];
