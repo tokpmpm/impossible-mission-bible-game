@@ -1,139 +1,137 @@
 #!/usr/bin/env python3
-"""窮舉驗證手工關卡（seed）的可解性與分星。只做規則試算，不是遊戲程式。
+"""窮舉驗證第一關「保羅海難」的可解性與分星（含所有故事卡組合）。只做規則試算，不是遊戲程式。
 
 用法：python3 tools/verify_seeds.py
       python3 tools/verify_seeds.py --export 路徑.json   # 匯出逐筆對照檔給規則引擎測試
+
+規則（docs/11-MISSION_01_SHIPWRECK.md）：
+- 船上的東西全部從船上開始；玩家決定留哪些（其餘丟進海裡）。
+- 留下的總重 ≤ 安全載重才能「決定好了」／「衝向海灘」，否則拒絕（超重）。
+- 星等＝上岸三件事顧好幾件：力氣（糧食或已吃飯）、船身（纜索或卡片已完成）、天亮（錨）。
+- 吃飯（突破口）：糧食離船、不再佔重量，力氣算顧好。
+暴風雨救援 seed 001／002 已於 2026-11-15 退役（使用者決定第一關改為保羅海難），見 git 歷史。
 """
 import json
 import sys
 from itertools import combinations
 
-REGULAR = ("紅", "藍")
-
 SEEDS = {
-    # 結構 A：預定路線被封，換路後工具太重；突破口是讓山路來得及。
-    "seed 001": dict(
-        cap=7, flood=5,
-        routes={"紅": (3, "繩子"), "藍": (4, "燈具"), "綠": (6, None)},
-        weights={"繩子": 1, "燈具": 3, "藥品": 1, "飲水": 2, "毛毯": 3, "食物": 2},
-        needs={"東村": "藥品", "西村": "飲水", "北村": "毛毯"},
-        urgent=("東村", "西村"),
-        crisis=dict(closed="紅"),                       # 吊橋坍塌
-        breakthrough=dict(kind="flood", route="綠", value=7),  # 分洪閘門
-        plan_route="紅", three_star_route="綠",
-    ),
-    # 結構 B：路都還在，但車輛受損載重下降；突破口是更輕的替代物資。
-    "seed 002": dict(
-        cap=6, flood=5,
-        routes={"紅": (3, "繩子"), "藍": (4, "燈具"), "綠": (6, None)},
-        weights={"繩子": 3, "燈具": 1, "食物": 2, "藥品": 1, "飲水": 2,
-                 "毛毯": 3, "淨水錠": 1},
-        needs={"東村": "食物", "西村": "藥品", "北村": "飲水"},
-        urgent=("東村", "西村"),
-        crisis=dict(cap=5),                             # 落石砸中車輛
-        # 北村確認井水可用後，淨水錠才會發放，並可滿足北村需求
-        breakthrough=dict(kind="substitute", item="淨水錠", village="北村"),
-        plan_route="藍", three_star_route="藍",
+    "ship 001": dict(
+        cap_pre=6, cap_post=4,
+        weights={"糧食": 2, "纜索": 1, "錨": 3, "麥子": 3, "器具": 2, "小船": 2},
+        needs={"力氣": "糧食", "船身": "纜索", "天亮": "錨"},
+        food="糧食",
     ),
 }
 
-
-def available_items(seed, used_breakthrough):
-    b = seed["breakthrough"]
-    locked = b["item"] if b["kind"] == "substitute" and not used_breakthrough else None
-    return [i for i in seed["weights"] if i != locked]
-
-
-def stars(seed, route, cargo, crisis, used_breakthrough):
-    """回傳 (星數, 原因)；星數 0 代表拒絕出發。"""
-    travel, tool = seed["routes"][route]
-    flood, cap = seed["flood"], seed["cap"]
-    b = seed["breakthrough"]
-    if crisis and "cap" in seed["crisis"]:
-        cap = seed["crisis"]["cap"]
-    if used_breakthrough and b["kind"] == "flood" and route == b["route"]:
-        flood = b["value"]
-    if any(c not in available_items(seed, used_breakthrough) for c in cargo):
-        return 0, "物資尚未發放"
-    if crisis and route == seed["crisis"].get("closed"):
-        return 0, "道路封閉"
-    if travel >= flood:
-        return 0, "來不及"
-    if tool and tool not in cargo:
-        return 0, "缺少工具"
-    if sum(seed["weights"][c] for c in cargo) > cap:
-        return 0, "超重"
-    served = [v for v, item in seed["needs"].items() if item in cargo]
-    if (used_breakthrough and b["kind"] == "substitute"
-            and b["item"] in cargo and b["village"] not in served):
-        served.append(b["village"])
-    if not served:
-        return 0, "沒有任何村需要的物資"
-    if len(served) == len(seed["needs"]):
-        return 3, "三村"
-    if all(v in served for v in seed["urgent"]):
-        return 2, "兩個急迫村"
-    return 1, "未滿足兩個急迫村"
+# 故事卡：deck A＝起風（開局翻開），deck B＝風暴（補好船後翻開）。
+# weight：重量增減；remove：自動離船；done：已顧好的事；pin_pre：危機前丟不掉；pre_max：危機前預期最高星。
+# 其他效果（時間、誰看得到線索）不影響可解性，只記在 note。
+CARDS = {
+    "A1": dict(deck="A", pin_pre=["麥子"], pre_max=2, note="船主不准丟麥子（危機前）"),
+    "A2": dict(deck="A", note="風暴提早 15 秒"),
+    "A3": dict(deck="A", weight={"糧食": -1}),
+    "A4": dict(deck="A", remove=["纜索"], done=["船身"]),
+    "A5": dict(deck="A", note="補船多 10 秒"),
+    "B1": dict(deck="B", remove=["器具"], weight={"麥子": -2}),
+    "B2": dict(deck="B", remove=["小船"]),
+    "B3": dict(deck="B", weight={"糧食": 1}),
+    "B4": dict(deck="B", note="醫生的吃飯線索全隊可見"),
+    "B5": dict(deck="B", note="補好後 20 秒才能衝向海灘"),
+}
 
 
-def best(seed, crisis, used_breakthrough):
-    items = available_items(seed, used_breakthrough)
-    result = {}
-    for route in seed["routes"]:
-        top = (0, ())
-        for n in range(len(items) + 1):
-            for cargo in combinations(items, n):
-                s, _ = stars(seed, route, cargo, crisis, used_breakthrough)
-                if s > top[0]:
-                    top = (s, cargo)
-        result[route] = top
-    return result
+def world(seed, cards, crisis, fed):
+    """回傳 (重量表, 船上可選的東西, 已顧好的事, 危機前釘住的東西, 載重)。"""
+    w = dict(seed["weights"])
+    removed, done, pinned = set(), set(), set()
+    for cid in cards:
+        c = CARDS[cid]
+        if c["deck"] == "B" and not crisis:
+            continue
+        for k, d in c.get("weight", {}).items():
+            w[k] += d
+        removed |= set(c.get("remove", []))
+        done |= set(c.get("done", []))
+        if not crisis:
+            pinned |= set(c.get("pin_pre", []))
+    if fed:
+        removed.add(seed["food"])
+        done.add("力氣")
+    items = [i for i in seed["weights"] if i not in removed]
+    cap = seed["cap_post"] if crisis else seed["cap_pre"]
+    return w, items, done, pinned, cap
+
+
+def evaluate(seed, kept, w, done, cap):
+    """回傳 (星數, 原因)；原因 None＝可以出發。"""
+    weight = sum(w[i] for i in kept)
+    served = [n for n, item in seed["needs"].items() if n in done or item in kept]
+    stars = len(served)
+    if weight > cap:
+        return stars, "超重"
+    return stars, None
+
+
+def best(seed, cards, crisis, fed):
+    w, items, done, pinned, cap = world(seed, cards, crisis, fed)
+    top = (-1, ())
+    for n in range(len(items) + 1):
+        for kept in combinations(items, n):
+            if not pinned <= set(kept):
+                continue
+            s, reason = evaluate(seed, kept, w, done, cap)
+            if reason is None and s > top[0]:
+                top = (s, kept)
+    return top
+
+
+def combos():
+    a = [k for k, c in CARDS.items() if c["deck"] == "A"]
+    b = [k for k, c in CARDS.items() if c["deck"] == "B"]
+    return [(x, y) for x in a for y in b]
 
 
 def check(name, seed):
-    pre = best(seed, crisis=False, used_breakthrough=False)
-    post = best(seed, crisis=True, used_breakthrough=False)
-    brk = best(seed, crisis=True, used_breakthrough=True)
-    plan, win = seed["plan_route"], seed["three_star_route"]
-    other = [r for r in REGULAR if r != plan][0]
-    rules = [
-        ("危機前：預定路線排得進三村", pre[plan][0] == 3),
-        ("危機前：另一條常規路線最多二星", pre[other][0] <= 2),
-        ("危機前：綠線不可行", pre["綠"][0] == 0),
-        ("危機後、無突破口：最高二星", max(v[0] for v in post.values()) == 2),
-        ("危機後：至少一條常規路線有二星解", max(post[r][0] for r in REGULAR) == 2),
-        ("危機後＋突破口：指定路線三星", brk[win][0] == 3),
-        ("三星只來自指定路線", all(brk[r][0] < 3 for r in brk if r != win)),
-    ]
-    print(f"== {name}")
-    for label, table in (("危機前", pre), ("危機後", post), ("危機後＋突破口", brk)):
-        print("  " + label + "：" + "；".join(
-            f"{r} {'★' * s or '不可行'} {'+'.join(c)}" for r, (s, c) in table.items()))
     ok = True
-    for label, passed in rules:
-        print(f"  [{'通過' if passed else '失敗'}] {label}")
+    print(f"== {name}（{len(combos())} 種故事卡組合）")
+    for cards in combos():
+        pre = best(seed, cards, crisis=False, fed=False)
+        post = best(seed, cards, crisis=True, fed=False)
+        fed = best(seed, cards, crisis=True, fed=True)
+        pre_max = min(CARDS[c].get("pre_max", 3) for c in cards)
+        rules = [
+            (f"危機前最高 {pre_max} 星", pre[0] == pre_max),
+            ("危機後未吃飯最高恰好 2 星", post[0] == 2),
+            ("危機後吃過飯可 3 星", fed[0] == 3),
+        ]
+        passed = all(p for _, p in rules)
         ok &= passed
+        print(f"  [{'通過' if passed else '失敗'}] {'+'.join(cards)}："
+              f"危機前 {'★' * pre[0]} {'+'.join(pre[1])}；"
+              f"危機後 {'★' * post[0]} {'+'.join(post[1])}；"
+              f"吃過飯 {'★' * fed[0]} {'+'.join(fed[1])}"
+              + ("" if passed else "  ← " + "、".join(l for l, p in rules if not p)))
     return ok
 
 
 def export(path):
-    """逐筆匯出：種子 × 情境 × 路線 × 每組物資（含工具）的星等與第一個拒絕原因。"""
-    scenarios = {"危機前": (False, False), "危機後": (True, False), "危機後＋突破口": (True, True)}
+    """逐筆匯出：種子 × 卡片組合 × 情境 × 每組留下的東西的星等與拒絕原因。"""
+    scenarios = {"危機前": (False, False), "危機後": (True, False), "危機後＋吃飯": (True, True)}
     rows = []
     for name, seed in SEEDS.items():
-        items = list(seed["weights"])
-        for scen, (crisis, used) in scenarios.items():
-            for route in seed["routes"]:
+        for cards in combos():
+            for scen, (crisis, fed) in scenarios.items():
+                w, items, done, _pinned, cap = world(seed, cards, crisis, fed)
                 for n in range(len(items) + 1):
-                    for cargo in combinations(items, n):
-                        s, reason = stars(seed, route, cargo, crisis, used)
-                        rows.append(dict(seed=name, scenario=scen, route=route,
-                                         cargo=list(cargo), stars=s,
-                                         reason=None if s else reason))
+                    for kept in combinations(items, n):
+                        s, reason = evaluate(seed, kept, w, done, cap)
+                        rows.append(dict(seed=name, cards=list(cards), scenario=scen,
+                                         kept=list(kept), stars=s, reason=reason))
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(dict(seeds={n: dict(tools={r: t for r, (_, t) in s["routes"].items()})
+        json.dump(dict(seeds={n: dict(weights=s["weights"], cap_pre=s["cap_pre"], cap_post=s["cap_post"])
                               for n, s in SEEDS.items()}, rows=rows),
-                  f, ensure_ascii=False, indent=0)
+                  f, ensure_ascii=False, separators=(",", ":"))
     print(f"已匯出 {len(rows)} 筆到 {path}")
 
 

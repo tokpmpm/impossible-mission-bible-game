@@ -1,6 +1,8 @@
 // 伺服器 → 手機的「個人化畫面資料」與 WebSocket 協定。前端只照這份資料畫圖，不自己算規則。
+// 2026-11-15 v0.7：第一關保羅海難。不是自己能操作的東西不送 can（前端不畫按鈕）。
 
 import type { RoleId, Preference } from './content.ts';
+import type { CardId, ItemId, NeedId } from '../engine/seeds.ts';
 
 /** 手機 → 伺服器 */
 export type ClientMessage =
@@ -11,19 +13,17 @@ export type ClientMessage =
   | { t: 'start' } // 房主；至少 3 人
   | { t: 'act'; id: string; ev: Action } // id：手機產生的唯一代號，重送不會重複執行
   | { t: 'thank'; to: string | null }
-  | { t: 'next' } // 房主：下一局（換另一個種子）
+  | { t: 'next' } // 房主：再來一局（新的故事卡）
   | { t: 'leave' }
-  /** 心跳：每 20 秒一次。雲端伺服器一段時間沒收到訊息會被關掉、房間跟著消失，這樣能讓它保持清醒。 */
+  /** 心跳：每 20 秒一次，讓雲端伺服器保持清醒。 */
   | { t: 'ping' };
 
 export type Action =
-  | { type: 'selectRoute'; route: '紅' | '藍' | '綠' }
-  | { type: 'setItem'; item: string; on: boolean }
+  | { type: 'setItem'; item: ItemId; on: boolean }
   | { type: 'lock' }
   | { type: 'repairPick'; option: string }
   | { type: 'useEliminate' }
-  | { type: 'floodgate'; channel: string }
-  | { type: 'query'; village: '東村' | '西村' | '北村'; question: 'well' | 'road' | 'needs' }
+  | { type: 'eat' }
   | { type: 'depart' };
 
 /** 伺服器 → 手機 */
@@ -38,17 +38,32 @@ export type ServerMessage =
 
 export interface Rejection {
   action: Action['type'];
-  /** code：規則代碼（OVERWEIGHT、TOO_EARLY…）；text：原因＋下一步，例「超重 2 kg，請 大衛（補給）放下一樣」。 */
   reasons: { code: string; text: string }[];
 }
 
 export type ViewPhase = 'lobby' | 'intro' | 'planning' | 'blackout' | 'replanning' | 'settled' | 'ended';
 
+export interface CardView {
+  id: CardId;
+  deck: 'A' | 'B';
+  title: string;
+  ref: string;
+  verse: string;
+  effect: string;
+  tone: 'good' | 'bad' | 'mixed';
+}
+
+export interface MomentView {
+  /** 圖：故事卡、東西、三件事、職能、背包、或場景（meal／landing／repair）。 */
+  icon: { kind: 'card' | 'item' | 'need' | 'role' | 'pref' | 'scene'; ids: string[] };
+  text: string;
+}
+
 export interface View {
   code: string;
   joinUrl: string;
   qrSvg: string | null; // 只有大廳時提供
-  serverNow: number; // Date.now()，前端用來校正倒數
+  serverNow: number;
   me: {
     id: string;
     nickname: string;
@@ -57,8 +72,7 @@ export interface View {
     roles: { id: RoleId; name: string; icon: string; job: string }[];
     spectator: boolean; // 開局後才加入，等下一局
   };
-  /** pref：背包裡多塞的東西（公開，大廳顯示在名字旁邊）。 */
-  players: { id: string; nickname: string; connected: boolean; isHost: boolean; pref: Preference | null; roles: string[] }[];
+  players: { id: string; nickname: string; connected: boolean; isHost: boolean; pref: Preference | null; roles: string[]; roleIds: RoleId[] }[];
   phase: ViewPhase;
   round: null | {
     no: number;
@@ -67,91 +81,83 @@ export interface View {
     firstRound: boolean;
     startedAt: number; // 伺服器時間
     elapsedMs: number;
-    timeLimitMs: number; // 480000
-    introMs: number; // 60000
-    lockOpensAt: number; // 伺服器時間；之前可以排方案但不能鎖定
+    timeLimitMs: number;
+    introMs: number;
+    lockOpensAt: number; // 伺服器時間
+    crisisAt: number; // 伺服器時間：最晚起風暴的時間（含 A2）
   };
-  /** 全隊共用的方案摘要 */
-  plan: null | {
-    route: null | { id: '紅' | '藍' | '綠'; label: string; travel: number; tool: string | null; closed: boolean };
-    routes: { id: '紅' | '藍' | '綠'; label: string; travel: number; tool: string | null; closed: boolean }[];
-    items: string[]; // 已裝物資（顯示名稱）
-    itemChoices: { id: string; name: string; on: boolean; locked: boolean }[]; // locked＝尚未發放
+  /** 這局的故事（一句＋章節），依階段換。 */
+  story: null | { text: string; ref: string };
+  /** 這局抽到的故事卡；b 在補好船前為 null。 */
+  cards: { a: CardView | null; b: CardView | null };
+  /** 全隊共用的船。 */
+  ship: null | {
+    /** 6 樣東西的狀態：onShip＝還留在船上；gone＝被故事卡或吃飯帶走（不在海上也不在船上）。 */
+    items: { id: ItemId; weight: number; onShip: boolean; gone: boolean; pinned: boolean }[];
     weight: number;
     cap: number;
     overweight: number;
-    safeWindow: number | null;
-    reachable: number; // 可送達村數
-    /** 危機前不顯示可送幾村（要問隊友才知道），鎖定／停電時揭曉；危機後照常顯示。 */
-    showReach: boolean;
-    reasons: string[]; // 中文短句，空＝可以出發／鎖定
-    reasonCodes: string[]; // 同上，規則代碼（前端用來決定哪一塊要閃、要不要顯示故事時間）
-    advice: string[]; // 同上，原因＋下一步（依看的人換成「你」或隊友暱稱）
+    /** 三件事：危機前不顯示亮不亮（null），危機後即時。 */
+    needs: { id: NeedId; lit: boolean }[] | null;
+    stars: number | null; // 同上
+    reasons: string[]; // 中文短句；空＝可以「決定好了」／衝向海灘
+    reasonCodes: string[];
+    advice: string[]; // 原因＋下一步（依看的人換成「你」或隊友暱稱）
     locked: boolean;
-    /** 最近一次被擋下的鎖定／出發（at 為伺服器時間），讓其他隊友也知道剛剛有人按了。 */
+    fed: boolean;
+    fedAt: number | null; // 伺服器時間：吃飯的那一刻（所有手機播動畫）
+    fedBy: string | null; // 誰召集的（暱稱）
+    dawnAt: number | null; // 伺服器時間：幾點起可以衝向海灘
     lastRejection: null | { at: number; action: Action['type']; reasons: string[] };
   };
-  /** 各操作的負責人暱稱：按了不是自己的按鈕時，告訴他該去找誰。 */
-  operators: null | { route: string; items: string; comms: string; repair: string };
-  /** 開局下一步：例 { verb: '問', nickname: '大衛', text: '車子最多能載多重？' } */
+  /** 我這局的任務（一句）：給沒有按鈕的人知道自己要做什麼。 */
+  myTask: string | null;
+  /** 開局下一步：例 { verb: '問', nickname: '大衛', text: '糧食要留嗎？' } */
   nextSteps: { verb: '問' | '告訴' | '找'; nickname: string; text: string }[];
-  /** 我能做的操作（只是入口分工；資訊大家都能看） */
+  /** 我能做的操作（只有 true 的才畫按鈕） */
   can: {
     start: boolean;
-    route: boolean;
     items: boolean;
     lock: boolean;
     depart: boolean;
     repair: boolean;
     eliminate: boolean;
-    floodgate: boolean;
-    query: boolean;
+    eat: boolean;
     next: boolean;
   };
-  /** 我手上的線索（依階段解鎖） */
-  clues: { title: string; text: string; role: string; when: 'start' | 'crisis' | 'power'; breakthrough?: number }[];
-  hint: string | null; // 2:15 方向提示（只顯示在持有者手機）
-  preferenceHint: string | null; // 手電筒：例如「帶手電筒的 小明 可以照亮面板一次。」
-  /** 老智慧：此刻的一句短經文（和合本）＋出處，當隊伍小提示。 */
-  tip: null | { text: string; ref: string };
-  crisis: null | { title: string; text: string; at: number; cause: 'lock' | 'timeout'; extra: string | null; reachBefore: number };
+  /** 吃飯按鈕的狀態（只有伙房會看到）：糧食丟了就要先撈回。 */
+  eatNeedsFood: boolean;
+  clues: { title: string; text: string; role: string; when: 'start' | 'power'; item?: ItemId; need?: NeedId; breakthrough?: number; shared?: boolean }[];
+  hint: string | null;
+  preferenceHint: string | null; // 油燈：例「帶油燈的 小明 可以照亮面板一次。」
+  crisis: null | { at: number; cause: 'lock' | 'timeout'; starsBefore: number };
   repair: null | {
-    startedAt: number; // 伺服器時間
+    startedAt: number;
     limitMs: number;
-    assistAt: number; // 伺服器時間
+    assistAt: number;
     assistLevel: 0 | 1 | 2;
     progress: number;
     done: boolean;
-    /** 工程師看到的面板 */
     panel: null | {
       slots: { index: number; askNickname: string; options: { id: string; desc: string; grayed: boolean }[]; done: boolean }[];
     };
-    mySymbols: { slot: number; id: string; desc: string }[]; // 長按才顯示
+    mySymbols: { slot: number; id: string; desc: string }[];
     myEliminationClue: string | null;
     engineerNickname: string;
     order: { slot: number; nickname: string }[];
-    wrongFlash: number; // 選錯次數（前端可用來顯示友善提示）
-  };
-  breakthrough: null | {
-    kind: 'floodgate' | 'query';
-    done: boolean;
-    queryUsed: boolean;
-    queryReply: string | null;
-    floodgateWrongCount: number;
-    questions: { id: 'well' | 'road' | 'needs'; text: string }[];
+    wrongFlash: number;
   };
   result: null | {
     stars: 0 | 1 | 2 | 3;
-    title: string; // 3＝驚喜、2＝任務成功、1＝部分救援、0＝另一支救援隊接手
-    served: string[];
-    unserved: string[];
+    title: string;
+    lit: Record<NeedId, boolean>;
     cause: 'depart' | 'time_up' | 'ended';
-    moments: string[]; // 這局真的發生的事（有名字），含背包物品出場
-    verse: { text: string; ref: string; link: string }; // 一句林前 12 章＋對應的真實事件
-    fact: string; // 「你知道嗎？」一行小知識
-    question: string; // 可跳過的輕鬆問題
-    thanks: { from: string; to: string }[]; // 只顯示誰謝了誰，不計票
-    myThanks: string | null; // 我謝了誰（playerId）
-    nextSeedTitle: string;
+    moments: MomentView[];
+    bible: string; // 「經文裡」對照
+    verse: { text: string; ref: string };
+    fact: string;
+    question: string;
+    thanks: { from: string; to: string }[];
+    myThanks: string | null;
   };
 }
