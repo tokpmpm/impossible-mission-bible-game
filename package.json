@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "不可能的任務：第一關暴風雨救援（原型，未經真人試玩）",
+  "description": "不可能的任務：第一關保羅海難（使徒行傳 27 章；原型，未經真人試玩）",
   "engines": {
     "node": ">=22.18"
   },
