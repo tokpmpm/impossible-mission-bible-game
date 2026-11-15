@@ -146,7 +146,7 @@ export const CARD_TEXT: Record<CardId, { title: string; ref: string; verse: stri
     title: '探深淺，拋錨盼天亮',
     ref: '徒 27:28–29',
     verse: '就探深淺，探得有十二丈；稍往前行，又探深淺，探得有九丈。恐怕撞在石頭上，就從船尾拋下四個錨，盼望天亮。',
-    effect: '錨已經拋下去了：⚓ 等天亮顧好了，錨不在船上。可是大家餓壞了：留著糧食不算，要真的吃了才有力氣。',
+    effect: '錨已經從船尾拋下去了：等天亮顧好了，錨不在船上。天快亮了，大家卻已經餓了十四天（27:33）：留著糧食不夠，要真的吃了才有力氣。',
     tone: 'bad',
   },
 };
@@ -191,7 +191,7 @@ export type Preference = keyof typeof PREFERENCES;
 
 /** 背包物品在結尾出場（只陳述、不影響規則）。{name} 換成暱稱。 */
 export const CAMEOS: Record<Exclude<Preference, 'lamp'>, string> = {
-  coat: '{name} 把外衣披在一個發抖的人身上——那天又下雨又冷（28:2）。',
+  coat: '上岸時下雨，天氣又冷（28:2）。{name} 把帶來的外衣披在一個發抖的人身上。',
   nuts: '上了岸，大家圍著火，分著吃 {name} 帶的乾果。',
   song: '{name} 在火堆旁哼起歌，大家慢慢暖和起來。',
 };

@@ -445,10 +445,15 @@ function needsRow(v) {
     .map((id) => {
       const n = s.needs && s.needs.find((x) => x.id === id);
       const lit = !!(n && n.lit);
-      return `<span class="need ${s.needs ? (lit ? 'lit' : 'dim') : 'unknown'}" data-need="${id}">${art.need(id, lit, 30)}<small>${esc(NEED_LABEL[id])}${s.needs ? (lit ? ' ✓' : '') : ' ?'}</small></span>`;
+      // 超重時還不能出發：亮的那幾件只是「暫時」，用虛線、不打勾
+      const pending = lit && s.overweight > 0;
+      const cls = s.needs ? (pending ? 'pending' : lit ? 'lit' : 'dim') : 'unknown';
+      const mark = s.needs ? (pending ? '' : lit ? ' ✓' : '') : ' ?';
+      return `<span class="need ${cls}" data-need="${id}">${art.need(id, lit, 40)}<small>${esc(NEED_LABEL[id])}${mark}</small></span>`;
     })
     .join('');
-  return `<div class="needs" aria-label="上岸三件事">${items}</div>`;
+  const over = s.needs && s.overweight > 0 ? `<p class="needs-over">超重 ${s.overweight}：要再丟掉 ${s.overweight} 重，這些才算數</p>` : '';
+  return `<div class="needs" aria-label="上岸三件事">${items}</div>${over}`;
 }
 
 function cardChips(v) {
@@ -484,7 +489,7 @@ function eatCard(v) {
   if (!v.can.eat) return '';
   return `<section class="eat-card">
     <div class="eat-art" aria-hidden="true">${art.item('糧食', 44)}</div>
-    <div><button class="btn primary block" data-action="eat" ${v.eatNeedsFood ? 'disabled' : ''}>召集大家吃飯</button>
+    <div><button class="btn secondary block" data-action="eat" ${v.eatNeedsFood ? 'disabled' : ''}>召集大家吃飯</button>
     ${v.eatNeedsFood ? '<p class="muted small">糧食在海裡：先請管倉撈回來。</p>' : '<p class="muted small">只能吃一次。</p>'}</div>
   </section>`;
 }
@@ -499,10 +504,7 @@ function nextSteps(v) {
 function renderShip(v) {
   const s = v.ship;
   const hint = v.hint ? `<div class="banner hint" role="status"><span aria-hidden="true">💡</span> ${esc(v.hint)}</div>` : '';
-  const crisis =
-    v.phase === 'replanning' && v.crisis
-      ? `<div class="banner crisis-note" role="status">浪更大了：船最多只能留 <strong>${s.cap}</strong>${s.fed ? '' : ''}</div>`
-      : '';
+  const crisis = '';
   const fedLine = s.fed ? `<div class="banner fed" role="status">${art.need('力氣', true, 22)} ${esc(s.fedBy || '伙房')} 召集大家吃過飯了（27:36）</div>` : '';
   const dawnWait = v.phase === 'replanning' && s.dawnAt && now() < s.dawnAt
     ? `<div class="banner dawn" role="status">⚓ 拋了錨，等天亮：<strong data-cd="dawn">${mmss(s.dawnAt - now())}</strong></div>`
@@ -516,10 +518,10 @@ function renderShip(v) {
     ${cardChips(v)}
     ${hint}${crisis}${fedLine}${dawnWait}
     ${v.can.items ? itemTray(v) : ''}
-    ${eatCard(v)}
     ${task}
     ${nextSteps(v)}
     <section class="clues" aria-label="你的線索">${clueCards(v)}</section>
+    ${eatCard(v)}
     <button class="btn ghost small zoom-btn" data-action="zoom">放大給隊友看</button>
   </main>
   ${actionBar(v, button)}`;
@@ -570,10 +572,10 @@ function renderBlackout(v) {
     <div class="bo-bg" aria-hidden="true">${art.darkness()}</div>
     <div class="bo-head">
       <h1>天黑了</h1>
-      <button class="btn tiny ghost" data-action="flicker" aria-label="${ui.noFlicker ? '開啟閃電' : '關閉閃電'}">${ui.noFlicker ? '閃電：關' : '閃電：開'}</button>
+      <button class="btn tiny ghost" data-action="flicker" aria-label="${ui.noFlicker ? '開啟閃光效果' : '關閉閃光效果（怕閃的人用）'}">${ui.noFlicker ? '閃光：關' : '閃光：開'}</button>
     </div>
     ${v.story ? `<p class="bo-story">${esc(v.story.text)}<cite>${esc(v.story.ref)}</cite></p>` : ''}
-    ${c ? `<p class="bo-reveal">${c.cause === 'lock' ? '你們決定的' : '時間到時的'}留法，原本顧好 <strong>${c.starsBefore}</strong>／3 件；現在浪更大了，船只能留 4。</p>` : ''}
+    ${c ? `<p class="bo-reveal">原本顧好 <strong>${c.starsBefore}</strong>／3 件・浪更大了，船只能留 4</p>` : ''}
     ${
       r
         ? `<div class="bo-timer"><span>補船 <strong data-cd="repair">${mmss(r.startedAt + r.limitMs - now())}</strong></span><span>進度 <strong>${r.progress}／${total}</strong></span></div>
@@ -630,7 +632,7 @@ function renderResult(v) {
   const res = v.result;
   if (!res) return `<main class="screen center"><p class="muted">結算中…</p></main>`;
   const needs = ['力氣', '船身', '天亮']
-    .map((id, i) => `<span class="need big ${res.lit[id] ? 'lit' : 'dim'}" style="--d:${0.3 + i * 0.5}s">${art.need(id, res.lit[id], 54)}<small>${esc(NEED_LABEL[id])}</small></span>`)
+    .map((id, i) => `<span class="need big ${res.lit[id] ? 'lit' : 'dim'}">${art.need(id, res.lit[id], 54)}<small>${esc(NEED_LABEL[id])}</small></span>`)
     .join('');
   const moments = (res.moments || []).map((m) => `<li>${momentIcon(m)}<span>${esc(m.text)}</span></li>`).join('');
   const others = v.players.filter((p) => p.id !== v.me.id && p.roles.length > 0);

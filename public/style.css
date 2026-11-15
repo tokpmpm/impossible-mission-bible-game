@@ -734,10 +734,11 @@ cite { display: block; margin-top: 4px; font-style: normal; color: var(--gold-2)
 #hud { position: sticky; top: 0; z-index: 10; background: var(--bg); }
 .stage { max-width: 560px; margin: 0 auto; position: relative; }
 .stage .art-scene { display: block; width: 100%; height: auto; max-height: 34vh; }
-.story { margin: 0; padding: 4px 16px 6px; font-size: 0.82rem; color: var(--muted); display: flex; gap: 8px; justify-content: space-between; align-items: baseline; }
+.story { margin: 0; padding: 4px 16px 6px; font-size: 0.8rem; color: var(--muted); display: flex; gap: 8px; justify-content: space-between; align-items: baseline; }
+.story > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .story cite, .bo-story cite, .ovl-cap cite, .saved cite { font-style: normal; color: var(--gold); font-size: 0.78rem; white-space: nowrap; margin-left: 6px; }
 .screen.ship { padding-top: 8px; gap: 10px; }
-.screen.ship.has-bar { padding-bottom: 170px; }
+.screen.ship.has-bar { padding-bottom: 210px; }
 .role-chip { display: inline-flex; align-items: center; gap: 4px; }
 .role-chip svg { flex: none; }
 .tb-cd { display: flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
@@ -759,7 +760,10 @@ cite { display: block; margin-top: 4px; font-style: normal; color: var(--gold-2)
 .need { display: flex; flex-direction: column; align-items: center; font-size: 0.78rem; color: var(--muted); min-width: 64px; }
 .need.lit { color: var(--gold-2); font-weight: 700; }
 .need.unknown svg { opacity: 0.45; }
-.need.big { font-size: 0.95rem; animation: needPop 0.5s both; animation-delay: var(--d, 0s); }
+.need.big { font-size: 0.95rem; }
+.need.pending { color: var(--warn); }
+.need.pending svg { opacity: 0.6; outline: 2px dashed var(--warn); outline-offset: 2px; border-radius: 50%; }
+.needs-over { margin: 0; text-align: center; color: var(--warn); font-weight: 700; font-size: 0.85rem; }
 @keyframes needPop { from { transform: scale(0.4); opacity: 0; } to { transform: none; opacity: 1; } }
 
 .card-chips { display: flex; gap: 8px; }

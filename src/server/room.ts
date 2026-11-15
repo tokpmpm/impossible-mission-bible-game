@@ -94,8 +94,17 @@ function randomId(len = 16): string {
   return s;
 }
 
-function cardView(id: CardId): CardView {
-  return { id, deck: CARDS[id].deck, ...CARD_TEXT[id] };
+/** 會改變最佳留法的卡（與 tools/verify_seeds.py 的 changes() 輸出一致，test 有比對）。 */
+export const PLAN_CHANGERS: CardId[] = ['A1', 'A3', 'A4', 'B1', 'B3', 'B5'];
+
+function cardView(id: CardId, alreadyGone: ItemId[] = []): CardView {
+  const v = { id, deck: CARDS[id].deck, ...CARD_TEXT[id] };
+  // 卡片要帶走的東西早就被你們丟了：照實說，不假裝有影響
+  const removes = CARDS[id].remove ?? [];
+  if (removes.length && removes.every((i) => alreadyGone.includes(i))) {
+    v.effect = `${removes.join('、')}你們早就丟進海裡了，這件事沒有再改變什麼。` + (CARDS[id].weight ? '（其他效果照常）' : '');
+  }
+  return v;
 }
 
 export class Room {
@@ -235,8 +244,13 @@ export class Room {
       const pool = fresh.length ? fresh : deck;
       return pool[Math.floor(this.random() * pool.length)];
     };
-    const a = pick(DECK_A);
-    const b = pick(DECK_B);
+    let a = pick(DECK_A);
+    let b = pick(DECK_B);
+    // 首局至少一張會改變最佳留法的卡（tools/verify_seeds.py 的「改變該怎麼做」清單），第一局就感覺得到卡片的作用
+    if (this.roundsPlayed === 0 && !PLAN_CHANGERS.includes(a) && !PLAN_CHANGERS.includes(b)) {
+      const pool = DECK_B.filter((c) => PLAN_CHANGERS.includes(c));
+      b = pool[Math.floor(this.random() * pool.length)];
+    }
     this.usedCards.push(a, b);
     // 一疊 5 張：抽滿一輪就重新開始，但不立刻重複上一局
     if (this.usedCards.length >= 8) this.usedCards = [a, b];
@@ -511,7 +525,10 @@ export class Room {
       if (this.operatorOf('supply') === pid) return '浪更大了，船只能留 4：再決定一次丟什麼。';
       if (this.operatorOf('nav') === pid) return '大家都準備好了，就由你按「衝向海灘」。';
       if (this.operatorOf('comms') === pid) return '你管全船的飯。';
-      if (mine.length) return `新線索來了：說給 ${this.nick(this.operatorOf('supply'))}（管倉）聽。`;
+      const r2 = this.round!;
+      const hasNew = [...r2.btHolders.values()].includes(pid);
+      if (hasNew) return `你有新線索：說給 ${this.nick(this.operatorOf('supply'))}（管倉）和 ${this.nick(this.operatorOf('comms'))}（伙房）聽。`;
+      if (mine.length) return `去問問大家：電來了以後，誰有新發現？`;
     }
     return null;
   }
@@ -595,7 +612,8 @@ export class Room {
     };
     const storyKey = phase === 'intro' ? 'intro' : phase === 'planning' ? 'planning' : phase === 'blackout' ? 'blackout' : phase === 'replanning' ? 'replanning' : 'landing';
     v.story = { ...STORY[storyKey] };
-    v.cards = { a: cardView(g.cards.a), b: powered ? cardView(g.cards.b) : null };
+    const thrownBeforeB = g.planAtCrisis ? ITEMS.filter((i) => !g.planAtCrisis!.items.includes(i)) : [];
+    v.cards = { a: cardView(g.cards.a), b: powered ? cardView(g.cards.b, thrownBeforeB) : null };
 
     // 船：6 樣東西的狀態
     const { aboard, pinned, weights } = aboardOf(g);
@@ -763,6 +781,13 @@ export class Room {
       const names = [1, 2].map((i) => this.nick(r.btHolders.get(i)));
       out.push({ icon: { kind: 'scene', ids: ['meal'] }, text: `${names[0]} 說吃了才有力氣、${names[1]} 想到吃了船就輕，${this.nick(eater?.playerId)} 召集大家吃飯。` });
     }
+    const served = (g.result?.served ?? []) as NeedId[];
+    const why: Record<NeedId, string> = {
+      力氣: g.fed ? '' : '力氣沒顧到：這局沒吃上飯，上岸時游得很吃力。',
+      船身: '船身沒顧到：沒留纜索，船尾被浪打得更碎。',
+      天亮: '等天亮沒顧到：沒留錨，夜裡差點撞上礁石。',
+    };
+    for (const n of NEEDS) if (!served.includes(n) && why[n]) out.push({ icon: { kind: 'need', ids: [n] }, text: why[n] });
     out.push({ icon: { kind: 'scene', ids: ['landing'] }, text: '船擱淺了，大家有的游、有的抱著板子，都上了岸（27:41–44）。' });
     for (const item of ['coat', 'nuts', 'song'] as const) {
       const p = this.players.find((x) => r.participants.includes(x.id) && x.pref === item);

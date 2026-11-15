@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import WebSocket from 'ws';
 import { startServer } from '../src/server/main.ts';
 import type { ServerMessage, View, Action } from '../src/server/view.ts';
-import { Room } from '../src/server/room.ts';
+import { Room, PLAN_CHANGERS } from '../src/server/room.ts';
+import { execFileSync } from 'node:child_process';
 
 class Phone {
   ws!: WebSocket;
@@ -431,5 +432,35 @@ test('故事卡：連續 4 局，起風卡、風暴卡都不和上一局重複',
       assert.notEqual(c.b, prev.b);
     }
     prev = c;
+  }
+});
+
+test('會改變留法的卡片清單和 tools/verify_seeds.py 一致；首局至少抽到一張', () => {
+  const out = execFileSync('python3', ['tools/verify_seeds.py'], { encoding: 'utf8' });
+  const fromScript = [...out.matchAll(/^  ([AB]\d)：改變/gm)].map((m) => m[1]);
+  assert.deepEqual([...PLAN_CHANGERS].sort(), fromScript.sort());
+  for (let seed = 1; seed <= 40; seed++) {
+    const room = new Room('FRST', { seed, introMs: 0 });
+    for (let i = 0; i < 3; i++) room.addPlayer('p' + i);
+    room.start(room.hostId!);
+    const c = room.round!.game.cards;
+    assert.ok(PLAN_CHANGERS.includes(c.a) || PLAN_CHANGERS.includes(c.b), `seed ${seed}: ${c.a}+${c.b}`);
+  }
+});
+
+test('風暴卡要帶走的東西早就丟了：卡面照實說沒有影響', async () => {
+  const { srv, phones, host } = await setup(3);
+  try {
+    roomOf(srv, host.code).forceCards = { a: 'A2', b: 'B2' };
+    host.send({ t: 'start' });
+    await Promise.all(phones.map((p) => p.until((v) => v.phase === 'planning')));
+    const sup = who(phones, (v) => v.can.items);
+    await keepOnly(sup, ['糧食', '纜索', '錨']);
+    who(phones, (v) => v.can.lock).act({ type: 'lock' });
+    await repair(phones);
+    assert.match(host.view!.cards.b!.effect, /早就丟進海裡/);
+  } finally {
+    phones.forEach((p) => p.close());
+    await srv.close();
   }
 });
