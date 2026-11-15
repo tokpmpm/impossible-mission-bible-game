@@ -16,7 +16,7 @@
 - **經文配上真實事件**：結尾把系統記錄到的事直接對應經節；感謝卡可用點選、不計票。
 
 ## v0.4 改進重點（仍適用）
-- **破冰真的融入玩法**：可跳過的偏好題會變成非必要尋人線索；結尾分享本局新發現的隊友特點。
+- **破冰真的融入玩法**：大廳可跳過的背包題（手電筒／零食／雨衣／哨子）公開顯示，手電筒停電時能照亮面板一次、其他物品在結尾出場；結尾分享本局新發現的隊友特點。
 - **三次高潮，不一次塞滿**：討論策略 → 45 秒停電修復 → 整合突破口並重新決策。
 - **危機有後果但不會無解**：危機後一定還有一條常規路線能拿二星。
 - **有公平的星等**：二星必須完成急迫的藥品＋飲水需求；三星經分洪閘門與山路將三村物資一併送達。
@@ -45,8 +45,19 @@
 | [tools/verify_seeds.py](tools/verify_seeds.py) | 窮舉試算兩個種子的可解性與分星 |
 | [AGENTS.md](AGENTS.md) | Codex 等後續開發者工作準則 |
 
+## 部署到網路（Cloudflare，任何網路都能玩）
+目前網址：https://impossible-mission.next-calendar.workers.dev （2026-11-14 部署；只有模擬手機測過，未經真人試玩）
+
+需要 Cloudflare 帳號。部署後會得到 `https://impossible-mission.<你的子網域>.workers.dev`，手機用行動網路掃 QR Code 就能加入（docs/adr/0005）。
+
+```bash
+npx wrangler deploy
+```
+
+第一次會要求登入或設定 `CLOUDFLARE_API_TOKEN`（Edit Cloudflare Workers 權限）。本機模擬 Cloudflare：`npm run dev:worker`。
+
 ## 在現場跑原型（未經真人試玩）
-需要 Node.js 22.18 以上，以及一台和手機連到**同一個 Wi-Fi** 的電腦。
+不想部署時的替代做法：需要 Node.js 22.18 以上，以及一台和手機連到**同一個 Wi-Fi** 的電腦。
 
 ```bash
 npm install

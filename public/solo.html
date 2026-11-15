@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>單機試玩</title>
+<style>
+  :root { --bg: #0b1d3a; --card: #13294d; --gold: #f2c14e; --text: #f4f1e8; --muted: #a9b6cc; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, "PingFang TC", "Noto Sans TC", sans-serif; }
+  header { padding: 16px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  h1 { font-size: 20px; margin: 0 12px 0 0; color: var(--gold); }
+  p.note { margin: 0 16px 12px; color: var(--muted); font-size: 14px; line-height: 1.6; }
+  select, button { font: inherit; min-height: 44px; border-radius: 12px; border: 1px solid #2c4a7a; background: var(--card); color: var(--text); padding: 0 14px; }
+  button.primary { background: var(--gold); color: #1b1b1b; border: none; font-weight: 700; }
+  .grid { display: flex; gap: 16px; padding: 0 16px 24px; overflow-x: auto; }
+  .phone { flex: 0 0 auto; }
+  .phone .label { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  iframe { width: 360px; height: 720px; border: 2px solid #2c4a7a; border-radius: 24px; background: #000; }
+</style>
+</head>
+<body>
+<header>
+  <h1>單機試玩</h1>
+  <label>人數
+    <select id="n">
+      <option>3</option><option>4</option><option>5</option><option>6</option>
+      <option>7</option><option>8</option><option>9</option><option>10</option>
+    </select>
+  </label>
+  <button class="primary" id="go">開一局</button>
+  <button id="reset">全部清掉重來</button>
+</header>
+<p class="note">一台電腦同時扮演多位玩家，每一格是一支獨立的「手機」，各自有不同的職能與線索。適合一個人先熟悉流程；真正的破冰效果還是要多人各用手機玩。房主在第一格，要在第一格按「開始任務」。</p>
+<div class="grid" id="grid"></div>
+<script>
+  const KEY = 'impossible-mission.solo';
+  const grid = document.getElementById('grid');
+  const nSel = document.getElementById('n');
+  const get = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+  const set = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
+  const del = (k) => { try { localStorage.removeItem(k); } catch {} };
+
+  function frame(seat, src) {
+    const box = document.createElement('div');
+    box.className = 'phone';
+    box.innerHTML = `<div class="label">玩家 ${seat}${seat === 1 ? '（房主）' : ''}</div>`;
+    const f = document.createElement('iframe');
+    f.src = src;
+    f.title = `玩家 ${seat}`;
+    box.appendChild(f);
+    grid.appendChild(box);
+  }
+
+  function seatCode(seat) {
+    try { return JSON.parse(get('impossible-mission.session.' + seat) || 'null')?.code ?? null; } catch { return null; }
+  }
+
+  async function open(n, resume) {
+    grid.innerHTML = '';
+    set(KEY, JSON.stringify({ n }));
+    frame(1, `/?seat=1&nick=玩家1&auto=1`);
+    // 等第一格建好房間，拿到房號
+    let code = null;
+    for (let i = 0; i < 100 && !code; i++) {
+      code = seatCode(1);
+      if (!code) await new Promise((r) => setTimeout(r, 100));
+    }
+    if (!code) { alert('建立房間失敗，請重新整理再試一次。'); return; }
+    for (let s = 2; s <= n; s++) frame(s, `/?seat=${s}&room=${code}&nick=玩家${s}&auto=1`);
+  }
+
+  function reset() {
+    const saved = JSON.parse(get(KEY) || 'null');
+    for (let s = 1; s <= 10; s++) del('impossible-mission.session.' + s);
+    del(KEY);
+    grid.innerHTML = '';
+    return saved;
+  }
+
+  document.getElementById('go').onclick = () => { reset(); open(Number(nSel.value)); };
+  document.getElementById('reset').onclick = reset;
+  // 重新整理：回到原本那局
+  const saved = JSON.parse(get(KEY) || 'null');
+  if (saved?.n) { nSel.value = String(saved.n); open(saved.n, true); }
+</script>
+</body>
+</html>

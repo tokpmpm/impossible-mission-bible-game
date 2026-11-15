@@ -8,6 +8,7 @@ export const CRISIS_AT = 165_000; // 2:45
 export const TIME_UP_AT = 480_000; // 8:00
 export const FIRST_ROUND_EXTRA = 15_000;
 export const SECOND_ASSIST_AFTER = 15_000; // 逾時再 15 秒，只留正確＋1 個錯誤選項
+export const LOCK_OPENS_AT = 60_000; // 前 60 秒可以排方案但不能鎖定，先認識隊友（ADR-0003 第 24 條，暫定）
 
 export type Phase = 'planning' | 'blackout' | 'replanning' | 'settled' | 'ended';
 
@@ -24,6 +25,8 @@ export interface GameConfig {
   channel?: string; // seed 001 授權頻道
   /** 協助模式要灰掉哪些錯誤選項的順序（每格一份，引擎依序取用）；未提供則按 options 順序。 */
   grayOrder?: string[][];
+  /** 幾毫秒後才能鎖定；預設 LOCK_OPENS_AT。測試可設 0。 */
+  lockOpensAt?: number;
 }
 
 export interface RepairState {
@@ -76,7 +79,10 @@ export interface GameState {
   floodgate: boolean;
   released: boolean;
   query: { used: boolean; village: Village | null; question: QueryQuestion | null; success: boolean };
-  lastRejection: { at: number; reasons: (RejectReason | 'GREEN_NOT_LOCKABLE' | 'WRONG_PHASE')[] } | null;
+  lockOpensAt: number;
+  lastRejection: { at: number; action: Exclude<GameEvent['type'], 'tick'>; reasons: (RejectReason | 'GREEN_NOT_LOCKABLE' | 'WRONG_PHASE' | 'TOO_EARLY')[] } | null;
+  /** 被規則拒絕的累計次數；房間層用來判斷這個動作有沒有被擋下。 */
+  rejections: number;
   result: { stars: 0 | 1 | 2 | 3; served: Village[]; weight: number; at: number; cause: 'depart' | 'time_up' } | null;
   log: LogEntry[];
 }
@@ -134,7 +140,9 @@ export function createGame(config: GameConfig): GameState {
     floodgate: false,
     released: false,
     query: { used: false, village: null, question: null, success: false },
+    lockOpensAt: config.lockOpensAt ?? LOCK_OPENS_AT,
     lastRejection: null,
+    rejections: 0,
     result: null,
     log: [],
   };
@@ -250,8 +258,9 @@ function settle(s: GameState, at: number, ev: Evaluation, cause: 'depart' | 'tim
   s.log.push({ at, kind: 'settled', data: { stars: ev.stars, served: ev.served, cause } });
 }
 
-function reject(s: GameState, at: number, reasons: NonNullable<GameState['lastRejection']>['reasons']): GameState {
-  s.lastRejection = { at, reasons };
+function reject(s: GameState, action: Exclude<GameEvent['type'], 'tick'>, at: number, reasons: NonNullable<GameState['lastRejection']>['reasons']): GameState {
+  s.lastRejection = { at, action, reasons };
+  s.rejections++;
   return s;
 }
 
@@ -268,18 +277,18 @@ export function apply(prev: GameState, event: GameEvent): GameState {
       return s;
 
     case 'selectRoute': {
-      if (!EDITABLE.includes(s.phase)) return reject(s, at, ['WRONG_PHASE']);
+      if (!EDITABLE.includes(s.phase)) return reject(s, event.type, at, ['WRONG_PHASE']);
       if (!(event.route in seed.routes)) return s;
       s.plan.route = event.route;
       return s;
     }
 
     case 'setItem': {
-      if (!EDITABLE.includes(s.phase)) return reject(s, at, ['WRONG_PHASE']);
+      if (!EDITABLE.includes(s.phase)) return reject(s, event.type, at, ['WRONG_PHASE']);
       if (!cargoItems(seed).includes(event.item)) return s;
       const b = seed.breakthrough;
       if (event.on && b.kind === 'query' && b.item === event.item && !s.released) {
-        return reject(s, at, ['NOT_RELEASED']);
+        return reject(s, event.type, at, ['NOT_RELEASED']);
       }
       const has = s.plan.items.includes(event.item);
       if (event.on && !has) s.plan.items = [...s.plan.items, event.item];
@@ -288,10 +297,11 @@ export function apply(prev: GameState, event: GameEvent): GameState {
     }
 
     case 'lock': {
-      if (s.phase !== 'planning') return reject(s, at, ['WRONG_PHASE']);
-      if (s.plan.route === '綠') return reject(s, at, ['GREEN_NOT_LOCKABLE']);
+      if (s.phase !== 'planning') return reject(s, event.type, at, ['WRONG_PHASE']);
+      if (at < s.lockOpensAt) return reject(s, event.type, at, ['TOO_EARLY']);
+      if (s.plan.route === '綠') return reject(s, event.type, at, ['GREEN_NOT_LOCKABLE']);
       const ev = evaluate(s);
-      if (ev.reasons.length > 0) return reject(s, at, ev.reasons);
+      if (ev.reasons.length > 0) return reject(s, event.type, at, ev.reasons);
       s.locked = true;
       s.lastRejection = null;
       startCrisis(s, at, 'lock');
@@ -299,7 +309,7 @@ export function apply(prev: GameState, event: GameEvent): GameState {
     }
 
     case 'repairPick': {
-      if (s.phase !== 'blackout' || !s.repair) return reject(s, at, ['WRONG_PHASE']);
+      if (s.phase !== 'blackout' || !s.repair) return reject(s, event.type, at, ['WRONG_PHASE']);
       const r = s.repair;
       const slot = r.slots[r.progress];
       if (event.option === slot.answer) {
@@ -320,7 +330,7 @@ export function apply(prev: GameState, event: GameEvent): GameState {
     }
 
     case 'useEliminate': {
-      if (s.phase !== 'blackout' || !s.repair || s.repair.eliminateUsed) return reject(s, at, ['WRONG_PHASE']);
+      if (s.phase !== 'blackout' || !s.repair || s.repair.eliminateUsed) return reject(s, event.type, at, ['WRONG_PHASE']);
       s.repair.eliminateUsed = true;
       grayMore(s, s.repair.progress, 2);
       s.log.push({ at, kind: 'eliminate', data: { slot: s.repair.progress } });
@@ -329,7 +339,7 @@ export function apply(prev: GameState, event: GameEvent): GameState {
 
     case 'floodgate': {
       if (seed.breakthrough.kind !== 'floodgate') return s;
-      if (s.phase !== 'replanning') return reject(s, at, ['NOT_POWERED']);
+      if (s.phase !== 'replanning') return reject(s, event.type, at, ['NOT_POWERED']);
       if (s.floodgate) return s;
       if (event.channel.trim() === s.channel) {
         s.floodgate = true;
@@ -343,7 +353,7 @@ export function apply(prev: GameState, event: GameEvent): GameState {
     case 'query': {
       const b = seed.breakthrough;
       if (b.kind !== 'query') return s;
-      if (s.phase !== 'replanning') return reject(s, at, ['NOT_POWERED']);
+      if (s.phase !== 'replanning') return reject(s, event.type, at, ['NOT_POWERED']);
       if (s.query.used) return s;
       const success = event.village === b.village && event.question === b.question;
       s.query = { used: true, village: event.village, question: event.question, success };
@@ -357,7 +367,7 @@ export function apply(prev: GameState, event: GameEvent): GameState {
       const ev = evaluatePlan(seed, s.plan, worldOf(s));
       if (ev.reasons.length > 0) {
         s.log.push({ at, kind: 'rejected', data: { reasons: ev.reasons } });
-        return reject(s, at, ev.reasons);
+        return reject(s, event.type, at, ev.reasons);
       }
       s.lastRejection = null;
       settle(s, at, ev, 'depart');
