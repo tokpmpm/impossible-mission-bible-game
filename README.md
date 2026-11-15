@@ -47,6 +47,8 @@
 npx wrangler deploy
 ```
 
+想先試新版、不動正式網址：`npm run deploy:preview` 會部署到另一個獨立的 Worker `impossible-mission-preview`（網址為 `https://impossible-mission-preview.<你的子網域>.workers.dev`）。
+
 第一次會要求登入或設定 `CLOUDFLARE_API_TOKEN`（Edit Cloudflare Workers 權限）。本機模擬 Cloudflare：`npm run dev:worker`。
 
 ## 在現場跑原型（未經真人試玩）

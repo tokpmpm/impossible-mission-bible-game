@@ -1,6 +1,6 @@
 // 職能、各人數的職能組合、線索、故事卡文字、結尾經文。
 // 這些是內容資料（暫定，未經真人試玩），不是規則；規則在 src/engine。
-// 經文為新標點和合本（公版，上帝版用字）。2026-11-15 以 GitHub brandonmcconnell/bible 的 zh-Hant/cuvt（標示「新標點和合本」）逐字核對字詞（docs/05）。
+// 經文為新標點和合本「神」版（公版；2026-11-15 使用者選定神版）。2026-11-15 以 GitHub brandonmcconnell/bible 的 zh-Hant/cuvt（標示「新標點和合本」）逐字核對字詞（docs/05）。
 import type { CardId, ItemId, NeedId } from '../engine/seeds.ts';
 
 export type RoleId = 'nav' | 'supply' | 'comms' | 'eng' | 'medic' | 'observer' | 'scout' | 'liaison' | 'store' | 'backup';
@@ -162,7 +162,7 @@ export const STORY = {
 
 /** 結尾經文。 */
 export const ENDING_VERSES = {
-  fed: { text: '保羅說了這話，就拿着餅，在眾人面前祝謝了上帝，擘開吃。於是他們都放下心，也就吃了。', ref: '徒 27:35–36' },
+  fed: { text: '保羅說了這話，就拿着餅，在眾人面前祝謝了神，擘開吃。於是他們都放下心，也就吃了。', ref: '徒 27:35–36' },
   shore: { text: '其餘的人可以用板子或船上的零碎東西上岸。這樣，眾人都得了救，上了岸。', ref: '徒 27:44' },
 } as const;
 

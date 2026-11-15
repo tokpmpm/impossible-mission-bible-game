@@ -3,6 +3,8 @@
 
 來源：GitHub brandonmcconnell/bible 的 zh-Hant/cuvt（標示「新標點和合本」，上帝版用字），
 經 raw.githubusercontent.com 下載使徒行傳 27、28 章。需要網路。
+本遊戲用「神」版（2026-11-15 使用者決定）。神版與上帝版只差「上帝」↔「神」這個詞，
+所以比對前先把來源的「上帝」換成「神」；畫面若出現「上帝」反而會被判為不一致。
 
 用法：python3 tools/verify_verses.py
 節錄處以「……」分段，每段都必須是對應經節連續原文的一部分。
@@ -52,13 +54,16 @@ def chapter(n):
     for i in range(1, len(parts), 2):
         txt = re.sub(r'<[^>]+>', '', parts[i + 1])
         txt = re.sub(r'^\s*#+.*$', '', txt, flags=re.M)
-        out[int(parts[i])] = re.sub(r'\s+', '', txt)
+        out[int(parts[i])] = re.sub(r'\s+', '', txt).replace('上帝', '神')  # 換成神版
     return out
 
 
 def main():
     verses = {27: chapter(27), 28: chapter(28)}
     content = CONTENT.read_text(encoding='utf-8')
+    if '上帝' in content:
+        print('[不一致] content.ts 出現「上帝」：本遊戲用神版')
+        return 1
     items = [(label, re.search(rx, content, re.S).group(1), c, a, b) for label, rx, c, a, b in QUOTES] + EXTRA
     ok_all = True
     for label, quote, c, a, b in items:
