@@ -1,173 +1,348 @@
 #!/usr/bin/env python3
-"""窮舉驗證第一關「保羅海難」的可解性與分星（含所有故事卡組合）。只做規則試算，不是遊戲程式。
+"""窮舉驗證第一關「保羅海難」的可解性、分星與重玩性（含所有故事卡×見聞組合）。只做規則試算，不是遊戲程式。
 
-用法：python3 tools/verify_seeds.py
-      python3 tools/verify_seeds.py --export 路徑.json   # 匯出逐筆對照檔給規則引擎測試
+用法：python3 tools/verify_seeds.py                     # 驗收（全部有三星解、二星保底、照抄成功率 < 20%）
+      python3 tools/verify_seeds.py --table             # 另外列出每一種「起風卡×見聞」與可搭配的風暴卡
+      python3 tools/verify_seeds.py --metrics           # 只印重玩性指標（JSON）
+      python3 tools/verify_seeds.py --export 路徑.json  # 匯出逐筆對照檔給規則引擎測試（test/golden.test.ts）
 
-規則（docs/11-MISSION_01_SHIPWRECK.md）：
-- 船上的東西全部從船上開始；玩家決定留哪些（其餘丟進海裡）。
-- 留下的總重 ≤ 安全載重才能「決定好了」／「衝向海灘」，否則拒絕（超重）。
-- 星等＝上岸三件事顧好幾件：力氣（糧食或已吃飯）、船身（纜索或卡片已完成）、天亮（錨）。
-- 吃飯（突破口）：糧食離船、不再佔重量，力氣算顧好。
-暴風雨救援 seed 001／002 已於 2026-11-15 退役（使用者決定第一關改為保羅海難），見 git 歷史。
+規則（docs/11-MISSION_01_SHIPWRECK.md、docs/12-REPLAYABILITY.md 第 3 節；2026-11-16 使用者核准，DECISIONS 15、16）：
+- 船上的東西全部從船上開始；玩家決定留哪些（其餘丟進海裡）。留下的總重 ≤ 安全載重才能「決定好了」／「衝向海灘」。
+- 見聞（每局不同，各在一支手機上）：
+    食＝今晚力氣靠糧食還是麥子；繩＝船身靠纜索、器具還是小船的繩子；
+    水＝淺（可以拋錨）或深（錨要帶到上岸）；胃＝吃得下或吃不下（吃不下就不能吃飯，食物要帶上岸）。
+- 星等＝上岸三件事顧好幾件：力氣（今晚的食物）、船身（今晚的繩子）、天亮（錨）。留著那樣東西、卡片已顧好、或已經「用掉」都算。
+- 風暴捲走：危機前丟下海的東西，危機一來就撈不回來（首局不啟用；只影響「風暴前帶什麼」，不影響單一方案的分星）。
+- 補好船後三種「用掉」：吃飯（力氣）／捆船底（船身）／拋錨（天亮）——那樣東西離船、那件事顧好；
+  天亮前全隊只來得及做 USES 件（=1）。
+- 一種「起風卡×見聞」要有一種風暴前的帶法，不管翻到哪一張允許的風暴卡都能三星，且允許的風暴卡至少 3 張，才會被抽到。
+暴風雨救援 seed 001／002 已於 2026-11-15 退役；ship 001 舊數值（6→4、只能吃飯）於 2026-11-16 換成本版，見 git 歷史。
 """
 import json
 import sys
-from itertools import combinations
+from collections import Counter
+from itertools import combinations, product
+
+ITEMS = ["糧食", "纜索", "錨", "麥子", "器具", "小船"]
+NEEDS = ["力氣", "船身", "天亮"]
 
 SEEDS = {
     "ship 001": dict(
-        cap_pre=6, cap_post=4,
-        weights={"糧食": 2, "纜索": 1, "錨": 3, "麥子": 3, "器具": 2, "小船": 2},
-        needs={"力氣": "糧食", "船身": "纜索", "天亮": "錨"},
-        food="糧食",
+        cap_pre=8, cap_post=5, uses=1,
+        weights={"糧食": 3, "纜索": 2, "錨": 3, "麥子": 3, "器具": 2, "小船": 2},
     ),
 }
 
+# 見聞：每局各發一個值。順序固定（腳本、引擎、對照檔都用這個順序）。
+TONIGHT = {"食": ["糧食", "麥子"], "繩": ["纜索", "器具", "小船"], "水": ["淺", "深"], "胃": ["吃得下", "吃不下"]}
+# 首局固定的「經典配置」：就是 v0.7 的打法（丟麥子、器具、小船，吃飯），讓新人先學會骨架。
+CLASSIC = {"食": "糧食", "繩": "纜索", "水": "深", "胃": "吃得下"}
+
+# 補好船後的三種「用掉」。blocked：這個見聞值時不能做。關掉某一種只要從 USE_ENABLED 拿掉（例：試玩後拿掉捆船底）。
+USES = {
+    "吃飯": dict(need="力氣", blocked=("胃", "吃不下")),
+    "捆船底": dict(need="船身", blocked=None),
+    "拋錨": dict(need="天亮", blocked=("水", "深")),
+}
+USE_ENABLED = ["吃飯", "捆船底", "拋錨"]
+
 # 故事卡：deck A＝起風（開局翻開），deck B＝風暴（補好船後翻開）。
-# weight：重量增減；remove：自動離船；done：已顧好的事；pin_pre：危機前丟不掉；cap：危機後載重增減；
-# eat_only：這件事只能靠吃飯顧好（留著糧食不算）；pre_max：危機前預期最高星。
-# 其他效果（時間、誰看得到線索）不影響可解性，只記在 note。
+# weight：重量增減（最低 0）；remove：自動離船；done：已顧好的事；pin_pre：危機前丟不掉；
+# eat_only：這件事只能靠「用掉」顧好（留著東西不算）；fix：這局的見聞固定成這個值（不發這張見聞）；
+# exclude：不和這個見聞值同局。其他效果（時間、誰看得到線索）不影響可解性，只記在 note。
 CARDS = {
-    "A1": dict(deck="A", pin_pre=["麥子"], pre_max=2, note="船主不准丟麥子（危機前）"),
+    "A1": dict(deck="A", pin_pre=["麥子"], note="船主不准丟麥子（危機前）"),
     "A2": dict(deck="A", note="風暴提早 15 秒"),
     "A3": dict(deck="A", weight={"糧食": -1}),
-    "A4": dict(deck="A", remove=["纜索"], done=["船身"]),
+    "A4": dict(deck="A", remove=["纜索"], done=["船身"], fix={"繩": "纜索"}),
     "A5": dict(deck="A", note="補船多 10 秒"),
     "B1": dict(deck="B", remove=["器具"], weight={"麥子": -2}),
     "B2": dict(deck="B", remove=["小船"]),
     "B3": dict(deck="B", weight={"糧食": 2}),
     "B4": dict(deck="B", note="醫生的吃飯線索全隊可見"),
-    "B5": dict(deck="B", remove=["錨"], done=["天亮"], eat_only=["力氣"]),
+    "B5": dict(deck="B", remove=["錨"], done=["天亮"], eat_only=["力氣"], exclude={"胃": "吃不下"}),
 }
+DECK_A = [k for k, c in CARDS.items() if c["deck"] == "A"]
+DECK_B = [k for k, c in CARDS.items() if c["deck"] == "B"]
+MIN_B = 3
 
 
-def world(seed, cards, crisis, fed):
-    """回傳 (重量表, 船上可選的東西, 已顧好的事, 危機前釘住的東西, 載重)。"""
+def subsets(xs):
+    xs = [i for i in ITEMS if i in xs]
+    for n in range(len(xs) + 1):
+        for c in combinations(xs, n):
+            yield frozenset(c)
+
+
+def provider(tn):
+    """今晚上岸三件事各靠哪一樣東西。"""
+    return {"力氣": tn["食"], "船身": tn["繩"], "天亮": "錨"}
+
+
+def weights(seed, cards):
     w = dict(seed["weights"])
+    for c in cards:
+        for k, d in CARDS[c].get("weight", {}).items():
+            w[k] = max(0, w[k] + d)
+    return w
+
+
+def story_ok(a, tn, b=None):
+    """這張起風卡（和風暴卡）能不能和這組見聞同局。"""
+    for c in [a] + ([b] if b else []):
+        for d, v in CARDS[c].get("fix", {}).items():
+            if tn[d] != v:
+                return False
+        for d, v in CARDS[c].get("exclude", {}).items():
+            if tn[d] == v:
+                return False
+    return True
+
+
+def can_use(use, tn):
+    if use not in USE_ENABLED:
+        return False
+    bl = USES[use]["blocked"]
+    return not (bl and tn[bl[0]] == bl[1])
+
+
+def world(seed, a, b, tn, crisis, used=None):
+    """回傳 (重量表, 船上可能有的東西, 已顧好的事, 危機前釘住的東西, 載重, 只能靠用掉的事)。
+    crisis=False：危機前（只有起風卡）；crisis=True：補好船後（起風＋風暴卡）。used：已用掉的那一種（或 None）。"""
+    cards = [a] + ([b] if crisis else [])
+    w = weights(seed, cards)
     removed, done, pinned, eat_only = set(), set(), set(), set()
-    cap_delta = 0
-    for cid in cards:
-        c = CARDS[cid]
-        if c["deck"] == "B" and not crisis:
-            continue
-        for k, d in c.get("weight", {}).items():
-            w[k] += d
-        removed |= set(c.get("remove", []))
-        done |= set(c.get("done", []))
+    for c in cards:
+        cd = CARDS[c]
+        removed |= set(cd.get("remove", []))
+        done |= set(cd.get("done", []))
+        eat_only |= set(cd.get("eat_only", []))
         if not crisis:
-            pinned |= set(c.get("pin_pre", []))
-        cap_delta += c.get("cap", 0)
-        eat_only |= set(c.get("eat_only", []))
-    if fed:
-        removed.add(seed["food"])
-        done.add("力氣")
-    items = [i for i in seed["weights"] if i not in removed]
-    cap = (seed["cap_post"] + cap_delta) if crisis else seed["cap_pre"]
-    return w, items, done, pinned, cap, eat_only
+            pinned |= set(cd.get("pin_pre", []))
+    if used:
+        need = USES[used]["need"]
+        removed.add(provider(tn)[need])
+        done.add(need)
+    aboard = [i for i in ITEMS if i not in removed]
+    cap = seed["cap_post"] if crisis else seed["cap_pre"]
+    return w, aboard, done, pinned, cap, eat_only
 
 
-def evaluate(seed, kept, w, done, cap, eat_only=()):
-    """回傳 (星數, 原因)；原因 None＝可以出發。"""
+def evaluate(seed, kept, tn, w, aboard, done, cap, eat_only):
+    """回傳 (星數, 原因)；原因 None＝可以出發。kept 裡不在船上的東西不算（與引擎相同）。"""
+    kept = [i for i in kept if i in aboard]
     weight = sum(w[i] for i in kept)
-    served = [n for n, item in seed["needs"].items() if n in done or (item in kept and n not in eat_only)]
-    stars = len(served)
-    if weight > cap:
-        return stars, "超重"
-    return stars, None
+    pv = provider(tn)
+    stars = sum(1 for n in NEEDS if n in done or (pv[n] in kept and n not in eat_only))
+    return stars, ("超重" if weight > cap else None)
 
 
-def best(seed, cards, crisis, fed):
-    w, items, done, pinned, cap, eat_only = world(seed, cards, crisis, fed)
-    top = (-1, ())
-    for n in range(len(items) + 1):
-        for kept in combinations(items, n):
-            if not pinned <= set(kept):
+def uses_available(seed, a, b, tn, aboard_set):
+    """補好船後，這局真的能做的「用掉」（東西要還在船上、那件事還沒顧好、見聞允許）。"""
+    _w, _ab, done, _p, _c, _e = world(seed, a, b, tn, True)
+    pv = provider(tn)
+    return [u for u in USES if can_use(u, tn) and USES[u]["need"] not in done and pv[USES[u]["need"]] in aboard_set]
+
+
+def stage1(seed, a, tn):
+    """風暴前可以帶過危機的組合（危機前不超重、含釘住的東西）。"""
+    w, aboard, _d, pinned, cap, _e = world(seed, a, None, tn, False)
+    return [K for K in subsets(aboard) if pinned <= K and sum(w[i] for i in K) <= cap]
+
+
+def stage2(seed, a, b, tn, K1, lines=False):
+    """風暴前帶著 K1 過了危機（漂著的被捲走），補好船、翻開風暴卡後的最高星（與達成的做法）。"""
+    _w0, aboard0, _d, _p, _c, _e = world(seed, a, b, tn, True)
+    aboard = set(K1) & set(aboard0)
+    av = uses_available(seed, a, b, tn, aboard)
+    best, out = -1, []
+    for n in range(0, seed["uses"] + 1):
+        for us in combinations(av, n):
+            used = us[0] if us else None  # USES=1：最多一件
+            w, ab, done, _p, cap, eo = world(seed, a, b, tn, True, used)
+            pool = aboard & set(ab) & set(provider(tn).values())  # 上岸只帶今晚用得上的東西（多帶別的只會更重）
+            for K2 in subsets(pool):
+                s, reason = evaluate(seed, K2, tn, w, ab, done, cap, eo)
+                if reason:
+                    continue
+                if s > best:
+                    best, out = s, []
+                if s == best and lines:
+                    out.append((used, K2))
+    return (best, out) if lines else best
+
+
+def tonights():
+    for vals in product(*TONIGHT.values()):
+        yield dict(zip(TONIGHT, vals))
+
+
+def tkey(tn):
+    return "/".join(tn[d] for d in TONIGHT)
+
+
+def setups(seed):
+    """所有通過的「起風卡×見聞」：(A, 見聞, 允許的風暴卡, {K1: [各風暴卡最高星]})；以及全部試過的數量。"""
+    valid, tried = [], 0
+    for a in DECK_A:
+        for tn in tonights():
+            if not story_ok(a, tn):
                 continue
-            s, reason = evaluate(seed, kept, w, done, cap, eat_only)
-            if reason is None and s > top[0]:
-                top = (s, kept)
-    return top
+            tried += 1
+            res = {K1: [stage2(seed, a, b, tn, K1) for b in DECK_B] for K1 in stage1(seed, a, tn)}
+            allowed = [i for i, b in enumerate(DECK_B) if story_ok(a, tn, b)]
+            chosen = None
+            for n in range(len(allowed), MIN_B - 1, -1):
+                for S in combinations(allowed, n):
+                    if any(all(r[i] == 3 for i in S) for r in res.values()):
+                        chosen = S
+                        break
+                if chosen:
+                    break
+            if chosen:
+                valid.append((a, tn, [DECK_B[i] for i in chosen], {K: {DECK_B[i]: r[i] for i in range(len(DECK_B))} for K, r in res.items()}))
+    return valid, tried
 
 
-def combos():
-    a = [k for k, c in CARDS.items() if c["deck"] == "A"]
-    b = [k for k, c in CARDS.items() if c["deck"] == "B"]
-    return [(x, y) for x in a for y in b]
+def robust(entry):
+    """不管翻到哪一張允許的風暴卡都三星的風暴前帶法中，最省的幾種。"""
+    _a, _tn, bs, res = entry
+    rob = [K for K, r in res.items() if all(r[b] == 3 for b in bs)]
+    return sorted((K for K in rob if not any(o < K for o in rob)), key=lambda K: [ITEMS.index(i) for i in ITEMS if i in K])
 
 
-def answers(seed, cards, crisis, fed, stars):
-    """所有能達到 stars 星且可出發的留法（集合）。"""
-    w, items, done, pinned, cap, eat_only = world(seed, cards, crisis, fed)
-    out = set()
-    for n in range(len(items) + 1):
-        for kept in combinations(items, n):
-            if not pinned <= set(kept):
-                continue
-            s, reason = evaluate(seed, kept, w, done, cap, eat_only)
-            if reason is None and s == stars:
-                out.add(kept)
-    return out
+def run_line(seed, a, tn, b, line):
+    """把一套打法（風暴前帶什麼、用掉哪件、帶什麼上岸）原封不動用在這一局，得幾星。"""
+    K1, use, K2 = line
+    w1, aboard1, _d, pinned, cap1, _e = world(seed, a, None, tn, False)
+    K = (set(K1) & set(aboard1)) | pinned
+    if sum(w1[i] for i in K) > cap1:
+        return 0
+    _w, ab0, _d, _p, _c, _e = world(seed, a, b, tn, True)
+    aboard = K & set(ab0)
+    if use and use in uses_available(seed, a, b, tn, aboard):
+        w, ab, done, _p, cap, eo = world(seed, a, b, tn, True, use)
+    else:
+        w, ab, done, _p, cap, eo = world(seed, a, b, tn, True)
+    keep = aboard & set(ab) & set(K2)
+    s, reason = evaluate(seed, keep, tn, w, ab, done, cap, eo)
+    return 0 if reason else s
 
 
-def changes(name, seed):
-    """每張卡和「沒有卡」相比，有沒有改變危機前三星、危機後兩星或吃飯後三星的留法。"""
-    base = {k: answers(seed, (), *v) for k, v in {"pre": (False, False, 3), "post": (True, False, 2), "fed": (True, True, 3)}.items()}
-    print(f"== {name}：卡片是否改變該怎麼做")
-    for cid in CARDS:
-        diff = [label for label, (k, v) in {"危機前": ("pre", (False, False, 3)), "危機後兩星": ("post", (True, False, 2)), "吃飯後三星": ("fed", (True, True, 3))}.items()
-                if answers(seed, (cid,), *v) != base[k]]
-        print(f"  {cid}：{'改變 ' + '、'.join(diff) if diff else '留法不變（只影響時間或資訊）'}")
+def metrics(seed):
+    """重玩性指標（docs/12-REPLAYABILITY.md 3.6 節）。"""
+    valid, tried = setups(seed)
+    games = [(a, tkey(tn), b) for a, tn, bs, _r in valid for b in bs]
+    byk = {(a, tkey(tn)): (tn, bs, res) for a, tn, bs, res in valid}
+    n = len(games)
+    L = {}
+    for a, k, b in games:
+        tn, _bs, res = byk[(a, k)]
+        ls = set()
+        for K1 in res:
+            s, l2 = stage2(seed, a, b, tn, K1, lines=True)
+            if s == 3:
+                ls |= {(K1, u, K2) for u, K2 in l2}
+        L[(a, k, b)] = ls
+    alllines = set().union(*L.values())
+    succ = {l: frozenset(g for g in games if run_line(seed, g[0], byk[(g[0], g[1])][0], g[2], l) == 3) for l in alllines}
+    copy_best = sum(len(set().union(*[succ[l] for l in L[g]]) - {g}) for g in games) / (n * (n - 1))
+    copy_avg = sum(sum(len(succ[l] - {g}) for l in L[g]) / len(L[g]) for g in games) / (n * (n - 1))
+    fixed = max(len(s) for s in succ.values()) / n
+    # 不問隊友：只看公開的起風卡決定風暴前帶什麼，之後都走最佳
+    blind = 0
+    for a in DECK_A:
+        ks = [(k, v) for k, v in byk.items() if k[0] == a]
+        if not ks:
+            continue
+        allK = set().union(*[set(v[2]) for _k, v in ks])
+        sc = {K: sum(sum(1 for b in v[1] if v[2].get(K, {}).get(b, 0) == 3) for _k, v in ks) for K in allK}
+        blind += max(sc.values())
+    sigs = Counter(frozenset(robust(e)) for e in valid)
+    two = all(any(all(r[b] >= 2 for b in bs) for r in res.values()) for _a, _tn, bs, res in valid)
+    return dict(
+        tried=tried, setups=len(valid), games=n,
+        three=sum(1 for g in games if L[g]), two_floor=two,
+        copy_best=round(copy_best, 4), copy_avg=round(copy_avg, 4), fixed=round(fixed, 4), blind=round(blind / n, 4),
+        signatures=len(sigs),
+    )
 
 
-def check(name, seed):
-    ok = True
-    print(f"== {name}（{len(combos())} 種故事卡組合）")
-    for cards in combos():
-        pre = best(seed, cards, crisis=False, fed=False)
-        post = best(seed, cards, crisis=True, fed=False)
-        fed = best(seed, cards, crisis=True, fed=True)
-        pre_max = min(CARDS[c].get("pre_max", 3) for c in cards)
-        rules = [
-            (f"危機前最高 {pre_max} 星", pre[0] == pre_max),
-            ("危機後未吃飯最高恰好 2 星", post[0] == 2),
-            ("危機後吃過飯可 3 星", fed[0] == 3),
-        ]
-        passed = all(p for _, p in rules)
-        ok &= passed
-        print(f"  [{'通過' if passed else '失敗'}] {'+'.join(cards)}："
-              f"危機前 {'★' * pre[0]} {'+'.join(pre[1])}；"
-              f"危機後 {'★' * post[0]} {'+'.join(post[1])}；"
-              f"吃過飯 {'★' * fed[0]} {'+'.join(fed[1])}"
-              + ("" if passed else "  ← " + "、".join(l for l, p in rules if not p)))
-    return ok
+def check(name, seed, table=False):
+    valid, tried = setups(seed)
+    m = metrics(seed)
+    print(f"== {name}：起風卡×見聞 {tried} 種，{len(valid)} 種通過；合計 {m['games']} 種局面")
+    print(f"  數值：{seed['weights']}；載重 {seed['cap_pre']}→{seed['cap_post']}；天亮前只來得及用掉 {seed['uses']} 件（{'、'.join(USE_ENABLED)}）")
+    classic_a = [a for a, tn, _b, _r in valid if tn == CLASSIC]
+    rules = [
+        (f"三星有解 {m['three']}/{m['games']}", m["three"] == m["games"]),
+        ("每種起風卡×見聞都有二星保底的帶法", m["two_floor"]),
+        (f"照抄成功率 {m['copy_best']:.1%} < 20%", m["copy_best"] < 0.20),
+        (f"首局經典配置可用的起風卡：{'、'.join(classic_a)}（至少 3 張）", len(classic_a) >= 3),
+    ]
+    print(f"  照抄成功率 {m['copy_best']:.1%}；隨機取一個三星打法 {m['copy_avg']:.1%}；最強固定打法 {m['fixed']:.1%}；"
+          f"不問隊友 {m['blind']:.1%}；風暴前最省的必帶組合 {m['signatures']} 種")
+    if table:
+        print("  -- 通過的組合（食/繩/水/胃｜可搭配的風暴卡｜風暴前最省的必帶組合）")
+        for e in valid:
+            a, tn, bs, _res = e
+            print(f"  {a} {tkey(tn)}｜{''.join(bs)}｜{'、'.join('+'.join(i for i in ITEMS if i in K) for K in robust(e))}")
+    for label, ok in rules:
+        print(f"  [{'通過' if ok else '失敗'}] {label}")
+    return all(ok for _l, ok in rules)
+
+
+def mask_items(m):
+    return [ITEMS[i] for i in range(len(ITEMS)) if m >> i & 1]
+
+
+def encode(seed, tn, w, aboard, done, cap, eat_only):
+    """64 種留法（位元 i＝ITEMS[i]）各一個字元：'0'–'3'＝可出發的星數；'a'–'d'＝超重時的星數。"""
+    out = []
+    for m in range(1 << len(ITEMS)):
+        s, reason = evaluate(seed, mask_items(m), tn, w, aboard, done, cap, eat_only)
+        out.append("abcd"[s] if reason else str(s))
+    return "".join(out)
 
 
 def export(path):
-    """逐筆匯出：種子 × 卡片組合 × 情境 × 每組留下的東西的星等與拒絕原因。"""
-    scenarios = {"危機前": (False, False), "危機後": (True, False), "危機後＋吃飯": (True, True)}
-    rows = []
-    for name, seed in SEEDS.items():
-        for cards in combos():
-            for scen, (crisis, fed) in scenarios.items():
-                w, items, done, _pinned, cap, eat_only = world(seed, cards, crisis, fed)
-                for n in range(len(items) + 1):
-                    for kept in combinations(items, n):
-                        s, reason = evaluate(seed, kept, w, done, cap, eat_only)
-                        rows.append(dict(seed=name, cards=list(cards), scenario=scen,
-                                         kept=list(kept), stars=s, reason=reason))
+    """逐筆匯出：每種通過的「起風卡×見聞」危機前 64 種留法；每種局面 × 不用掉／三種用掉 × 64 種留法；
+    以及每種局面的一套三星打法（給引擎整局重播）。"""
+    name, seed = "ship 001", SEEDS["ship 001"]
+    valid, _tried = setups(seed)
+    out = []
+    for e in valid:
+        a, tn, bs, res = e
+        w, aboard, done, _p, cap, eo = world(seed, a, None, tn, False)
+        rob = robust(e)
+        games = []
+        for b in bs:
+            post = {}
+            for use in [None] + list(USES):
+                if use and use not in uses_available(seed, a, b, tn, set(ITEMS)):
+                    continue
+                w2, ab2, done2, _p2, cap2, eo2 = world(seed, a, b, tn, True, use)
+                post[use or "無"] = encode(seed, tn, w2, ab2, done2, cap2, eo2)
+            # 一套三星打法：最省的保險帶法＋第一個三星的做法（不用掉優先）
+            s, lines = stage2(seed, a, b, tn, rob[0], lines=True)
+            assert s == 3
+            use, K2 = sorted(lines, key=lambda x: (x[0] is not None, x[0] or "", len(x[1]), [ITEMS.index(i) for i in x[1]]))[0]
+            games.append(dict(b=b, post=post, line=dict(keep=[i for i in ITEMS if i in rob[0]], use=use, land=[i for i in ITEMS if i in K2])))
+        out.append(dict(a=a, tonight=tn, b=bs, pre=encode(seed, tn, w, aboard, done, cap, eo),
+                        robust=[[i for i in ITEMS if i in K] for K in rob], games=games))
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(dict(seeds={n: dict(weights=s["weights"], cap_pre=s["cap_pre"], cap_post=s["cap_post"])
-                              for n, s in SEEDS.items()}, rows=rows),
-                  f, ensure_ascii=False, separators=(",", ":"))
-    print(f"已匯出 {len(rows)} 筆到 {path}")
+        json.dump(dict(seed=name, items=ITEMS, weights=seed["weights"], cap_pre=seed["cap_pre"], cap_post=seed["cap_post"],
+                       uses=seed["uses"], use_enabled=USE_ENABLED, classic=CLASSIC, metrics=metrics(seed), setups=out),
+                  f, ensure_ascii=False, indent=0, separators=(",", ":"))
+    print(f"已匯出 {len(out)} 種起風卡×見聞、{sum(len(e['games']) for e in out)} 種局面到 {path}")
 
 
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--export":
         export(sys.argv[2])
         raise SystemExit(0)
-    results = [check(n, s) for n, s in SEEDS.items()]
-    for n, s in SEEDS.items():
-        changes(n, s)
-    raise SystemExit(0 if all(results) else 1)
+    if "--metrics" in sys.argv:
+        print(json.dumps(metrics(SEEDS["ship 001"]), ensure_ascii=False))
+        raise SystemExit(0)
+    ok = all(check(n, s, "--table" in sys.argv) for n, s in SEEDS.items())
+    raise SystemExit(0 if ok else 1)

@@ -139,6 +139,10 @@ def diagnose_current():
     """現行 ship 001（tools/verify_seeds.py）的固定打法有多強。"""
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "tools"))
     import verify_seeds as v
+    if not hasattr(v, "combos"):
+        # 2026-11-16 起 tools/verify_seeds.py 已換成本方案的正式規則；現況（v0.7）診斷請在 commit 992a8e2 執行本腳本。
+        print("== 一、現況：tools/verify_seeds.py 已改為本方案（見 git commit 992a8e2 的舊版診斷），略過")
+        return
     seed = v.SEEDS["ship 001"]
     decoys = ("麥子", "器具", "小船")
     print("== 一、現況（ship 001，25 種故事卡組合）")
