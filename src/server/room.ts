@@ -21,6 +21,7 @@ import {
 } from '../engine/game.ts';
 import { REASON_TEXT, evaluatePlan, storyOk, validSetups, type Evaluation, type RejectReason, type Setup } from '../engine/rules.ts';
 import { CARDS, CLASSIC, DIALS, ITEMS, NEEDS, USES, type CardId, type DialId, type ItemId, type NeedId, type SeedId, type Tonight, type UseId } from '../engine/seeds.ts';
+import { scoreOf, type ScoreBreakdown, type ScoreRaw } from '../engine/score.ts';
 import { describeSymbol, makeEliminationClues, makeSlots, parseSymbol, rng } from '../engine/symbols.ts';
 import {
   ASKS,
@@ -63,6 +64,8 @@ export interface Player {
 }
 
 interface Round {
+  /** 每局唯一的代號（排行榜用來防止同一局登記兩次）。 */
+  id: string;
   no: number;
   seedId: SeedId;
   startedAt: number;
@@ -82,6 +85,8 @@ interface Round {
   btHolders: Map<number, string>;
   /** 見聞：哪一張在誰手上（A4 的局不發「繩」）。 */
   tonightHolders: Map<DialId, string>;
+  /** 已登記上榜（每局只能一次）。 */
+  submitted: { name: string; rank: number; best: boolean; bestScore: number } | null;
 }
 
 const EXTRA_REASON_TEXT: Record<string, string> = {
@@ -132,9 +137,12 @@ export class Room {
 
   /** 捲走前提醒幾毫秒（正式遊戲 10 秒；只給自動測試縮短）。 */
   sweepWarningMs: number | undefined;
+  /** 練習房（單機試玩 solo.html 開的）：分數照算照顯示，但不能登記排行榜。 */
+  practice: boolean;
 
-  constructor(code: string, opts: { now?: () => number; seed?: number; introMs?: number; sweepWarningMs?: number } = {}) {
+  constructor(code: string, opts: { now?: () => number; seed?: number; introMs?: number; sweepWarningMs?: number; practice?: boolean } = {}) {
     this.code = code;
+    this.practice = !!opts.practice;
     this.introMs = opts.introMs ?? INTRO_MS;
     this.sweepWarningMs = opts.sweepWarningMs;
     this.now = opts.now ?? Date.now;
@@ -149,7 +157,7 @@ export class Room {
     const name = nickname.trim().slice(0, 12) || `隊員${active.length + 1}`;
     const player: Player = { id: randomId(10), token: randomId(24), nickname: this.uniqueName(name), connected: true, left: false, pref: null, seenActs: [] };
     this.players.push(player);
-    if (!this.hostId || !this.get(this.hostId)?.connected) this.hostId = player.id;
+    this.transferHostIfNeeded(); // 房主不在線時優先交給這局的隊員
     this.touch();
     return player;
   }
@@ -168,7 +176,7 @@ export class Room {
     const p = this.get(id);
     if (!p || p.token !== token || p.left) return null;
     p.connected = true;
-    if (!this.hostId || !this.get(this.hostId)?.connected) this.hostId = p.id;
+    this.transferHostIfNeeded();
     this.touch();
     return p;
   }
@@ -192,7 +200,9 @@ export class Room {
   private transferHostIfNeeded(): void {
     const host = this.hostId ? this.get(this.hostId) : undefined;
     if (host && host.connected && !host.left) return;
-    const next = this.players.find((p) => p.connected && !p.left);
+    // 一局進行中或剛結算：房主優先交給這局的隊員（登記上榜要由隊員決定隊名）
+    const inRound = this.round?.participants ?? [];
+    const next = this.players.find((p) => p.connected && !p.left && inRound.includes(p.id)) ?? this.players.find((p) => p.connected && !p.left);
     this.hostId = next ? next.id : null;
   }
 
@@ -310,6 +320,7 @@ export class Room {
       if (h) tonightHolders.set(d, h);
     }
     this.round = {
+      id: `${this.code}-${this.roundsPlayed}-${randomId(8)}`,
       no: this.roundsPlayed,
       seedId: SEED_ID,
       startedAt: this.now(),
@@ -326,6 +337,7 @@ export class Room {
       thanks: new Map(),
       btHolders,
       tonightHolders,
+      submitted: null,
     };
     this.touch();
   }
@@ -546,6 +558,32 @@ export class Room {
     else if (to !== from && r.participants.includes(to)) r.thanks.set(from, to);
   }
 
+  // ---------- 計分與登記上榜 ----------
+
+  /** 這局的分數（伺服器依規則狀態計算；還沒結束＝null）。 */
+  score(): { raw: ScoreRaw; score: ScoreBreakdown } | null {
+    const g = this.round?.game;
+    return g ? scoreOf(g) : null;
+  }
+
+  /** 登記上榜前的檢查：房主、這局已結算、不是練習房、還沒登記過。通過就回傳要存的資料。 */
+  submission(pid: string): { roundId: string; raw: ScoreRaw; score: ScoreBreakdown; players: number } {
+    const r = this.round;
+    if (this.practice) throw new Error('練習模式不計入排行榜');
+    if (pid !== this.hostId) throw new Error('只有房主可以登記上榜');
+    if (!r) throw new Error('還沒有可以登記的一局');
+    if (!r.participants.includes(pid)) throw new Error('只有這局的隊員可以登記上榜');
+    const sc = this.score();
+    if (!sc) throw new Error('這局還沒結束');
+    if (r.submitted) throw new Error('這局已經登記過了');
+    return { roundId: r.id, raw: sc.raw, score: sc.score, players: r.participants.length };
+  }
+
+  markSubmitted(roundId: string, info: NonNullable<Round['submitted']>): void {
+    if (this.round?.id === roundId) this.round.submitted = info;
+    this.touch();
+  }
+
   // ---------- 畫面資料 ----------
 
   private nick(pid: string | null | undefined): string {
@@ -637,6 +675,7 @@ export class Room {
         repair: false,
         eliminate: false,
         next: false,
+        submit: false,
         uses: [],
         undo: false,
       },
@@ -715,6 +754,8 @@ export class Room {
     }
     v.can.undo = g.phase === 'replanning' && !!g.used && useActor?.playerId === pid && g.now - g.used.at <= UNDO_USE_MS;
     v.can.next = finished && this.hostId === pid;
+    // 登記上榜：只有房主看得到；練習房、已登記過都不顯示按鈕
+    v.can.submit = finished && this.hostId === pid && !this.practice && !r.submitted;
 
     // 見聞：只在拿的人手機上（可以互看）
     v.tonight = DIALS.filter((d) => r.tonightHolders.get(d) === pid).map((d) => {
@@ -824,6 +865,35 @@ export class Room {
       question: QUESTIONS[k % QUESTIONS.length],
       thanks: [...r.thanks.entries()].map(([from, to]) => ({ from: this.nick(from), to: this.nick(to) })),
       myThanks: r.thanks.get(pid) ?? null,
+      score: this.scoreView(),
+    };
+  }
+
+  private scoreView(): NonNullable<View['result']>['score'] {
+    const r = this.round!;
+    const sc = this.score();
+    if (!sc) return null;
+    const { raw, score } = sc;
+    return {
+      total: score.total,
+      max: 1000,
+      parts: [
+        { id: 'mission', points: score.mission, max: 600, detail: `顧好 ${raw.stars} 件` },
+        {
+          id: 'teamwork',
+          points: score.teamwork,
+          max: 200,
+          // 不寫協助等級數字，避免矛頭指向木匠一個人（公平性審查）
+          detail: raw.repairMs === null ? '天亮前沒補好船' : `大家一起補船 ${Math.round(raw.repairMs / 1000)} 秒`,
+        },
+        { id: 'time', points: score.time, max: 100, detail: `${Math.floor(raw.finishedAt / 60000)}:${String(Math.floor((raw.finishedAt % 60000) / 1000)).padStart(2, '0')} 上岸` },
+        { id: 'difficulty', points: score.difficulty, max: 100, detail: `三星解 ${raw.solutions} 種` + (raw.sweep ? '・風暴捲走' : '') },
+      ],
+      factor: score.factor,
+      trial: true,
+      formula: score.formula,
+      practice: this.practice,
+      submitted: r.submitted ? { ...r.submitted } : null,
     };
   }
 

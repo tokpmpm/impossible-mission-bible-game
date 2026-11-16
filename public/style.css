@@ -877,3 +877,52 @@ cite { display: block; margin-top: 4px; font-style: normal; color: var(--gold-2)
 .need-via { position: absolute; top: -2px; right: 4px; background: var(--bg-2); border-radius: 999px; padding: 1px; line-height: 0; border: 1px solid var(--line); }
 .tonight-line { margin: 8px 0 0; padding: 8px 10px; border-radius: var(--radius-s); background: rgba(242, 193, 78, 0.1); font-weight: 600; }
 .use-ovl .art { max-width: 360px; }
+
+/* ───── 團隊分數（試行）與排行榜 ───── */
+.trial-tag { display: inline-block; vertical-align: middle; font-size: 0.7rem; font-weight: 800; letter-spacing: 0.08em; color: var(--gold-2); border: 1px solid var(--gold); border-radius: 999px; padding: 1px 8px; margin-left: 6px; }
+.score-card h2 { margin: 0 0 10px; }
+.sc-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.sc-row { display: flex; gap: 12px; align-items: flex-start; transition: opacity 0.25s, transform 0.25s; }
+.sc-row.pending { opacity: 0; transform: translateY(8px); }
+.sc-ico { font-size: 1.9rem; line-height: 1; width: 2.2rem; text-align: center; flex: none; }
+.sc-row.pop .sc-ico { animation: sc-pop 0.5s ease-out; }
+.sc-mid { flex: 1; min-width: 0; }
+.sc-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-weight: 700; }
+.sc-num b { font-size: 1.4rem; color: var(--gold-2); font-variant-numeric: tabular-nums; }
+.sc-num i { font-style: normal; color: var(--muted); font-size: 0.85rem; }
+.sc-bar { height: 10px; border-radius: 999px; background: var(--bg-2); border: 1px solid var(--line); overflow: hidden; margin: 4px 0; }
+.sc-bar span { display: block; height: 100%; background: linear-gradient(90deg, var(--gold), var(--gold-2)); border-radius: 999px; }
+.sc-detail { color: var(--muted); font-size: 0.8rem; line-height: 1.4; display: block; }
+.sc-total { display: flex; align-items: baseline; justify-content: center; gap: 8px; margin: 16px 0 8px; transition: opacity 0.3s; }
+.sc-total.pending { opacity: 0; }
+.sc-total.boom { animation: sc-boom 0.7s cubic-bezier(.2, 1.6, .4, 1); }
+.sc-total strong { font-size: 3.4rem; font-weight: 900; color: var(--gold-2); text-shadow: 0 4px 24px rgba(242, 193, 78, 0.55); font-variant-numeric: tabular-nums; }
+.sc-total-ico { font-size: 2rem; }
+.sc-total-max { color: var(--muted); font-weight: 700; }
+@keyframes sc-pop { 0% { transform: scale(0.3); } 70% { transform: scale(1.25); } 100% { transform: scale(1); } }
+@keyframes sc-boom { 0% { transform: scale(0.4); } 60% { transform: scale(1.3); } 100% { transform: scale(1); } }
+.sub-form { display: grid; gap: 10px; margin-top: 8px; }
+.sub-row { display: flex; gap: 8px; align-items: center; }
+.sub-row input { flex: 1; min-width: 0; }
+.sub-left { min-width: 2.2em; text-align: center; color: var(--muted); font-weight: 800; }
+.sub-err { margin: 0; color: var(--warn); font-weight: 700; }
+.sub-btns { display: flex; gap: 8px; }
+.sub-btns .btn { flex: 1; }
+.sub-done { display: flex; gap: 10px; align-items: center; justify-content: center; margin-top: 8px; padding: 10px; border-radius: var(--radius-s); background: rgba(111, 211, 160, 0.14); border: 1px solid var(--ok); }
+.sub-done span { font-size: 1.8rem; }
+.sub-done small { display: block; color: var(--muted); }
+.sub-practice { text-align: center; color: var(--muted); margin: 8px 0 0; }
+.board h1 { font-size: 1.6rem; margin: 0 0 4px; }
+.center-text { text-align: center; }
+.lb-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; }
+.lb-row { display: flex; align-items: center; gap: 10px; background: #161d33; border-radius: var(--radius-s); padding: 10px 12px; }
+.lb-row.r1 { border: 1px solid var(--gold); }
+.lb-rank { width: 2rem; text-align: center; font-size: 1.4rem; font-weight: 800; color: var(--gold-2); flex: none; }
+.lb-name { flex: 1; min-width: 0; font-weight: 800; overflow-wrap: anywhere; }
+.lb-meta { text-align: right; flex: none; }
+.lb-meta b { font-size: 1.2rem; color: var(--gold-2); }
+.lb-meta small { display: block; color: var(--muted); font-size: 0.72rem; }
+@media (prefers-reduced-motion: reduce) {
+  .sc-row, .sc-total { transition: none; }
+  .sc-row.pop .sc-ico, .sc-total.boom { animation: none; }
+}

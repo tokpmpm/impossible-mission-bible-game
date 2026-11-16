@@ -5,6 +5,8 @@
       python3 tools/verify_seeds.py --table             # 另外列出每一種「起風卡×見聞」與可搭配的風暴卡
       python3 tools/verify_seeds.py --metrics           # 只印重玩性指標（JSON）
       python3 tools/verify_seeds.py --export 路徑.json  # 匯出逐筆對照檔給規則引擎測試（test/golden.test.ts）
+      python3 tools/verify_seeds.py --difficulty        # 只印每種局面的難度表（JSON；計分用，docs/13-SCORING.md）
+      python3 tools/verify_seeds.py --difficulty-ts 路徑.ts  # 產生引擎讀的難度表（src/engine/difficulty.ts）
 
 規則（docs/11-MISSION_01_SHIPWRECK.md、docs/12-REPLAYABILITY.md 第 3 節；2026-11-16 使用者核准，DECISIONS 15、16）：
 - 船上的東西全部從船上開始；玩家決定留哪些（其餘丟進海裡）。留下的總重 ≤ 安全載重才能「決定好了」／「衝向海灘」。
@@ -268,6 +270,62 @@ def metrics(seed):
     )
 
 
+# ---------- 計分用難度表（docs/13-SCORING.md；2026-11-16 使用者核准，試行） ----------
+# 每種局面（起風卡×見聞×風暴卡）補好船後有幾種三星解：
+#   （不用掉／三種用掉之一）×（上岸帶的東西組合，只算還在船上的東西）中，不超重且顧好三件事的組合數。
+#   不考慮風暴捲走（捲走只影響風暴前帶什麼，另外用 SWEEP_BONUS 加分）。
+# 解越少越難：DIFF_MAX × (最多解數 − 這局解數) ÷ (最多解數 − 最少解數)，四捨五入成整數。
+DIFF_MAX = 80     # 難度加成中「三星解多寡」的部分
+SWEEP_BONUS = 20  # 第二局起有風暴捲走再加
+
+
+def solutions(seed, a, b, tn):
+    """補好船後的三星解數（不用掉＋各種用掉 × 上岸帶法）。"""
+    n = 0
+    for use in [None] + list(USES):
+        if use and use not in uses_available(seed, a, b, tn, set(ITEMS)):
+            continue
+        w, ab, done, _p, cap, eo = world(seed, a, b, tn, True, use)
+        for K in subsets(ab):
+            s, reason = evaluate(seed, K, tn, w, ab, done, cap, eo)
+            if s == 3 and not reason:
+                n += 1
+    return n
+
+
+def round_half_up(x):
+    return int(x + 0.5)
+
+
+def difficulty(seed):
+    """每種局面的難度：{"A1|糧食/纜索/深/吃得下|B1": {"solutions": n, "points": 0–DIFF_MAX}}。"""
+    valid, _tried = setups(seed)
+    rows = {f"{a}|{tkey(tn)}|{b}": solutions(seed, a, b, tn) for a, tn, bs, _r in valid for b in bs}
+    hi, lo = max(rows.values()), min(rows.values())
+    span = max(1, hi - lo)
+    return dict(max=DIFF_MAX, sweep_bonus=SWEEP_BONUS, most=hi, fewest=lo,
+                games={k: dict(solutions=n, points=round_half_up(DIFF_MAX * (hi - n) / span)) for k, n in rows.items()})
+
+
+def export_difficulty_ts(path):
+    d = difficulty(SEEDS["ship 001"])
+    lines = [
+        "// 由 tools/verify_seeds.py --difficulty-ts 產生，請勿手改（npm run golden 會一起更新）。",
+        "// 每種局面（起風卡|食/繩/水/胃|風暴卡）補好船後有幾種三星解，與難度分（解越少越高）。docs/13-SCORING.md。",
+        f"export const DIFF_MAX = {d['max']};",
+        f"export const SWEEP_BONUS = {d['sweep_bonus']};",
+        f"export const DIFF_MOST = {d['most']};",
+        f"export const DIFF_FEWEST = {d['fewest']};",
+        "export const DIFFICULTY: Record<string, { solutions: number; points: number }> = {",
+    ]
+    for k, v in d["games"].items():
+        lines.append(f"  '{k}': {{ solutions: {v['solutions']}, points: {v['points']} }},")
+    lines.append("};")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    print(f"已匯出 {len(d['games'])} 種局面的難度到 {path}")
+
+
 def check(name, seed, table=False):
     valid, tried = setups(seed)
     m = metrics(seed)
@@ -280,6 +338,10 @@ def check(name, seed, table=False):
         (f"照抄成功率 {m['copy_best']:.1%} < 20%", m["copy_best"] < 0.20),
         (f"首局經典配置可用的起風卡：{'、'.join(classic_a)}（至少 3 張）", len(classic_a) >= 3),
     ]
+    d = difficulty(seed)
+    pts = [v["points"] for v in d["games"].values()]
+    rules.append((f"難度表涵蓋全部 {m['games']} 種局面、三星解 {d['fewest']}–{d['most']} 種、難度分 {min(pts)}–{max(pts)}（≤ {DIFF_MAX}）",
+                  len(d["games"]) == m["games"] and min(v["solutions"] for v in d["games"].values()) >= 1 and 0 <= min(pts) and max(pts) <= DIFF_MAX))
     print(f"  照抄成功率 {m['copy_best']:.1%}；隨機取一個三星打法 {m['copy_avg']:.1%}；最強固定打法 {m['fixed']:.1%}；"
           f"不問隊友 {m['blind']:.1%}；風暴前最省的必帶組合 {m['signatures']} 種")
     if table:
@@ -332,7 +394,8 @@ def export(path):
                         robust=[[i for i in ITEMS if i in K] for K in rob], games=games))
     with open(path, "w", encoding="utf-8") as f:
         json.dump(dict(seed=name, items=ITEMS, weights=seed["weights"], cap_pre=seed["cap_pre"], cap_post=seed["cap_post"],
-                       uses=seed["uses"], use_enabled=USE_ENABLED, classic=CLASSIC, metrics=metrics(seed), setups=out),
+                       uses=seed["uses"], use_enabled=USE_ENABLED, classic=CLASSIC, metrics=metrics(seed), setups=out,
+                       difficulty=difficulty(seed)),
                   f, ensure_ascii=False, indent=0, separators=(",", ":"))
     print(f"已匯出 {len(out)} 種起風卡×見聞、{sum(len(e['games']) for e in out)} 種局面到 {path}")
 
@@ -340,6 +403,12 @@ def export(path):
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--export":
         export(sys.argv[2])
+        raise SystemExit(0)
+    if len(sys.argv) == 3 and sys.argv[1] == "--difficulty-ts":
+        export_difficulty_ts(sys.argv[2])
+        raise SystemExit(0)
+    if "--difficulty" in sys.argv:
+        print(json.dumps(difficulty(SEEDS["ship 001"]), ensure_ascii=False))
         raise SystemExit(0)
     if "--metrics" in sys.argv:
         print(json.dumps(metrics(SEEDS["ship 001"]), ensure_ascii=False))

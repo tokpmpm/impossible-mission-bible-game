@@ -48,6 +48,8 @@ export function newId() {
  *   onWelcome: (w: any) => void,
  *   onError: (msg: string, ctx: {duringResume: boolean}) => void,
  *   onStatus: (status: 'connecting'|'open'|'closed') => void,
+ *   onSubmitted?: (m: {name: string, rank: number, best: boolean, bestScore: number}) => void,
+ *   onLeaderboard?: (m: {entries: any[], formula: string}) => void,
  *   onRejected?: (r: {id: string, action: string, reasons: {code: string, text: string}[]}) => void,
  * }} handlers
  */
@@ -115,6 +117,10 @@ export function createConnection(handlers) {
         if (handlers.onRejected) handlers.onRejected(msg);
       } else if (msg.t === 'ack') {
         pendingActs.delete(msg.id);
+      } else if (msg.t === 'submitted') {
+        if (handlers.onSubmitted) handlers.onSubmitted(msg);
+      } else if (msg.t === 'leaderboard') {
+        if (handlers.onLeaderboard) handlers.onLeaderboard(msg);
       } else if (msg.t === 'error') {
         const duringResume = resuming;
         resuming = false;
