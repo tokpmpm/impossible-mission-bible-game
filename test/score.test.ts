@@ -3,21 +3,24 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { apply, createGame, crisisAtFor, symbolCount, TIME_UP_AT, type GameState } from '../src/engine/game.ts';
+import { apply, createGame, crisisAtFor, repairLimitMs, symbolCount, FIRST_ROUND_EXTRA, SECOND_ASSIST_AFTER, TIME_UP_AT, type GameState } from '../src/engine/game.ts';
 import { makeSlots } from '../src/engine/symbols.ts';
 import { CLASSIC, type CardId } from '../src/engine/seeds.ts';
 import { validSetups } from '../src/engine/rules.ts';
 import { DIFFICULTY, DIFF_MAX, SWEEP_BONUS } from '../src/engine/difficulty.ts';
-import { PLAYER_FACTOR, SCORE_MAX, computeScore, difficultyKey, rawOf, scoreOf, type ScoreRaw } from '../src/engine/score.ts';
+import { PLAYER_FACTOR, REPAIR_MS_PER_SLOT, SCORE_MAX, computeScore, difficultyKey, rawOf, scoredAssist, scoreOf, standardRepairMs, type ScoreRaw } from '../src/engine/score.ts';
 
 /** 一份「中等」的原始資料，各測試只改要測的欄位。 */
 function raw(over: Partial<ScoreRaw> = {}): ScoreRaw {
   return {
     formula: 'v1-trial',
     stars: 3,
-    repairMs: 35_000,
-    repairLimitMs: 70_000,
+    repairMs: 30_000,
+    repairLimitMs: 60_000,
     assistLevel: 0,
+    slots: 4,
+    firstRound: false,
+    wrongPicks: 0,
     finishedAt: 240_000,
     cards: { a: 'A5', b: 'B4' },
     tonight: CLASSIC,
@@ -50,24 +53,66 @@ test('計分：任務成果每星 200', () => {
   for (const stars of [0, 1, 2, 3] as const) assert.equal(computeScore(raw({ stars })).mission, 200 * stars);
 });
 
-test('計分：合作順暢＝補船速度 140×(1−用時/限時) 四捨五入＋協助分 60/30/0', () => {
-  assert.equal(computeScore(raw({ repairMs: 0, assistLevel: 0 })).teamwork, 140 + 60);
-  assert.equal(computeScore(raw({ repairMs: 35_000, assistLevel: 0 })).teamwork, 70 + 60);
-  assert.equal(computeScore(raw({ repairMs: 35_000, assistLevel: 1 })).teamwork, 70 + 30);
-  assert.equal(computeScore(raw({ repairMs: 35_000, assistLevel: 2 })).teamwork, 70 + 0);
-  // 四捨五入：140×(1−10000/70000)＝120
-  assert.equal(computeScore(raw({ repairMs: 10_000, assistLevel: 2 })).teamwork, 120);
-  // 140×(1−1/3)＝93.33 → 93
-  assert.equal(computeScore(raw({ repairMs: 10_000, repairLimitMs: 15_000, assistLevel: 2 })).teamwork, 47);
-  assert.equal(computeScore(raw({ repairMs: 5_000, repairLimitMs: 15_000, assistLevel: 2 })).teamwork, 93);
+test('計分：合作順暢＝補船速度 140×(1−用時/標準時間) 四捨五入＋協助分 60/30/0', () => {
+  // 預設 4 格、非首局：標準時間 60 秒，限時 60 秒
+  assert.equal(computeScore(raw({ repairMs: 0 })).teamwork, 140 + 60);
+  assert.equal(computeScore(raw({ repairMs: 30_000 })).teamwork, 70 + 60);
+  // 四捨五入：140×(1−10000/60000)＝116.67 → 117
+  assert.equal(computeScore(raw({ repairMs: 10_000 })).teamwork, 117 + 60);
+  // 140×(1−5000/15000)＝93.33 → 93（1 格 15 秒）
+  assert.equal(computeScore(raw({ slots: 1, repairLimitMs: 15_000, repairMs: 5_000 })).teamwork, 93 + 60);
 });
 
-test('計分：逾時才補好，速度分為 0，只剩協助分；沒補好＝合作 0 分', () => {
-  assert.equal(computeScore(raw({ repairMs: 80_000, assistLevel: 1 })).teamwork, 30);
-  assert.equal(computeScore(raw({ repairMs: 70_000, assistLevel: 0 })).teamwork, 60);
+test('計分：逾時才補好，速度分為 0，協助分依逾時多久（scoredAssist）', () => {
+  assert.equal(computeScore(raw({ repairMs: 70_000, assistLevel: 1 })).teamwork, 30, '逾時 10 秒＝協助 1');
+  assert.equal(computeScore(raw({ repairMs: 80_000, assistLevel: 2 })).teamwork, 0, '逾時超過 15 秒＝協助 2');
+  assert.equal(computeScore(raw({ repairMs: 60_000 })).teamwork, 60, '剛好限時＝速度 0、協助分 60');
   assert.equal(computeScore(raw({ repairMs: null, assistLevel: 2 })).teamwork, 0);
   assert.equal(computeScore(raw({ repairMs: null, assistLevel: 0 })).teamwork, 0);
   assert.equal(computeScore(raw({ repairLimitMs: 0 })).teamwork, 0);
+});
+
+test('standardRepairMs：3 人 2 格 30 秒、4 人 3 格 45 秒、5–10 人 4 格 60 秒、首局 +15 秒', () => {
+  assert.equal(REPAIR_MS_PER_SLOT, 15_000);
+  const expected: Record<number, number> = { 3: 30_000, 4: 45_000, 5: 60_000, 6: 60_000, 7: 60_000, 8: 60_000, 9: 60_000, 10: 60_000 };
+  for (const [n, ms] of Object.entries(expected)) {
+    const slots = symbolCount(Number(n));
+    assert.equal(standardRepairMs({ slots, firstRound: false }), ms, `${n} 人`);
+    assert.equal(standardRepairMs({ slots, firstRound: true }), ms + FIRST_ROUND_EXTRA, `${n} 人首局`);
+  }
+});
+
+test('計分：同一每格秒數下，3／4／6／10 人速度分相同（每格 7.5 秒 → 140×0.5＝70）', () => {
+  const teamworkFor = (n: number) => {
+    const slots = symbolCount(n);
+    return computeScore(raw({ playerCount: n, slots, repairLimitMs: repairLimitMs(n, false), repairMs: slots * 7_500 })).teamwork;
+  };
+  for (const n of [3, 4, 6, 10]) assert.equal(teamworkFor(n), 70 + 60, `${n} 人`);
+});
+
+test('計分：A5 的 +10 秒只放寬限時，不進速度分母', () => {
+  const base = computeScore(raw({ repairMs: 30_000, repairLimitMs: 60_000 })).teamwork;
+  const a5 = computeScore(raw({ repairMs: 30_000, repairLimitMs: 70_000 })).teamwork;
+  assert.equal(a5, base, '同樣用 30 秒，限時 +10 秒不改變分數');
+  assert.equal(standardRepairMs({ slots: 4, firstRound: false }), 60_000);
+  assert.equal(computeScore(raw({ repairMs: 65_000, repairLimitMs: 70_000 })).teamwork, 60, '有 A5 寬限內補好＝協助分 60、速度 0');
+});
+
+test('scoredAssist：剛好等於限時＝0、限時＋15 秒＝1、再多 1 毫秒＝2、沒補好＝2', () => {
+  const L = 60_000;
+  assert.equal(scoredAssist({ repairMs: L, repairLimitMs: L }), 0);
+  assert.equal(scoredAssist({ repairMs: L - 1, repairLimitMs: L }), 0);
+  assert.equal(scoredAssist({ repairMs: L + 1, repairLimitMs: L }), 1);
+  assert.equal(scoredAssist({ repairMs: L + SECOND_ASSIST_AFTER, repairLimitMs: L }), 1);
+  assert.equal(scoredAssist({ repairMs: L + SECOND_ASSIST_AFTER + 1, repairLimitMs: L }), 2);
+  assert.equal(scoredAssist({ repairMs: null, repairLimitMs: L }), 2);
+});
+
+test('計分：首局協助已出現但還沒逾時（assistLevel 1、用時 < 限時）協助分仍為 60', () => {
+  // 首局 4 格：限時 75 秒，協助 60 秒就出現；用 65 秒補好 → 畫面 assistLevel 1，但計分看 repairMs ≤ 限時
+  const b = computeScore(raw({ firstRound: true, repairLimitMs: 75_000, repairMs: 65_000, assistLevel: 1 }));
+  const speed = Math.round(140 * (1 - 65_000 / 75_000));
+  assert.equal(b.teamwork, speed + 60);
 });
 
 test('計分：時間 2:00 前滿分、8:00 為 0、中間線性', () => {
@@ -170,6 +215,9 @@ test('rawOf：真的跑完一局三星上岸，原始資料各欄位正確', () 
   assert.equal(r.repairMs, 5_000);
   assert.equal(r.repairLimitMs, s.repair!.limitMs);
   assert.equal(r.assistLevel, 0);
+  assert.equal(r.slots, 4, '6 人＝4 格');
+  assert.equal(r.firstRound, false);
+  assert.equal(r.wrongPicks, 0);
   assert.equal(r.finishedAt, s.result!.at);
   assert.equal(r.sweep, false);
   assert.equal(r.playerCount, 6);
@@ -188,7 +236,7 @@ test('scoreOf：快速補好船的三星局＝raw 與 computeScore 一致，且�
   const { raw: r, score } = scoreOf(s)!;
   assert.deepEqual(score, computeScore(r));
   assert.equal(score.mission, 600);
-  assert.equal(score.teamwork, Math.round(140 * (1 - 5_000 / r.repairLimitMs)) + 60);
+  assert.equal(score.teamwork, Math.round(140 * (1 - 5_000 / standardRepairMs(r))) + 60);
   assert.equal(score.total, score.mission + score.teamwork + score.time + score.difficulty);
   assert.ok(score.total <= SCORE_MAX);
 });
@@ -200,6 +248,28 @@ test('rawOf：補船逾時進協助 → assistLevel 1、repairMs 超過限時，
   assert.equal(r.repairMs, 80_000);
   assert.ok(r.repairMs! > r.repairLimitMs);
   assert.equal(computeScore(r).teamwork, 30);
+});
+
+test('rawOf：記下 slots／firstRound／wrongPicks；選錯不計分但存下來', () => {
+  // 3 人首局：2 格、首局
+  let s = createGame({ seedId: 'ship 001', playerCount: 3, firstRound: true, slots: makeSlots(symbolCount(3), 7), cards: { a: 'A5', b: 'B4' }, tonight: CLASSIC, sweep: false });
+  for (const i of ['麥子', '器具', '小船'] as const) s = apply(s, { type: 'setItem', at: 1000, item: i, on: false });
+  const crisis = crisisAtFor(s.cards);
+  s = apply(s, { type: 'tick', at: crisis });
+  const slot = s.repair!.slots[0];
+  const bad = slot.options.find((o) => o !== slot.answer)!;
+  s = apply(s, { type: 'repairPick', at: crisis + 3_000, option: bad });
+  s = apply(s, { type: 'repairPick', at: crisis + 4_000, option: bad });
+  for (const sl of s.repair!.slots) s = apply(s, { type: 'repairPick', at: crisis + 10_000, option: sl.answer });
+  s = apply(s, { type: 'use', at: crisis + 10_100, use: '吃飯' });
+  s = apply(s, { type: 'depart', at: 200_000 });
+  const r = rawOf(s)!;
+  assert.equal(r.slots, 2);
+  assert.equal(r.firstRound, true);
+  assert.equal(r.wrongPicks, 2);
+  assert.equal(standardRepairMs(r), 45_000);
+  const noWrong = computeScore({ ...r, wrongPicks: 0 });
+  assert.deepEqual(computeScore(r), noWrong, '選錯次數目前不影響分數');
 });
 
 test('rawOf：風暴捲走局 sweep 為 true，難度加 20', () => {
@@ -270,4 +340,26 @@ test('難度表：validSetups() 的每一種局面（起風卡×見聞×允許�
     }
   }
   assert.ok(n > 0);
+});
+
+// ---------- docs/13 的範例（903／753／607）與公平性對照 ----------
+
+test('docs/13 範例 A／B／C 與公平性對照：逐項與文件一致', () => {
+  const ex = (a: CardId, b: CardId, tonight: ScoreRaw['tonight'], over: Partial<ScoreRaw>) => {
+    const d = DIFFICULTY[difficultyKey({ a, b }, tonight)];
+    return computeScore(raw({ cards: { a, b }, tonight, solutions: d.solutions, difficultyPoints: d.points, ...over }));
+  };
+  const shallow = { ...CLASSIC, 水: '淺' as const };
+  const A = ex('A3', 'B1', CLASSIC, { firstRound: true, repairLimitMs: 75_000, repairMs: 30_000, finishedAt: 150_000 });
+  assert.deepEqual([A.mission, A.teamwork, A.time, A.difficulty, A.total], [600, 144, 92, 67, 903]);
+  const B = ex('A4', 'B5', shallow, { repairMs: 50_000, finishedAt: 300_000, sweep: true });
+  assert.deepEqual([B.mission, B.teamwork, B.time, B.difficulty, B.total], [600, 83, 50, 20, 753]);
+  const B2 = ex('A4', 'B5', shallow, { repairMs: 70_000, assistLevel: 1, finishedAt: 300_000, sweep: true });
+  assert.deepEqual([B2.teamwork, B2.total], [30, 700]);
+  const C = ex('A2', 'B2', CLASSIC, { playerCount: 3, slots: 2, repairLimitMs: 45_000, repairMs: 20_000, stars: 2, finishedAt: 360_000, sweep: true });
+  assert.deepEqual([C.mission, C.teamwork, C.time, C.difficulty, C.total], [400, 107, 33, 67, 607]);
+  const c3 = ex('A2', 'B2', CLASSIC, { playerCount: 3, slots: 2, repairLimitMs: 45_000, repairMs: 15_000, finishedAt: 360_000, sweep: true });
+  const c6 = ex('A2', 'B2', CLASSIC, { playerCount: 6, slots: 4, repairLimitMs: 60_000, repairMs: 30_000, finishedAt: 360_000, sweep: true });
+  assert.equal(c3.total, 863);
+  assert.equal(c6.total, 863);
 });

@@ -202,3 +202,38 @@ test('排行榜訊息：{t:"leaderboard"} 回傳前 10 名、公式版本與試�
   assert.equal(m.trial, true);
   assert.deepEqual(hub.leaderboardJson().entries, m.entries);
 });
+
+test('登記：房主斷線後，新加入者不會搶到房主，房主轉給這局的隊員', () => {
+  const { hub, conns, host, code, room } = playToSettled({ players: 4 });
+  const late = new FakeConn();
+  hub.open(late);
+  hub.close(host); // 房主斷線
+  send(hub, late, { t: 'join', code, nickname: '路人' });
+  const hostId = room.hostId!;
+  assert.ok(room.round!.participants.includes(hostId), '房主是這局隊員');
+  assert.notEqual(hostId, late.playerId);
+  assert.equal(late.view.can.submit, false);
+  assert.equal(conns[1].view.can.submit, true, '轉給還在線的隊員');
+  send(hub, late, { t: 'submitScore', name: '路人隊' });
+  assert.equal(hub.leaderboard.all().length, 0);
+});
+
+test('登記：局後才加入的人成為房主（隊員全離線）時，登記被拒：只有這局的隊員可以登記上榜', () => {
+  const { hub, conns, code, room } = playToSettled({ players: 3 });
+  for (const c of conns) hub.close(c); // 三位隊員都斷線
+  const late = new FakeConn();
+  hub.open(late);
+  send(hub, late, { t: 'join', code, nickname: '路人' });
+  assert.equal(room.hostId, late.playerId, '沒有隊員在線時路人暫代房主');
+  assert.equal(room.round!.participants.includes(late.playerId!), false);
+  send(hub, late, { t: 'submitScore', name: '路人隊' });
+  assert.match(late.errors().at(-1)!, /只有這局的隊員可以登記上榜/);
+  assert.equal(hub.leaderboard.all().length, 0);
+});
+
+test('結算明細：teamwork 的說明是「大家一起補船 N 秒」，不寫協助等級', () => {
+  const { host } = playToSettled();
+  const tw = host.view.result!.score!.parts.find((p) => p.id === 'teamwork')!;
+  assert.match(tw.detail, /^大家一起補船 \d+ 秒$/);
+  assert.doesNotMatch(tw.detail, /協助/);
+});

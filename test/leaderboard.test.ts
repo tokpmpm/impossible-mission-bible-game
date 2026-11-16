@@ -16,6 +16,9 @@ const RAW: ScoreRaw = {
   repairMs: 20_000,
   repairLimitMs: 70_000,
   assistLevel: 0,
+  slots: 4,
+  firstRound: false,
+  wrongPicks: 0,
   finishedAt: 200_000,
   cards: { a: 'A5', b: 'B4' },
   tonight: CLASSIC,
@@ -197,6 +200,37 @@ for (const [label, make] of makers) {
     assert.equal(all[0].formula, 'v1-trial');
     assert.equal(all[1].players, 6);
   });
+
+  test(`${label}：setHidden 隱藏後那隊從榜上消失、恢復後回來；資料不刪`, () => {
+    const s = make();
+    s.add(row('甲', 800, 1));
+    s.add(row('乙', 600, 2));
+    s.add(row('丙', 400, 3));
+    const id = s.all().find((r) => r.name === '乙')!.id;
+    s.setHidden(id, true);
+    assert.deepEqual(s.top().map((e) => [e.rank, e.name]), [[1, '甲'], [2, '丙']]);
+    assert.equal(s.all().length, 3, '資料還在');
+    assert.equal(s.all().find((r) => r.id === id)!.hidden, true);
+    s.setHidden(id, false);
+    assert.deepEqual(s.top().map((e) => [e.rank, e.name]), [[1, '甲'], [2, '乙'], [3, '丙']]);
+    s.setHidden(9999, true); // 不存在的 id 不丟錯
+    assert.equal(s.top().length, 3);
+  });
+
+  test(`${label}：隱藏某隊最高那筆 → 改顯示該隊次高；全部隱藏 → 該隊消失；roundId 仍算已登記`, () => {
+    const s = make();
+    s.add(row('甲', 900, 1, 'H1'));
+    s.add(row('甲', 500, 2, 'H2'));
+    s.add(row('乙', 700, 3, 'H3'));
+    const top = s.all().find((r) => r.roundId === 'H1')!.id;
+    const second = s.all().find((r) => r.roundId === 'H2')!.id;
+    s.setHidden(top, true);
+    assert.deepEqual(s.top().map((e) => [e.name, e.score]), [['乙', 700], ['甲', 500]]);
+    s.setHidden(second, true);
+    assert.deepEqual(s.top().map((e) => e.name), ['乙']);
+    assert.equal(s.hasRound('H1'), true);
+    assert.throws(() => s.add(row('甲', 100, 4, 'H1')), /已經登記過/);
+  });
 }
 
 test('MemoryStore 與 SqlStore：同一組資料，每步 add 結果與 top／all 完全一致', () => {
@@ -211,7 +245,9 @@ test('MemoryStore 與 SqlStore：同一組資料，每步 add 結果與 top／al
   });
   assert.deepEqual(sql.top(), mem.top());
   assert.deepEqual(sql.top(4), mem.top(4));
-  assert.deepEqual(sql.all(), mem.all());
+  // SqlStore 一定有 hidden 欄（false）；MemoryStore 未隱藏時可能沒有這欄，所以先補成 false 再比
+  const norm = (rows: LeaderRow[]) => rows.map((r) => ({ ...r, hidden: r.hidden ?? false }));
+  assert.deepEqual(norm(sql.all()), norm(mem.all()));
 });
 
 // ---------- 重開後仍在 ----------
