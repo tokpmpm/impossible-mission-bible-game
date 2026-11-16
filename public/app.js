@@ -62,6 +62,17 @@ const ui = {
   seenSwept: null,
   sweptAt: 0,
   revealAt: 0, // 上岸動畫開始時間
+  /** 分數動畫：只在每一局第一次看到時播（key＝房號:局數）。 */
+  scoreAnim: null, // { key, at }
+  scorePlayed: new Set(),
+  /** 登記上榜：輸入框是否展開、隊名、錯誤、送出中、剛登記的結果。 */
+  subOpen: false,
+  subName: '',
+  subErr: '',
+  subBusy: false,
+  subDone: null, // { key, name, rank, best, bestScore }
+  /** 排行榜面板（首頁用）。 */
+  board: null, // null＝沒開；{ loading, entries, error }
 };
 
 const ACTION_LABEL = { lock: '決定好了', depart: '衝向海灘', use: '天亮前要做的事', undoUse: '取消', setItem: '丟東西' };
@@ -128,7 +139,7 @@ const conn = createConnection({
     if (s === 'open' && params.get('auto') && !autoSent && !loadSession() && ui.nick) {
       autoSent = true;
       if (ui.code) conn.send({ t: 'join', code: ui.code, nickname: ui.nick });
-      else conn.send({ t: 'create', nickname: ui.nick });
+      else conn.send({ t: 'create', nickname: ui.nick, ...(params.get('seat') ? { practice: true } : {}) });
     }
   },
   onWelcome() {
@@ -146,6 +157,17 @@ const conn = createConnection({
     if (prevPhase !== view.phase) onPhaseChange(prevPhase, view.phase);
     render();
   },
+  onSubmitted(m) {
+    ui.subBusy = false;
+    ui.subErr = '';
+    ui.subOpen = false;
+    ui.subDone = { key: roundKey(ui.view), name: m.name, rank: m.rank, best: m.best, bestScore: m.bestScore };
+    render();
+  },
+  onLeaderboard(m) {
+    if (ui.board) ui.board = { loading: false, entries: m.entries, error: false };
+    render();
+  },
   onRejected(r) {
     const title = ACTION_LABEL[r.action] ? `還不能${ACTION_LABEL[r.action]}` : '這一步沒有成功';
     const blocks = new Set(['status']);
@@ -155,6 +177,13 @@ const conn = createConnection({
   },
   onError(msg, ctx) {
     ui.busy = false;
+    if (ui.subBusy) {
+      // 登記被伺服器擋下：訊息放在輸入框旁
+      ui.subBusy = false;
+      ui.subErr = msg;
+      render();
+      return;
+    }
     if (ctx.duringResume && !ui.view) {
       clearSession();
       ui.hadSession = false;
@@ -347,6 +376,7 @@ function renderHome() {
       <button class="btn primary block" type="submit" ${ui.busy ? 'disabled' : ''}>${ui.busy ? '連線中…' : isJoin ? '加入房間' : '建立房間'}</button>
       <p class="muted small">入房不計時；人到齊、房主按開始後才開始 8 分鐘。</p>
     </form>
+    <button class="btn secondary block" data-action="board-open">🏆 排行榜</button>
     <p class="muted small" style="text-align:center">手機不夠？<a href="/solo.html" style="color:inherit">用一台電腦同時扮演 3–10 位玩家</a></p>
   </main>`;
 }
@@ -688,6 +718,182 @@ function momentIcon(m) {
   return `<span class="m-icon" aria-hidden="true">${ids.map(one).join('')}</span>`;
 }
 
+// ───────── 團隊分數（試行） ─────────
+
+const SCORE_ICON = { mission: '🧭', teamwork: '🤝', time: '⏱️', difficulty: '🌊' };
+const SCORE_LABEL = { mission: '任務成果', teamwork: '合作順暢', time: '時間', difficulty: '難度加成' };
+const SCORE_STEP = 600; // 每一項間隔
+const SCORE_ITEM = 520; // 每一項數字跳動時間
+const SCORE_TOTAL_AT = 4 * SCORE_STEP + 200;
+const SCORE_END = SCORE_TOTAL_AT + 900;
+
+function roundKey(v) {
+  return v ? `${v.code}:${v.round ? v.round.no : 0}` : '';
+}
+
+/** 這局分數動畫已經播了多久；播過了（或偏好減少動態）回傳 Infinity。 */
+function scoreElapsed(v) {
+  const key = roundKey(v);
+  if (reduceMotion() || ui.scorePlayed.has(key)) return Infinity;
+  if (ui.revealAt && Date.now() - ui.revealAt < REVEAL_MS) return -1; // 上岸動畫播完才開始
+  if (!ui.scoreAnim || ui.scoreAnim.key !== key) ui.scoreAnim = { key, at: Date.now() };
+  const e = Date.now() - ui.scoreAnim.at;
+  if (e >= SCORE_END) {
+    ui.scorePlayed.add(key);
+    return Infinity;
+  }
+  return e;
+}
+
+function renderScore(v, sc) {
+  const rows = sc.parts
+    .map(
+      (p, i) => `<li class="sc-row" data-i="${i}" data-points="${p.points}" data-max="${p.max}">
+      <span class="sc-ico" aria-hidden="true">${SCORE_ICON[p.id] || '⭐'}</span>
+      <div class="sc-mid"><div class="sc-head"><span class="sc-name">${esc(SCORE_LABEL[p.id] || p.id)}</span>
+        <span class="sc-num"><b data-score-part="${esc(p.id)}">${p.points}</b><i>/${p.max}</i></span></div>
+        <div class="sc-bar"><span style="width:${p.max ? (p.points / p.max) * 100 : 0}%"></span></div>
+        <small class="sc-detail">${esc(p.detail)}</small></div></li>`,
+    )
+    .join('');
+  return `<section class="card score-card" data-score-card>
+    <h2><span aria-hidden="true">🏆</span> 團隊分數 <span class="trial-tag">試行</span></h2>
+    <ul class="sc-list">${rows}</ul>
+    <div class="sc-total" data-total-box><span class="sc-total-ico" aria-hidden="true">⭐</span>
+      <strong data-score-total="${sc.total}"><span data-total-num>${sc.total}</span></strong><span class="sc-total-max">/ ${sc.max}</span></div>
+    ${renderSubmit(v, sc)}
+  </section>`;
+}
+
+/** 依動畫進度更新數字、進度條、出現狀態（render 完與動畫期間每個畫面影格呼叫）。 */
+function applyScoreAnim() {
+  const v = ui.view;
+  const card = root.querySelector('[data-score-card]');
+  if (!v || !card) return false;
+  const e = ui.scoreAnimNow;
+  const clamp = (x) => Math.max(0, Math.min(1, x));
+  for (const row of card.querySelectorAll('.sc-row')) {
+    const i = Number(row.getAttribute('data-i'));
+    const pts = Number(row.getAttribute('data-points'));
+    const max = Number(row.getAttribute('data-max'));
+    const t = e === Infinity ? 1 : clamp((e - i * SCORE_STEP) / SCORE_ITEM);
+    const shown = e === Infinity || e >= i * SCORE_STEP;
+    row.classList.toggle('pending', !shown);
+    row.classList.toggle('pop', shown && t < 1);
+    row.querySelector('b').textContent = String(Math.round(pts * t));
+    row.querySelector('.sc-bar span').style.width = (max ? (pts / max) * t * 100 : 0) + '%';
+  }
+  const box = card.querySelector('[data-total-box]');
+  const total = Number(card.querySelector('[data-score-total]').getAttribute('data-score-total'));
+  const t = e === Infinity ? 1 : clamp((e - SCORE_TOTAL_AT) / 700);
+  box.classList.toggle('pending', e !== Infinity && e < SCORE_TOTAL_AT);
+  box.classList.toggle('boom', e !== Infinity && e >= SCORE_TOTAL_AT);
+  box.querySelector('[data-total-num]').textContent = String(Math.round(total * t));
+  return e !== Infinity;
+}
+
+let scoreRaf = 0;
+function runScoreAnim() {
+  const v = ui.view;
+  if (!v || !v.result || !v.result.score) return;
+  ui.scoreAnimNow = scoreElapsed(v);
+  const going = applyScoreAnim();
+  if (going && !scoreRaf) {
+    const loop = () => {
+      scoreRaf = 0;
+      if (!ui.view || !ui.view.result || !ui.view.result.score) return;
+      ui.scoreAnimNow = scoreElapsed(ui.view);
+      if (applyScoreAnim()) scoreRaf = requestAnimationFrame(loop);
+    };
+    scoreRaf = requestAnimationFrame(loop);
+  }
+}
+
+function renderSubmit(v, sc) {
+  const key = roundKey(v);
+  const done = sc.submitted || (ui.subDone && ui.subDone.key === key ? ui.subDone : null);
+  if (done) {
+    const text = done.rank ? `第 ${done.rank} 名` : '';
+    const more = done.best === false ? `<small>這隊最好成績仍是 ${done.bestScore} 分</small>` : '';
+    return `<div class="sub-done" data-submitted role="status"><span aria-hidden="true">🏅</span><div><strong>已登記：${esc(done.name)}・${text}</strong>${more}</div></div>`;
+  }
+  if (sc.practice) return `<p class="sub-practice" data-practice>🧪 練習模式不計入排行榜</p>`;
+  if (!v.can.submit) return '';
+  if (!ui.subOpen) {
+    return `<button class="btn primary block" data-action="sub-open">🏆 登記上榜</button>`;
+  }
+  const left = 12 - [...ui.subName].length;
+  return `<form class="sub-form" data-form="submit" autocomplete="off">
+    <label class="field"><span>🏆 團隊名稱</span>
+      <div class="sub-row">
+        <input id="in-team" data-model="subName" value="${esc(ui.subName)}" maxlength="12" placeholder="例如：同心號" required>
+        <span class="sub-left" data-sub-left aria-label="還能輸入幾個字">${left}</span>
+      </div></label>
+    ${ui.subErr ? `<p class="sub-err" role="alert">⚠️ ${esc(ui.subErr)}</p>` : ''}
+    <div class="sub-btns">
+      <button class="btn primary" type="submit" ${ui.subBusy ? 'disabled' : ''}>${ui.subBusy ? '送出中…' : '登記'}</button>
+      <button class="btn ghost" type="button" data-action="sub-close">不登記</button>
+    </div>
+  </form>`;
+}
+
+// ───────── 排行榜 ─────────
+
+function fmtDate(ms) {
+  const d = new Date(ms);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+function renderBoard() {
+  const b = ui.board;
+  const medal = ['🥇', '🥈', '🥉'];
+  let body;
+  if (!b || b.loading) body = `<p class="muted center-text">載入中…</p>`;
+  else if (b.error) body = `<p class="muted center-text">暫時看不到排行榜，等一下再試試。</p>`;
+  else if (!b.entries.length) body = `<p class="muted center-text">還沒有隊伍上榜。<br>玩完一局，由房主登記，你們就是第一隊！</p>`;
+  else
+    body = `<ol class="lb-list" data-leaderboard>${b.entries
+      .slice(0, 10)
+      .map(
+        (e) => `<li class="lb-row r${e.rank}"><span class="lb-rank">${medal[e.rank - 1] || e.rank}</span>
+      <span class="lb-name">${esc(e.name)}</span>
+      <span class="lb-meta"><b>${esc(e.score)}</b> 分<small>👥 ${esc(e.players)}・${fmtDate(e.at)}</small></span></li>`,
+      )
+      .join('')}</ol>`;
+  return `<main class="screen board">
+    <section class="card">
+      <h1>🏆 排行榜 <span class="trial-tag">試行</span></h1>
+      <p class="muted small">只排團隊、不排個人。分數算法還在試行調整。</p>
+      ${body}
+    </section>
+    <button class="btn ghost block" data-action="board-close">⬅ 返回</button>
+  </main>`;
+}
+
+async function openBoard() {
+  ui.board = { loading: true, entries: [], error: false };
+  render();
+  try {
+    const r = await fetch('/api/leaderboard', { cache: 'no-store' });
+    if (!r.ok) throw new Error('http ' + r.status);
+    const j = await r.json();
+    if (ui.board) ui.board = { loading: false, entries: j.entries || [], error: false };
+  } catch {
+    // 退回 WebSocket；回來時 onLeaderboard 會填
+    if (ui.board) {
+      conn.send({ t: 'leaderboard' });
+      setTimeout(() => {
+        if (ui.board && ui.board.loading) {
+          ui.board = { loading: false, entries: [], error: true };
+          render();
+        }
+      }, 4000);
+    }
+  }
+  render();
+}
+
 function renderResult(v) {
   const res = v.result;
   if (!res) return `<main class="screen center"><p class="muted">結算中…</p></main>`;
@@ -712,6 +918,7 @@ function renderResult(v) {
       <div class="result-needs" aria-label="${res.stars}／3 件顧好">${needs}</div>
       <p class="saved">船上 276 人，全都得救上了岸<cite>徒 27:37、44</cite></p>
     </section>
+    ${res.score ? renderScore(v, res.score) : ''}
     <section class="card"><h2>這局發生的事</h2><ul class="moments">${moments}</ul>
       ${res.tonightLine ? `<p class="tonight-line">${esc(res.tonightLine)}</p>` : ''}
       <p class="bible-cmp">${esc(res.bible)}</p></section>
@@ -837,7 +1044,7 @@ function render() {
   let hud = '';
   let hudKey = '';
   let html;
-  if (!v) html = renderHome();
+  if (!v) html = ui.board && !(ui.hadSession && !ui.left) ? renderBoard() : renderHome();
   else if (v.me.spectator && !['lobby', 'settled', 'ended'].includes(v.phase)) {
     hud = renderTopbar(v);
     html = renderSpectator(v);
@@ -888,6 +1095,7 @@ function render() {
     for (const b of ui.flash.blocks) for (const el of root.querySelectorAll(`[data-block="${b}"]`)) el.classList.add('flash');
   }
   if (v) ui.lockOpen = lockOpen(v);
+  if (v && v.result && v.result.score && ['settled', 'ended'].includes(v.phase)) runScoreAnim();
   if (focusId) {
     const el = document.getElementById(focusId);
     if (el) {
@@ -968,6 +1176,10 @@ document.addEventListener('input', (e) => {
   const k = el && el.getAttribute && el.getAttribute('data-model');
   if (!k) return;
   ui[k] = k === 'code' ? el.value.toUpperCase() : el.value;
+  if (k === 'subName') {
+    const l = document.querySelector('[data-sub-left]');
+    if (l) l.textContent = String(12 - [...el.value].length);
+  }
   if (k === 'code' && el.value !== ui.code) {
     const pos = el.selectionStart;
     el.value = ui.code;
@@ -984,6 +1196,15 @@ document.addEventListener('submit', (e) => {
   if (!form) return;
   e.preventDefault();
   const kind = form.getAttribute('data-form');
+  if (kind === 'submit') {
+    const name = ui.subName.trim();
+    if (!name) return;
+    ui.subErr = '';
+    ui.subBusy = true;
+    conn.send({ t: 'submitScore', name });
+    render();
+    return;
+  }
   if (kind === 'create' || kind === 'join') {
     const nickname = ui.nick.trim();
     if (!nickname) return toast('先輸入暱稱，隊友才知道怎麼叫你。');
@@ -1009,6 +1230,25 @@ document.addEventListener('click', (e) => {
   switch (a) {
     case 'home-mode':
       ui.homeMode = el.getAttribute('data-mode');
+      render();
+      break;
+    case 'board-open':
+      openBoard();
+      break;
+    case 'board-close':
+      ui.board = null;
+      render();
+      break;
+    case 'sub-open':
+      ui.subOpen = true;
+      ui.subErr = '';
+      render();
+      setTimeout(() => { const i = document.getElementById('in-team'); if (i) i.focus(); }, 0);
+      break;
+    case 'sub-close':
+      ui.subOpen = false;
+      ui.subErr = '';
+      ui.subBusy = false;
       render();
       break;
     case 'forget':

@@ -27,6 +27,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     await p.screenshot({ path: OUT + name + '.png', fullPage: !process.env.VIEWPORT_ONLY });
   };
   const [host] = pages;
+  const countPages = async (sel) => { let n = 0; for (const p of pages) if (await p.$(sel)) n++; return n; };
   await host.goto(BASE);
   await shot(host, '00-home');
   await host.fill('#in-nick', '小明');
@@ -69,7 +70,48 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       await p.waitForFunction(([s, w]) => { const e = document.querySelector(s); return !e || (e.getAttribute('aria-pressed') === 'true') === w; }, [sel, want], { timeout: 3000 });
     }
   };
-  const countPages = async (sel) => { let n = 0; for (const p of pages) if (await p.$(sel)) n++; return n; };
+
+  // ── 團隊分數與排行榜檢查 ──
+  const TEAM = `測試隊${N}${Date.now() % 1000}`;
+  /** 每一支手機都看得到同一個總分（0–1000）與四項；只有房主有「登記上榜」。回傳總分。 */
+  const checkScore = async (label) => {
+    const totals = [];
+    for (const p of pages) {
+      await p.waitForSelector('[data-score-total]', { timeout: 8000 });
+      // 動畫跑完（約 4.5 秒）數字才會停在最終分數
+      await p.waitForFunction(() => { const e = document.querySelector('[data-score-total]'); return e && e.textContent.trim() === e.getAttribute('data-score-total'); }, null, { timeout: 15000 });
+      totals.push(Number(await p.getAttribute('[data-score-total]', 'data-score-total')));
+      if ((await p.$$('.sc-row')).length !== 4) errs.push(`${label}：分數不是四項`);
+      if (await p.$('.sc-row.pending')) errs.push(`${label}：動畫結束後還有項目沒出現`);
+    }
+    if (new Set(totals).size !== 1) errs.push(`${label}：各手機總分不一致 ${JSON.stringify(totals)}`);
+    if (!(totals[0] >= 0 && totals[0] <= 1000)) errs.push(`${label}：總分超出 0–1000：${totals[0]}`);
+    for (let i = 1; i < N; i++) if (await pages[i].$('[data-action=sub-open]')) errs.push(`${label}：非房主看到登記按鈕`);
+    if (!(await pages[0].$('[data-action=sub-open]'))) errs.push(`${label}：房主沒有登記按鈕`);
+    // 重新連線（整頁重載）不重播動畫
+    await pages[0].reload();
+    await pages[0].waitForSelector('[data-score-total]', { timeout: 8000 });
+    await sleep(300);
+    if (await pages[0].$('.sc-row.pending')) errs.push(`${label}：重新連線後動畫又重播`);
+    return totals[0];
+  };
+  const submitTeam = async (label) => {
+    await pages[0].click('[data-action=sub-open]');
+    await pages[0].fill('#in-team', TEAM);
+    const left = (await pages[0].textContent('[data-sub-left]')).trim();
+    if (left !== String(12 - [...TEAM].length)) errs.push(`${label}：剩餘字數顯示 ${left}`);
+    await shot(pages[0], `${label}-submit-form`);
+    await pages[0].click('form[data-form=submit] button[type=submit]');
+    await pages[0].waitForSelector('[data-submitted]', { timeout: 5000 });
+    const t = await pages[0].textContent('[data-submitted]');
+    if (!t.includes(TEAM) || !/第 \d+ 名/.test(t)) errs.push(`${label}：登記結果沒有隊名與名次：${t.trim()}`);
+    for (let i = 1; i < N; i++) {
+      await pages[i].waitForSelector('[data-submitted]', { timeout: 5000 });
+      if (!(await pages[i].textContent('[data-submitted]')).includes(TEAM)) errs.push(`${label}：隊員沒看到已登記`);
+    }
+    await shot(pages[0], `${label}-submitted`);
+    return t;
+  };
   // 不是自己能操作的不顯示：托盤、決定好了各只有一支手機
   if ((await countPages('.tray')) !== 1) errs.push('托盤不只出現在管倉手機');
   if ((await countPages('[data-action=lock]')) !== 1) errs.push('「決定好了」不只出現在船長手機');
@@ -171,6 +213,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   if (!result.includes('上岸很順利')) errs.push('第一局沒有三星：' + result.trim().slice(0, 60));
   if (!result.includes('外衣')) errs.push('結尾沒有點名背包裡的外衣');
   if (!/27:\d+/.test(result) || !result.includes('你知道嗎')) errs.push('結尾缺經文或小知識');
+  const score1 = await checkScore('第一局分數');
+  await submitTeam('第一局登記');
   await pages[1].click('[data-action=thank]');
   await sleep(300);
   for (let i = 0; i < N; i++) await shot(pages[i], `15-result-p${i}`);
@@ -262,8 +306,51 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     if (!res2.includes('上岸很順利')) errs.push('第二局照見聞做應該三星：' + res2.trim().slice(0, 60));
     if (!res2.includes('被浪捲走')) errs.push('第二局結尾沒有提到被浪捲走');
     if (!/今晚力氣靠/.test(res2)) errs.push('結尾沒有「今晚靠的是……」');
+    const score2 = await checkScore('第二局分數');
+    // 第二局：房主用同一個隊名再登記，榜上同一隊只留一筆、取較高分
+    await pages[0].click('[data-action=sub-open]');
+    await pages[0].fill('#in-team', TEAM);
+    await pages[0].click('form[data-form=submit] button[type=submit]');
+    await pages[0].waitForSelector('[data-submitted]', { timeout: 5000 });
+    const t2 = await pages[0].textContent('[data-submitted]');
+    if (score2 < score1 && !t2.includes('最好成績仍是 ' + score1)) errs.push('第二局分數較低，畫面沒說「最好成績仍是 ' + score1 + '」：' + t2.trim());
+    await shot(pages[0], 'r2-16-submitted');
+    const lb = await pages[0].evaluate(() => fetch('/api/leaderboard').then((r) => r.json()));
+    const mine = lb.entries.filter((e) => e.name === TEAM);
+    if (mine.length !== 1) errs.push(`排行榜同一隊名出現 ${mine.length} 次`);
+    else if (mine[0].score !== Math.max(score1, score2)) errs.push(`排行榜分數 ${mine[0].score}，應為 ${Math.max(score1, score2)}`);
+    if (!lb.trial) errs.push('排行榜沒有標試行');
+    // 首頁排行榜面板（全新的瀏覽器分頁、沒有房間）
+    const ctx2 = await browser.newContext({ viewport: { width: W, height: 844 }, ignoreHTTPSErrors: !!proxy });
+    const hp = await ctx2.newPage();
+    hp.on('pageerror', (e) => errs.push(`board: ${e.message}`));
+    await hp.goto(BASE);
+    await hp.click('[data-action=board-open]');
+    await hp.waitForSelector('[data-leaderboard]', { timeout: 5000 });
+    if (!(await hp.textContent('[data-leaderboard]')).includes(TEAM)) errs.push('首頁排行榜沒有這一隊');
+    await shot(hp, 'r2-17-board');
+    await hp.click('[data-action=board-close]');
+    await hp.waitForSelector('[data-action=board-open]');
+    await ctx2.close();
+    console.log(`分數：第一局 ${score1}、第二局 ${score2}，排行榜 ${TEAM} = ${mine[0] && mine[0].score}`);
     console.log(`第二局：${JSON.stringify(tonight)} 卡 ${bCard} → ${plan.use || '不用掉'}，帶 ${plan.land.map((n) => provides[n]).join('、')} 上岸`);
   }
+  // 練習房：伺服器第一個檢查就是 practice，submitScore 一定被拒
+  await new Promise((resolve) => {
+    const WS = require('ws');
+    const ws = new WS(BASE.replace(/^http/, 'ws') + '/ws');
+    const timer = setTimeout(() => { errs.push('練習房檢查逾時'); ws.close(); resolve(); }, 8000);
+    ws.on('open', () => ws.send(JSON.stringify({ t: 'create', nickname: '練習', practice: true })));
+    ws.on('message', (d) => {
+      const m = JSON.parse(String(d));
+      if (m.t === 'welcome') ws.send(JSON.stringify({ t: 'submitScore', name: '練習隊' }));
+      else if (m.t === 'error' || m.t === 'submitted') {
+        if (m.t !== 'error' || !String(m.msg).includes('練習模式不計入排行榜')) errs.push('練習房登記沒被拒絕：' + JSON.stringify(m));
+        clearTimeout(timer); ws.close(); resolve();
+      }
+    });
+    ws.on('error', (e) => { errs.push('練習房 ws：' + e.message); clearTimeout(timer); resolve(); });
+  });
   await browser.close();
   if (errs.length) {
     console.error('失敗：', errs);
