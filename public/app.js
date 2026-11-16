@@ -56,11 +56,17 @@ const ui = {
   justThrown: [],
   justRescued: [],
   mealAt: 0, // 吃飯動畫開始時間
-  seenFed: null,
+  seenUse: null,
+  useAt: 0,
+  useKind: null,
+  seenSwept: null,
+  sweptAt: 0,
   revealAt: 0, // 上岸動畫開始時間
 };
 
-const ACTION_LABEL = { lock: '決定好了', depart: '衝向海灘', eat: '召集大家吃飯', setItem: '丟東西' };
+const ACTION_LABEL = { lock: '決定好了', depart: '衝向海灘', use: '天亮前要做的事', undoUse: '取消', setItem: '丟東西' };
+const USE_DONE = { 吃飯: '召集大家吃了', 拋錨: '從船尾拋下了', 捆船底: '用來捆綁船底：' };
+const USE_REF = { 吃飯: '徒 27:33–36', 拋錨: '徒 27:29', 捆船底: '徒 27:17' };
 const FLASH_BLOCK = { OVERWEIGHT: 'load', PINNED: 'items', NO_FOOD: 'items' };
 const MEAL_MS = 2800;
 const REVEAL_MS = 4400;
@@ -181,11 +187,23 @@ function track(v) {
       }
     }
     ui.prevOnShip = on;
-    if (ship.fed && ui.seenFed === false && ship.fedAt && now() - ship.fedAt < 8000) ui.mealAt = Date.now();
-    ui.seenFed = ship.fed;
+    // 用掉一件：所有手機播一次動畫；3 秒內被取消就收起來
+    const usedAt = ship.used ? ship.used.at : null;
+    if (usedAt && ui.seenUse !== null && ui.seenUse !== usedAt && now() - usedAt < 8000) {
+      ui.useAt = Date.now();
+      ui.useKind = ship.used.id;
+      if (ship.used.id === '吃飯') ui.mealAt = Date.now();
+    }
+    if (!usedAt) ui.useAt = ui.mealAt = 0;
+    ui.seenUse = usedAt || 0;
+    // 風暴捲走：剛被捲走的東西閃一下
+    const swept = ship.items.filter((i) => i.swept).length;
+    if (ui.seenSwept !== null && swept > ui.seenSwept) ui.sweptAt = Date.now();
+    ui.seenSwept = swept;
   } else {
     ui.prevOnShip = null;
-    ui.seenFed = null;
+    ui.seenUse = null;
+    ui.seenSwept = null;
   }
 }
 
@@ -449,7 +467,9 @@ function needsRow(v) {
       const pending = lit && s.overweight > 0;
       const cls = s.needs ? (pending ? 'pending' : lit ? 'lit' : 'dim') : 'unknown';
       const mark = s.needs ? (pending ? '' : lit ? ' ✓' : '') : ' ?';
-      return `<span class="need ${cls}" data-need="${id}">${art.need(id, lit, 40)}<small>${esc(NEED_LABEL[id])}${mark}</small></span>`;
+      // 補好船後才公開「今晚靠哪一樣」（危機前要問隊友）
+      const via = s.provides ? `<span class="need-via" title="今晚靠${esc(s.provides[id])}">${art.item(s.provides[id], 18)}</span>` : '';
+      return `<span class="need ${cls}" data-need="${id}">${art.need(id, lit, 40)}${via}<small>${esc(NEED_LABEL[id])}${mark}</small></span>`;
     })
     .join('');
   const over = s.needs && s.overweight > 0 ? `<p class="needs-over">超重 ${s.overweight}：要再丟掉 ${s.overweight} 重，這些才算數</p>` : '';
@@ -485,13 +505,48 @@ function itemTray(v) {
   return `<section class="tray" data-block="items"><div class="tray-grid">${btns}</div></section>`;
 }
 
-function eatCard(v) {
-  if (!v.can.eat) return '';
-  return `<section class="eat-card">
-    <div class="eat-art" aria-hidden="true">${art.item('糧食', 44)}</div>
-    <div><button class="btn secondary block" data-action="eat" ${v.eatNeedsFood ? 'disabled' : ''}>召集大家吃飯</button>
-    ${v.eatNeedsFood ? '<p class="muted small">糧食在海裡：先請管倉撈回來。</p>' : '<p class="muted small">只能吃一次。</p>'}</div>
-  </section>`;
+/** 見聞：只有自己手上的（每局不同）。自創細節標「遊戲設定」、有經文的附章節。 */
+function tonightCards(v) {
+  if (!v.tonight || !v.tonight.length) return '';
+  return `<section class="tonight" aria-label="你今晚看到的事">${v.tonight
+    .map((t) => `<article class="tn-card" data-dial="${esc(t.dial)}" data-value="${esc(t.value)}">
+      <div class="tn-pic" aria-hidden="true">${t.item ? art.item(t.item, 40) : t.dial === '胃' ? art.need('力氣', true, 40) : ''}</div>
+      <div class="tn-body"><div class="clue-head"><span class="tn-k">今晚你看到</span><span class="clue-title">${esc(t.title)}</span>${t.tag ? `<span class="tag tag-set">${esc(t.tag)}</span>` : ''}</div>
+      <p>${esc(t.text)}</p>${t.verse ? `<p class="tn-verse">${esc(t.verse)}<cite>${esc(t.ref)}</cite></p>` : ''}</div>
+    </article>`)
+    .join('')}</section>`;
+}
+
+/** 天亮前的三種用掉：只有今晚做得到、輪到自己的人看得到按鈕；全隊只能做一件。 */
+function useCards(v) {
+  const s = v.ship;
+  if (v.can.undo && s.used) {
+    return `<section class="use-card done"><div class="use-art" aria-hidden="true">${art.item(s.used.item, 40)}</div>
+      <div><p><strong>你${esc(USE_DONE[s.used.id])}${esc(s.used.item)}</strong></p>
+      <button class="btn ghost block" data-action="undo-use">按錯了，取消（<span data-cd="undo">3</span> 秒內）</button></div></section>`;
+  }
+  if (!v.can.uses || !v.can.uses.length) return '';
+  const btns = v.can.uses
+    .map((u) => `<div class="use-row"><div class="use-art" aria-hidden="true">${art.item(u.item, 40)}</div><div>
+      <button class="btn secondary block" data-action="use" data-use="${esc(u.id)}" ${u.ready ? '' : 'disabled'}>${esc(u.icon)} ${esc(u.label)}</button>
+      <p class="muted small">${u.ready ? `用掉${esc(u.item)}，${esc(NEED_LABEL[u.need])}就顧好了（${esc(u.ref)}）` : `${esc(u.item)}不在船上：先請管倉撈回來`}</p></div></div>`)
+    .join('');
+  return `<section class="use-card"><p class="use-rule">天亮前全隊只來得及做<strong>一件</strong>：先和大家商量</p>${btns}</section>`;
+}
+
+function sweepBanner(v) {
+  const s = v.ship;
+  if (!s || !s.sweep) return '';
+  if (s.sweepWarning) {
+    const f = s.sweepWarning.floating;
+    return `<div class="banner sweep warn" role="alert"><span aria-hidden="true">🌊</span> 風暴快來了：${f.length ? `漂著的${esc(f.join('、'))}再 <strong data-cd="sweep">${Math.max(0, Math.ceil((s.sweepWarning.stormAt - now()) / 1000))}</strong> 秒就會被浪捲走` : `再 <strong data-cd="sweep">${Math.max(0, Math.ceil((s.sweepWarning.stormAt - now()) / 1000))}</strong> 秒`}</div>`;
+  }
+  const swept = s.items.filter((i) => i.swept).map((i) => i.id);
+  if (swept.length && v.phase === 'replanning') {
+    return `<div class="banner sweep ${Date.now() - ui.sweptAt < 4000 ? 'flash' : ''}" role="status"><span aria-hidden="true">🌊</span> ${esc(swept.join('、'))}被浪捲走了，撈不回來</div>`;
+  }
+  if (v.phase === 'planning' || v.phase === 'intro') return `<div class="banner sweep rule" role="note"><span aria-hidden="true">🌊</span> 這局起：風暴一來，丟下海的東西就撈不回來</div>`;
+  return '';
 }
 
 function nextSteps(v) {
@@ -505,7 +560,9 @@ function renderShip(v) {
   const s = v.ship;
   const hint = v.hint ? `<div class="banner hint" role="status"><span aria-hidden="true">💡</span> ${esc(v.hint)}</div>` : '';
   const crisis = '';
-  const fedLine = s.fed ? `<div class="banner fed" role="status">${art.need('力氣', true, 22)} ${esc(s.fedBy || '伙房')} 召集大家吃過飯了（27:36）</div>` : '';
+  const fedLine = s.used
+    ? `<div class="banner fed" role="status">${art.item(s.used.item, 22)} ${esc(s.used.mine ? '你' : s.used.by)}${esc(USE_DONE[s.used.id])}${esc(s.used.item)}（${esc(USE_REF[s.used.id])}）</div>`
+    : '';
   const dawnWait = v.phase === 'replanning' && s.dawnAt && now() < s.dawnAt
     ? `<div class="banner dawn" role="status">⚓ 拋了錨，等天亮：<strong data-cd="dawn">${mmss(s.dawnAt - now())}</strong></div>`
     : '';
@@ -516,12 +573,13 @@ function renderShip(v) {
   return `<main class="screen ship ${button ? 'has-bar' : ''}">
     <div class="ship-meta">${loadGauge(s)}${needsRow(v)}</div>
     ${cardChips(v)}
-    ${hint}${crisis}${fedLine}${dawnWait}
+    ${sweepBanner(v)}${hint}${crisis}${fedLine}${dawnWait}
+    ${useCards(v)}
     ${v.can.items ? itemTray(v) : ''}
     ${task}
     ${nextSteps(v)}
+    ${tonightCards(v)}
     <section class="clues" aria-label="你的線索">${clueCards(v)}</section>
-    ${eatCard(v)}
     <button class="btn ghost small zoom-btn" data-action="zoom">放大給隊友看</button>
   </main>
   ${actionBar(v, button)}`;
@@ -622,6 +680,8 @@ function momentIcon(m) {
     if (kind === 'role') return art.role(id, 28);
     if (kind === 'pref') return art.pref(id, 28);
     if (id === 'meal') return art.need('力氣', true, 28);
+    if (id === 'anchor') return art.item('錨', 28);
+    if (id === 'undergird') return art.need('船身', true, 28);
     if (id === 'landing') return art.need('天亮', true, 28);
     return '';
   };
@@ -653,6 +713,7 @@ function renderResult(v) {
       <p class="saved">船上 276 人，全都得救上了岸<cite>徒 27:37、44</cite></p>
     </section>
     <section class="card"><h2>這局發生的事</h2><ul class="moments">${moments}</ul>
+      ${res.tonightLine ? `<p class="tonight-line">${esc(res.tonightLine)}</p>` : ''}
       <p class="bible-cmp">${esc(res.bible)}</p></section>
     <section class="card verse-card">
       <blockquote>${esc(res.verse.text)}<cite>${esc(res.verse.ref)}</cite></blockquote>
@@ -682,6 +743,7 @@ function renderZoom(v) {
     <div class="zoom-inner">
       <div class="zoom-nick">${esc(v.me.nickname)}</div>
       ${roles}
+      ${(v.tonight || []).map((t) => `<div class="zoom-clue">${t.item ? art.item(t.item, 48) : ''}<div class="zoom-title">今晚：${esc(t.title)}${t.tag ? `（${esc(t.tag)}）` : ''}</div><p>${esc(t.text)}</p></div>`).join('')}
       ${v.clues
         .map((c) => `<div class="zoom-clue">${c.item ? art.item(c.item, 48) : ''}${c.need ? art.need(c.need, true, 48) : ''}<div class="zoom-title">${esc(c.title)}</div><p>${esc(c.text)}</p></div>`)
         .join('')}
@@ -714,6 +776,15 @@ function overlayHtml(v) {
   if (ui.mealAt && Date.now() - ui.mealAt < MEAL_MS) {
     return `<div class="ovl meal-ovl" aria-hidden="true">${art.meal()}<p class="ovl-cap">於是他們都放下心，也就吃了。<cite>徒 27:36</cite></p></div>`;
   }
+  if (ui.useAt && ui.useKind !== '吃飯' && Date.now() - ui.useAt < MEAL_MS) {
+    return ui.useKind === '拋錨'
+      ? `<div class="ovl use-ovl" aria-hidden="true">${art.anchorDrop()}<p class="ovl-cap">從船尾拋下四個錨，盼望天亮。<cite>徒 27:29</cite></p></div>`
+      : `<div class="ovl use-ovl" aria-hidden="true">${art.undergird()}${
+          v.ship && v.ship.used && v.ship.used.item !== '纜索'
+            ? `<p class="ovl-cap">用${v.ship.used.item === '器具' ? '器具裡的繩具' : '小船上的拉繩'}捆綁船底。<cite>遊戲設定</cite></p>`
+            : '<p class="ovl-cap">就用纜索捆綁船底。<cite>徒 27:17</cite></p>'
+        }</div>`;
+  }
   if (ui.cardOpen) {
     const c = [v.cards.a, v.cards.b].find((x) => x && x.id === ui.cardOpen);
     if (c) return cardOverlay(c, c.deck === 'A' ? '起風時發生的事' : '風暴中發生的事');
@@ -726,6 +797,7 @@ function overlayKey(v) {
   if (!v || !v.round) return '';
   if (ui.revealAt && Date.now() - ui.revealAt < REVEAL_MS && v.result) return 'landing:' + ui.revealAt;
   if (ui.mealAt && Date.now() - ui.mealAt < MEAL_MS) return 'meal:' + ui.mealAt;
+  if (ui.useAt && ui.useKind !== '吃飯' && Date.now() - ui.useAt < MEAL_MS) return 'use:' + ui.useAt;
   if (ui.cardOpen && [v.cards.a, v.cards.b].some((x) => x && x.id === ui.cardOpen)) return 'card:' + ui.cardOpen;
   return '';
 }
@@ -844,6 +916,14 @@ setInterval(() => {
     else if (k === 'assist' && v.repair) ms = v.repair.assistAt - now();
     else if (k === 'lock' && v.round) ms = v.round.lockOpensAt - now();
     else if (k === 'dawn' && v.ship && v.ship.dawnAt) ms = v.ship.dawnAt - now();
+    else if (k === 'sweep' && v.ship && v.ship.sweepWarning) {
+      el.textContent = String(Math.max(0, Math.ceil((v.ship.sweepWarning.stormAt - now()) / 1000)));
+      continue;
+    } else if (k === 'undo' && v.ship && v.ship.used) {
+      const left = v.ship.used.undoUntil - now();
+      el.textContent = String(Math.max(0, Math.ceil(left / 1000)));
+      continue;
+    }
     if (ms != null) {
       el.textContent = mmss(ms);
       el.classList.toggle('low', ms < 30000 && k === 'round');
@@ -860,6 +940,12 @@ setInterval(() => {
     ui.mealAt = 0;
     redraw = true;
   }
+  if (ui.useAt && Date.now() - ui.useAt >= MEAL_MS) {
+    ui.useAt = 0;
+    redraw = true;
+  }
+  // 取消的 3 秒過了：收起取消鍵
+  if (v.ship && v.ship.used && v.can.undo && now() > v.ship.used.undoUntil) redraw = true;
   if (ui.cardOpen && Date.now() - ui.cardOpenAt > CARD_AUTO_CLOSE_MS) {
     ui.cardOpen = null;
     redraw = true;
@@ -970,8 +1056,11 @@ document.addEventListener('click', (e) => {
     case 'depart':
       conn.act({ type: 'depart' });
       break;
-    case 'eat':
-      conn.act({ type: 'eat' });
+    case 'use':
+      conn.act({ type: 'use', use: el.getAttribute('data-use') });
+      break;
+    case 'undo-use':
+      conn.act({ type: 'undoUse' });
       break;
     case 'pick':
       conn.act({ type: 'repairPick', option: el.getAttribute('data-opt') });
