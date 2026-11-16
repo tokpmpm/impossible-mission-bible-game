@@ -4,6 +4,8 @@
 import QRCore from 'qrcode/lib/core/qrcode.js';
 // @ts-expect-error 同上
 import SvgTag from 'qrcode/lib/renderer/svg-tag.js';
+import { FORMULA_VERSION } from '../engine/score.ts';
+import { MemoryStore, NAME_REASON_TEXT, TOP_N, checkTeamName, type LeaderboardStore } from './leaderboard.ts';
 import { Room } from './room.ts';
 import type { ClientMessage, ServerMessage } from './view.ts';
 
@@ -28,8 +30,11 @@ export class Hub {
   private fixedBaseUrl: string | null;
   private introMs: number | undefined;
   private sweepWarningMs: number | undefined;
+  /** 團隊排行榜（Node：記憶體或 JSON 檔；Cloudflare：Durable Object 的 SQLite）。 */
+  leaderboard: LeaderboardStore;
 
-  constructor(opts: { publicUrl?: string | null; introMs?: number; sweepWarningMs?: number } = {}) {
+  constructor(opts: { publicUrl?: string | null; introMs?: number; sweepWarningMs?: number; leaderboard?: LeaderboardStore } = {}) {
+    this.leaderboard = opts.leaderboard ?? new MemoryStore();
     this.fixedBaseUrl = opts.publicUrl || null;
     this.introMs = opts.introMs;
     this.sweepWarningMs = opts.sweepWarningMs;
@@ -110,9 +115,11 @@ export class Hub {
     switch (msg.t) {
       case 'ping':
         return this.send(conn, { t: 'pong' });
+      case 'leaderboard':
+        return this.send(conn, { t: 'leaderboard', ...this.leaderboardJson() });
       case 'create': {
         const code = this.newCode();
-        const r = new Room(code, { introMs: this.introMs, sweepWarningMs: this.sweepWarningMs });
+        const r = new Room(code, { introMs: this.introMs, sweepWarningMs: this.sweepWarningMs, practice: msg.practice === true });
         this.rooms.set(code, r);
         this.roomOrigin.set(code, conn.origin);
         const p = r.addPlayer(String(msg.nickname ?? ''));
@@ -170,6 +177,26 @@ export class Hub {
       case 'thank':
         room.thank(pid, msg.to);
         break;
+      case 'submitScore': {
+        // 伺服器檢查：房主、已結算、非練習房、這局沒登記過；隊名最多 12 字、過濾不雅字詞
+        const sub = room.submission(pid);
+        const name = checkTeamName(msg.name);
+        if (!name.ok) throw new Error(NAME_REASON_TEXT[name.reason]);
+        if (this.leaderboard.hasRound(sub.roundId)) throw new Error('這局已經登記過了');
+        const res = this.leaderboard.add({
+          roundId: sub.roundId,
+          name: name.name,
+          key: name.key,
+          score: sub.score.total,
+          players: sub.players,
+          at: Date.now(),
+          formula: sub.score.formula,
+          raw: sub.raw,
+        });
+        room.markSubmitted(sub.roundId, { name: name.name, ...res });
+        this.send(conn, { t: 'submitted', name: name.name, ...res });
+        break;
+      }
       case 'leave':
         room.leave(pid);
         conn.roomCode = null;
@@ -177,6 +204,11 @@ export class Hub {
         break;
     }
     this.broadcast(room);
+  }
+
+  /** 排行榜前 10 名（HTTP GET /api/leaderboard 與 WebSocket 共用）。 */
+  leaderboardJson(): { entries: ReturnType<LeaderboardStore['top']>; formula: string; trial: true } {
+    return { entries: this.leaderboard.top(TOP_N), formula: FORMULA_VERSION, trial: true };
   }
 
   /** 定時呼叫：推進各房間時間（2:15 提示、2:45 危機、修復協助、8:00）。 */

@@ -3,10 +3,12 @@
 
 import type { RoleId, Preference } from './content.ts';
 import type { CardId, DialId, ItemId, NeedId, UseId } from '../engine/seeds.ts';
+import type { LeaderEntry } from './leaderboard.ts';
 
 /** 手機 → 伺服器 */
 export type ClientMessage =
-  | { t: 'create'; nickname: string }
+  /** practice：單機試玩（solo.html）開的練習房，不能登記排行榜。 */
+  | { t: 'create'; nickname: string; practice?: boolean }
   | { t: 'join'; code: string; nickname: string }
   | { t: 'resume'; playerId: string; token: string }
   | { t: 'pref'; value: Preference | null }
@@ -14,6 +16,10 @@ export type ClientMessage =
   | { t: 'act'; id: string; ev: Action } // id：手機產生的唯一代號，重送不會重複執行
   | { t: 'thank'; to: string | null }
   | { t: 'next' } // 房主：再來一局（新的故事卡）
+  /** 房主：把這局登記上排行榜（每局一次、練習房不行）。 */
+  | { t: 'submitScore'; name: string }
+  /** 查排行榜前 10 名（也可以用 HTTP GET /api/leaderboard）。 */
+  | { t: 'leaderboard' }
   | { t: 'leave' }
   /** 心跳：每 20 秒一次，讓雲端伺服器保持清醒。 */
   | { t: 'ping' };
@@ -35,6 +41,9 @@ export type ServerMessage =
   /** 只送給按的那支手機：這個動作被規則擋下了，附原因與下一步。 */
   | ({ t: 'rejected'; id: string } & Rejection)
   | { t: 'error'; msg: string }
+  /** 只送給房主：登記結果（rank＝這一隊現在第幾名；best＝這次是不是這隊最好成績）。 */
+  | { t: 'submitted'; name: string; rank: number; best: boolean; bestScore: number }
+  | { t: 'leaderboard'; entries: LeaderEntry[]; formula: string; trial: true }
   | { t: 'pong' };
 
 export interface Rejection {
@@ -129,6 +138,8 @@ export interface View {
     repair: boolean;
     eliminate: boolean;
     next: boolean;
+    /** 房主：可以把這局登記上排行榜（練習房、已登記過＝false）。 */
+    submit: boolean;
     /** 我今晚能做的用掉（只有今晚真的做得到、且輪到我的才有）；ready＝那樣東西還在船上。 */
     uses: { id: UseId; label: string; icon: string; ref: string; need: NeedId; item: ItemId; ready: boolean }[];
     /** 我剛用掉，3 秒內可以取消。 */
@@ -169,5 +180,17 @@ export interface View {
     question: string;
     thanks: { from: string; to: string }[];
     myThanks: string | null;
+    /** 團隊分數（試行；伺服器計算）。四項依序：任務成果、合作順暢、時間、難度加成。 */
+    score: null | {
+      total: number;
+      max: number;
+      parts: { id: 'mission' | 'teamwork' | 'time' | 'difficulty'; points: number; max: number; detail: string }[];
+      factor: number;
+      trial: true;
+      formula: string;
+      /** 練習房：分數照算，但不計入排行榜。 */
+      practice: boolean;
+      submitted: null | { name: string; rank: number; best: boolean; bestScore: number };
+    };
   };
 }
