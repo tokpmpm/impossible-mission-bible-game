@@ -105,7 +105,9 @@ test('262 種局面：腳本給的三星打法在狀態機裡整局走完都是�
 });
 
 test('docs/12 第 3 節的重玩性指標與腳本現在算出來的一致', () => {
-  const live = JSON.parse(execFileSync('python3', ['tools/verify_seeds.py', '--metrics'], { encoding: 'utf8' }));
+  const live = JSON.parse(execFileSync('python3', ['tools/verify_seeds.py', '--metrics'], { encoding: 'utf8' })) as {
+    tried: number; setups: number; games: number; three: number; two_floor: boolean; copy_best: number; copy_avg: number; fixed: number; blind: number; signatures: number;
+  };
   assert.deepEqual(live, golden.metrics, '對照檔過期：請跑 npm run golden');
   const doc = readFileSync(new URL('../docs/12-REPLAYABILITY.md', import.meta.url), 'utf8');
   const sec3 = doc.slice(doc.indexOf('## 3.'), doc.indexOf('## 4.'));

@@ -2,7 +2,7 @@
 // 2026-11-15 v0.7：第一關保羅海難。不是自己能操作的東西不送 can（前端不畫按鈕）。
 
 import type { RoleId, Preference } from './content.ts';
-import type { CardId, ItemId, NeedId } from '../engine/seeds.ts';
+import type { CardId, DialId, ItemId, NeedId, UseId } from '../engine/seeds.ts';
 
 /** 手機 → 伺服器 */
 export type ClientMessage =
@@ -23,7 +23,8 @@ export type Action =
   | { type: 'lock' }
   | { type: 'repairPick'; option: string }
   | { type: 'useEliminate' }
-  | { type: 'eat' }
+  | { type: 'use'; use: UseId } // 補好船後：吃飯／拋錨／捆船底（全隊只來得及一件）
+  | { type: 'undoUse' } // 按下後 3 秒內本人取消
   | { type: 'depart' };
 
 /** 伺服器 → 手機 */
@@ -92,8 +93,14 @@ export interface View {
   cards: { a: CardView | null; b: CardView | null };
   /** 全隊共用的船。 */
   ship: null | {
-    /** 6 樣東西的狀態：onShip＝還留在船上；gone＝被故事卡或吃飯帶走（不在海上也不在船上）。 */
-    items: { id: ItemId; weight: number; onShip: boolean; gone: boolean; pinned: boolean }[];
+    /** 6 樣東西的狀態：onShip＝還留在船上；gone＝被故事卡、用掉或浪捲走（不在海上也不在船上）；swept＝被浪捲走。 */
+    items: { id: ItemId; weight: number; onShip: boolean; gone: boolean; pinned: boolean; swept: boolean }[];
+    /** 這局有沒有「風暴捲走」（首局沒有）。 */
+    sweep: boolean;
+    /** 捲走前 10 秒提醒：風暴幾點來（伺服器時間）、漂著的東西。 */
+    sweepWarning: null | { stormAt: number; floating: ItemId[] };
+    /** 今晚三件事各靠哪一樣：補好船後才公開（危機前要問隊友）。 */
+    provides: Record<NeedId, ItemId> | null;
     weight: number;
     cap: number;
     overweight: number;
@@ -104,9 +111,8 @@ export interface View {
     reasonCodes: string[];
     advice: string[]; // 原因＋下一步（依看的人換成「你」或隊友暱稱）
     locked: boolean;
-    fed: boolean;
-    fedAt: number | null; // 伺服器時間：吃飯的那一刻（所有手機播動畫）
-    fedBy: string | null; // 誰召集的（暱稱）
+    /** 天亮前用掉的那一件（所有手機播動畫）；at 為伺服器時間。 */
+    used: null | { id: UseId; item: ItemId; at: number; by: string; mine: boolean; undoUntil: number };
     dawnAt: number | null; // 伺服器時間：幾點起可以衝向海灘
     lastRejection: null | { at: number; action: Action['type']; reasons: string[] };
   };
@@ -122,11 +128,14 @@ export interface View {
     depart: boolean;
     repair: boolean;
     eliminate: boolean;
-    eat: boolean;
     next: boolean;
+    /** 我今晚能做的用掉（只有今晚真的做得到、且輪到我的才有）；ready＝那樣東西還在船上。 */
+    uses: { id: UseId; label: string; icon: string; ref: string; need: NeedId; item: ItemId; ready: boolean }[];
+    /** 我剛用掉，3 秒內可以取消。 */
+    undo: boolean;
   };
-  /** 吃飯按鈕的狀態（只有伙房會看到）：糧食丟了就要先撈回。 */
-  eatNeedsFood: boolean;
+  /** 我手上的見聞（每局不同）。tag＝「遊戲設定」：遊戲自創的細節，不附章節（DECISIONS 15）。 */
+  tonight: { dial: DialId; title: string; text: string; ref: string | null; verse: string | null; tag: string | null; item: ItemId | null; use: UseId | null }[];
   clues: { title: string; text: string; role: string; when: 'start' | 'power'; item?: ItemId; need?: NeedId; breakthrough?: number; shared?: boolean }[];
   hint: string | null;
   preferenceHint: string | null; // 油燈：例「帶油燈的 小明 可以照亮面板一次。」
@@ -154,6 +163,7 @@ export interface View {
     cause: 'depart' | 'time_up' | 'ended';
     moments: MomentView[];
     bible: string; // 「經文裡」對照
+    tonightLine: string; // 「今晚靠的是……」（不指名誰沒說）
     verse: { text: string; ref: string };
     fact: string;
     question: string;

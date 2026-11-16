@@ -35,6 +35,8 @@ export interface GameConfig {
   grayOrder?: string[][];
   /** 幾毫秒後才能「決定好了」；預設 LOCK_OPENS_AT。測試可設 0。 */
   lockOpensAt?: number;
+  /** 捲走前提醒幾毫秒；預設 SWEEP_WARNING_MS（10 秒）。只給自動測試縮短。 */
+  sweepWarningMs?: number;
 }
 
 export interface RepairState {
@@ -81,6 +83,7 @@ export interface GameState {
   /** 風暴（危機）預定什麼時候來：2:45（A2 提早），船長「決定好了」後若有風暴捲走則改為 10 秒後。 */
   stormAt: number;
   warned: boolean; // 已發出 10 秒提醒
+  sweepWarningMs: number;
   swept: ItemId[]; // 被浪捲走、撈不回來的東西
   crisisAt: number | null;
   crisisCause: 'lock' | 'timeout' | null;
@@ -153,6 +156,7 @@ export function createGame(config: GameConfig): GameState {
     locked: false,
     stormAt: crisisAtFor(config.cards),
     warned: false,
+    sweepWarningMs: config.sweepWarningMs ?? SWEEP_WARNING_MS,
     swept: [],
     crisisAt: null,
     crisisCause: null,
@@ -333,9 +337,9 @@ function advanceTime(s: GameState, at: number): void {
     s.hint.shown = ev.stars < 3 || ev.overweight > 0;
     if (s.hint.shown) s.log.push({ at: HINT_AT, kind: 'hint' });
   }
-  if (s.phase === 'planning' && s.sweep && !s.warned && at >= s.stormAt - SWEEP_WARNING_MS) {
+  if (s.phase === 'planning' && s.sweep && !s.warned && at >= s.stormAt - s.sweepWarningMs) {
     s.warned = true;
-    s.log.push({ at: Math.max(0, s.stormAt - SWEEP_WARNING_MS), kind: 'storm_warning' });
+    s.log.push({ at: Math.max(0, s.stormAt - s.sweepWarningMs), kind: 'storm_warning' });
   }
   if (s.phase === 'planning' && at >= s.stormAt) startCrisis(s, s.stormAt, s.locked ? 'lock' : 'timeout');
   if (s.phase === 'blackout' && s.repair) {
@@ -410,7 +414,7 @@ export function apply(prev: GameState, event: GameEvent): GameState {
       s.lastRejection = null;
       if (s.sweep) {
         // 決定好了：風暴 10 秒後來，先提醒「漂著的東西快被捲走了」，這 10 秒內還可以撈回
-        s.stormAt = Math.min(s.stormAt, at + SWEEP_WARNING_MS);
+        s.stormAt = Math.min(s.stormAt, at + s.sweepWarningMs);
         advanceTime(s, at);
       } else startCrisis(s, at, 'lock');
       return s;

@@ -27,10 +27,12 @@ export class Hub {
   private qrCache = new Map<string, string>();
   private fixedBaseUrl: string | null;
   private introMs: number | undefined;
+  private sweepWarningMs: number | undefined;
 
-  constructor(opts: { publicUrl?: string | null; introMs?: number } = {}) {
+  constructor(opts: { publicUrl?: string | null; introMs?: number; sweepWarningMs?: number } = {}) {
     this.fixedBaseUrl = opts.publicUrl || null;
     this.introMs = opts.introMs;
+    this.sweepWarningMs = opts.sweepWarningMs;
   }
 
   joinUrl(code: string): string {
@@ -110,7 +112,7 @@ export class Hub {
         return this.send(conn, { t: 'pong' });
       case 'create': {
         const code = this.newCode();
-        const r = new Room(code, { introMs: this.introMs });
+        const r = new Room(code, { introMs: this.introMs, sweepWarningMs: this.sweepWarningMs });
         this.rooms.set(code, r);
         this.roomOrigin.set(code, conn.origin);
         const p = r.addPlayer(String(msg.nickname ?? ''));
