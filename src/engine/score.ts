@@ -3,7 +3,7 @@
 // 公式只吃「原始計分資料」（ScoreRaw），所以將來改公式時，排行榜可以用存下來的原始資料重算，不必清榜。
 // 只排團隊、不排個人；分數與信仰、聖經答題無關。
 import { DIFFICULTY, DIFF_MAX, SWEEP_BONUS } from './difficulty.ts';
-import { TIME_UP_AT, type GameState } from './game.ts';
+import { FIRST_ROUND_EXTRA, SECOND_ASSIST_AFTER, TIME_UP_AT, symbolCount, type GameState } from './game.ts';
 import { DIALS, type CardId, type Tonight } from './seeds.ts';
 
 /** 公式版本：改公式就換版本號，舊紀錄可用新版本重算。 */
@@ -16,6 +16,12 @@ export const PARTS = { mission: 600, teamwork: 200, time: 100, difficulty: 100 }
 export const PER_STAR = 200;
 /** 合作順暢：補船速度（線性）＋沒用協助（依協助等級遞減）。 */
 export const REPAIR_SPEED_MAX = 140;
+/**
+ * 速度項的標準時間：每格記號 15 秒（＋首局 15 秒）。用格數算而不是用遊戲限時，
+ * 因為 3 人局限時 45 秒只有 2 格（每格 22.5 秒），直接用限時會讓 3 人隊平白多 30 分以上（公平性審查）。
+ * 故事卡 A5（補船多 10 秒）不放進分母：卡片給的寬限不該同時讓速度分變高。
+ */
+export const REPAIR_MS_PER_SLOT = 15_000;
 export const NO_ASSIST_POINTS: Record<0 | 1 | 2, number> = { 0: 60, 1: 30, 2: 0 };
 /** 時間：這個時間（含）以前上岸給滿分，8:00 為 0，中間線性。 */
 export const TIME_FULL_AT = 120_000;
@@ -34,8 +40,13 @@ export interface ScoreRaw {
   repairMs: number | null;
   /** 這局補船的限時（含首局＋15 秒、A5＋10 秒）。 */
   repairLimitMs: number;
-  /** 補好時的協助等級：0＝沒用、1＝逾時進協助、2＝第二段協助。沒補好＝2。 */
+  /** 補好時畫面上的協助等級：0＝沒用、1＝進協助、2＝第二段協助。沒補好＝2。（首局協助會在限時前提早出現，計分不直接用它，見 scoredAssist） */
   assistLevel: 0 | 1 | 2;
+  /** 補船記號格數（3 人 2 格、4 人 3 格、5 人以上 4 格）。 */
+  slots: number;
+  firstRound: boolean;
+  /** 木匠選錯幾次（目前不計分；存下來給將來調整公式重算）。 */
+  wrongPicks: number;
   /** 結束時間（局內毫秒）：上岸時間；時間到＝8:00。 */
   finishedAt: number;
   cards: { a: CardId; b: CardId };
@@ -82,6 +93,9 @@ export function rawOf(g: GameState): ScoreRaw | null {
     repairMs: done ? r!.doneAt! - r!.startedAt : null,
     repairLimitMs: r?.limitMs ?? 0,
     assistLevel: done ? r!.assistLevel : 2,
+    slots: r?.slots.length ?? symbolCount(g.playerCount),
+    firstRound: g.firstRound,
+    wrongPicks: r?.wrongPicks ?? 0,
     finishedAt: g.result ? g.result.at : TIME_UP_AT,
     cards: { ...g.cards },
     tonight: { ...g.tonight },
@@ -92,14 +106,30 @@ export function rawOf(g: GameState): ScoreRaw | null {
   };
 }
 
+/** 速度項的標準時間（毫秒）。 */
+export function standardRepairMs(raw: Pick<ScoreRaw, 'slots' | 'firstRound'>): number {
+  return raw.slots * REPAIR_MS_PER_SLOT + (raw.firstRound ? FIRST_ROUND_EXTRA : 0);
+}
+
+/**
+ * 計分用的協助等級：看補船有沒有超過這局限時（未超過＝0、超過 15 秒內＝1、再久＝2）。
+ * 不看首局「協助提早 15 秒出現」的時點——那是給新手的幫忙，不該讓還沒用完限時的新手被扣分。
+ */
+export function scoredAssist(raw: Pick<ScoreRaw, 'repairMs' | 'repairLimitMs'>): 0 | 1 | 2 {
+  if (raw.repairMs === null) return 2;
+  if (raw.repairMs <= raw.repairLimitMs) return 0;
+  return raw.repairMs <= raw.repairLimitMs + SECOND_ASSIST_AFTER ? 1 : 2;
+}
+
 /** 公式（只看原始資料）。每項各自封頂，總分上限 1000。 */
 export function computeScore(raw: ScoreRaw): ScoreBreakdown {
   const mission = PER_STAR * raw.stars;
 
   let teamwork = 0;
-  if (raw.repairMs !== null && raw.repairLimitMs > 0) {
-    const speed = Math.round(REPAIR_SPEED_MAX * clamp01(1 - raw.repairMs / raw.repairLimitMs));
-    teamwork = speed + NO_ASSIST_POINTS[raw.assistLevel];
+  const standard = standardRepairMs(raw);
+  if (raw.repairMs !== null && raw.repairLimitMs > 0 && standard > 0) {
+    const speed = Math.round(REPAIR_SPEED_MAX * clamp01(1 - raw.repairMs / standard));
+    teamwork = speed + NO_ASSIST_POINTS[scoredAssist(raw)];
   }
 
   const time = Math.round(PARTS.time * clamp01((TIME_UP_AT - raw.finishedAt) / (TIME_UP_AT - TIME_FULL_AT)));

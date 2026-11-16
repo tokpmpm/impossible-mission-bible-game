@@ -19,6 +19,8 @@ export interface LeaderRow {
   at: number; // 登記時間（毫秒）
   formula: string;
   raw: ScoreRaw;
+  /** 管理者隱藏（不雅隊名、灌榜）：不刪資料、不顯示在榜上。 */
+  hidden?: boolean;
 }
 
 /** 排行榜上顯示的一列。 */
@@ -46,6 +48,8 @@ export interface LeaderboardStore {
   add(row: Omit<LeaderRow, 'id'>): SubmitResult;
   /** 全部登記（給重算或匯出用）。 */
   all(): LeaderRow[];
+  /** 管理用：隱藏或恢復一筆（不刪原始資料，榜不重置）。目前沒有對外端點，由維運直接呼叫。 */
+  setHidden(id: number, hidden: boolean): void;
 }
 
 // ---------- 隊名 ----------
@@ -104,6 +108,7 @@ const better = (x: LeaderRow, y: LeaderRow) => y.score - x.score || x.at - y.at 
 export function rankBest(rows: LeaderRow[]): LeaderRow[] {
   const best = new Map<string, LeaderRow>();
   for (const r of rows) {
+    if (r.hidden) continue;
     const cur = best.get(r.key);
     if (!cur || better(r, cur) < 0) best.set(r.key, r);
   }
@@ -149,6 +154,13 @@ export class MemoryStore implements LeaderboardStore {
   all(): LeaderRow[] {
     return this.rows.map((r) => ({ ...r }));
   }
+
+  setHidden(id: number, hidden: boolean): void {
+    const r = this.rows.find((x) => x.id === id);
+    if (!r) return;
+    r.hidden = hidden;
+    this.onChange?.(this.rows);
+  }
 }
 
 // ---------- SQLite（Cloudflare Durable Object；測試用 node:sqlite） ----------
@@ -170,7 +182,8 @@ export class SqlStore implements LeaderboardStore {
       players INTEGER NOT NULL,
       at INTEGER NOT NULL,
       formula TEXT NOT NULL,
-      raw TEXT NOT NULL
+      raw TEXT NOT NULL,
+      hidden INTEGER NOT NULL DEFAULT 0
     )`);
     exec('CREATE INDEX IF NOT EXISTS leaderboard_key ON leaderboard (name_key, score DESC, at ASC)');
   }
@@ -186,6 +199,7 @@ export class SqlStore implements LeaderboardStore {
       at: Number(r.at),
       formula: String(r.formula),
       raw: JSON.parse(String(r.raw)) as ScoreRaw,
+      hidden: Number(r.hidden ?? 0) === 1,
     };
   }
 
@@ -193,7 +207,7 @@ export class SqlStore implements LeaderboardStore {
   private ranked(limit?: number): LeaderRow[] {
     const rows = this.exec(
       `SELECT * FROM (
-         SELECT *, ROW_NUMBER() OVER (PARTITION BY name_key ORDER BY score DESC, at ASC, id ASC) AS rn FROM leaderboard
+         SELECT *, ROW_NUMBER() OVER (PARTITION BY name_key ORDER BY score DESC, at ASC, id ASC) AS rn FROM leaderboard WHERE hidden = 0
        ) WHERE rn = 1 ORDER BY score DESC, at ASC, id ASC` + (limit ? ` LIMIT ${Math.max(1, Math.floor(limit))}` : ''),
     );
     return rows.map(SqlStore.row);
@@ -225,5 +239,9 @@ export class SqlStore implements LeaderboardStore {
 
   all(): LeaderRow[] {
     return this.exec('SELECT * FROM leaderboard ORDER BY id').map(SqlStore.row);
+  }
+
+  setHidden(id: number, hidden: boolean): void {
+    this.exec('UPDATE leaderboard SET hidden = ? WHERE id = ?', hidden ? 1 : 0, id);
   }
 }

@@ -157,7 +157,7 @@ export class Room {
     const name = nickname.trim().slice(0, 12) || `隊員${active.length + 1}`;
     const player: Player = { id: randomId(10), token: randomId(24), nickname: this.uniqueName(name), connected: true, left: false, pref: null, seenActs: [] };
     this.players.push(player);
-    if (!this.hostId || !this.get(this.hostId)?.connected) this.hostId = player.id;
+    this.transferHostIfNeeded(); // 房主不在線時優先交給這局的隊員
     this.touch();
     return player;
   }
@@ -176,7 +176,7 @@ export class Room {
     const p = this.get(id);
     if (!p || p.token !== token || p.left) return null;
     p.connected = true;
-    if (!this.hostId || !this.get(this.hostId)?.connected) this.hostId = p.id;
+    this.transferHostIfNeeded();
     this.touch();
     return p;
   }
@@ -200,7 +200,9 @@ export class Room {
   private transferHostIfNeeded(): void {
     const host = this.hostId ? this.get(this.hostId) : undefined;
     if (host && host.connected && !host.left) return;
-    const next = this.players.find((p) => p.connected && !p.left);
+    // 一局進行中或剛結算：房主優先交給這局的隊員（登記上榜要由隊員決定隊名）
+    const inRound = this.round?.participants ?? [];
+    const next = this.players.find((p) => p.connected && !p.left && inRound.includes(p.id)) ?? this.players.find((p) => p.connected && !p.left);
     this.hostId = next ? next.id : null;
   }
 
@@ -570,6 +572,7 @@ export class Room {
     if (this.practice) throw new Error('練習模式不計入排行榜');
     if (pid !== this.hostId) throw new Error('只有房主可以登記上榜');
     if (!r) throw new Error('還沒有可以登記的一局');
+    if (!r.participants.includes(pid)) throw new Error('只有這局的隊員可以登記上榜');
     const sc = this.score();
     if (!sc) throw new Error('這局還沒結束');
     if (r.submitted) throw new Error('這局已經登記過了');
@@ -880,7 +883,8 @@ export class Room {
           id: 'teamwork',
           points: score.teamwork,
           max: 200,
-          detail: raw.repairMs === null ? '沒補好船' : `補船 ${Math.round(raw.repairMs / 1000)} 秒` + (raw.assistLevel ? `・協助 ${raw.assistLevel}` : ''),
+          // 不寫協助等級數字，避免矛頭指向木匠一個人（公平性審查）
+          detail: raw.repairMs === null ? '天亮前沒補好船' : `大家一起補船 ${Math.round(raw.repairMs / 1000)} 秒`,
         },
         { id: 'time', points: score.time, max: 100, detail: `${Math.floor(raw.finishedAt / 60000)}:${String(Math.floor((raw.finishedAt % 60000) / 1000)).padStart(2, '0')} 上岸` },
         { id: 'difficulty', points: score.difficulty, max: 100, detail: `三星解 ${raw.solutions} 種` + (raw.sweep ? '・風暴捲走' : '') },
