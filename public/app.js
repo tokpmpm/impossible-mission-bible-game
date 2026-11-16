@@ -64,7 +64,7 @@ const ui = {
   revealAt: 0, // 上岸動畫開始時間
   /** 分數動畫：只在每一局第一次看到時播（key＝房號:局數）。 */
   scoreAnim: null, // { key, at }
-  scorePlayed: new Set(),
+  scorePlayed: new Set(readList('im.scorePlayed')),
   /** 登記上榜：輸入框是否展開、隊名、錯誤、送出中、剛登記的結果。 */
   subOpen: false,
   subName: '',
@@ -82,6 +82,23 @@ const FLASH_BLOCK = { OVERWEIGHT: 'load', PINNED: 'items', NO_FOOD: 'items' };
 const MEAL_MS = 2800;
 const REVEAL_MS = 4400;
 const CARD_AUTO_CLOSE_MS = 20000;
+
+function readList(k) {
+  try {
+    const a = JSON.parse(sessionStorage.getItem(k) || '[]');
+    return Array.isArray(a) ? a.slice(-20) : [];
+  } catch {
+    return [];
+  }
+}
+function markScorePlayed(key) {
+  ui.scorePlayed.add(key);
+  try {
+    sessionStorage.setItem('im.scorePlayed', JSON.stringify([...ui.scorePlayed].slice(-20)));
+  } catch {
+    /* 忽略 */
+  }
+}
 
 function readFlag(k) {
   try {
@@ -725,7 +742,7 @@ const SCORE_LABEL = { mission: '任務成果', teamwork: '合作順暢', time: '
 const SCORE_STEP = 600; // 每一項間隔
 const SCORE_ITEM = 520; // 每一項數字跳動時間
 const SCORE_TOTAL_AT = 4 * SCORE_STEP + 200;
-const SCORE_END = SCORE_TOTAL_AT + 900;
+const SCORE_END = SCORE_TOTAL_AT + 700;
 
 function roundKey(v) {
   return v ? `${v.code}:${v.round ? v.round.no : 0}` : '';
@@ -739,7 +756,7 @@ function scoreElapsed(v) {
   if (!ui.scoreAnim || ui.scoreAnim.key !== key) ui.scoreAnim = { key, at: Date.now() };
   const e = Date.now() - ui.scoreAnim.at;
   if (e >= SCORE_END) {
-    ui.scorePlayed.add(key);
+    markScorePlayed(key);
     return Infinity;
   }
   return e;

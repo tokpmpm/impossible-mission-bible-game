@@ -89,10 +89,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     for (let i = 1; i < N; i++) if (await pages[i].$('[data-action=sub-open]')) errs.push(`${label}：非房主看到登記按鈕`);
     if (!(await pages[0].$('[data-action=sub-open]'))) errs.push(`${label}：房主沒有登記按鈕`);
     // 重新連線（整頁重載）不重播動畫
-    await pages[0].reload();
-    await pages[0].waitForSelector('[data-score-total]', { timeout: 8000 });
+    // （不重載房主：房主斷線會換人當房主）
+    const last = pages[N - 1];
+    await last.reload();
+    await last.waitForSelector('[data-score-total]', { timeout: 8000 });
     await sleep(300);
-    if (await pages[0].$('.sc-row.pending')) errs.push(`${label}：重新連線後動畫又重播`);
+    if (await last.$('.sc-row.pending')) errs.push(`${label}：重新連線後動畫又重播`);
     return totals[0];
   };
   const submitTeam = async (label) => {
