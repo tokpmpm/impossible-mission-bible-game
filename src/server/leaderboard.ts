@@ -86,10 +86,12 @@ export function checkTeamName(input: unknown): NameCheck {
     .replace(/[\u0000-\u001f\u007f\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
-  const key = nameKey(name);
+  // 只有表情符號的隊名：去掉標點符號後是空的，改用去空白後的原字當比對用 key
+  const key = nameKey(name) || name.normalize('NFKC').toLowerCase().replace(/[\s\p{P}]/gu, '');
   if (!key) return { ok: false, reason: 'EMPTY' };
   if ([...name].length > TEAM_NAME_MAX) return { ok: false, reason: 'TOO_LONG' };
-  const k2 = leet(key);
+  // 不雅比對：先把 $、@ 等代字還原成字母，再去空白標點（否則 $hit 的 $ 會先被刪掉）
+  const k2 = nameKey(leet(name.normalize('NFKC').toLowerCase()));
   if (BLOCKED.some((w) => key.includes(w) || k2.includes(w))) return { ok: false, reason: 'BLOCKED' };
   return { ok: true, name, key };
 }
