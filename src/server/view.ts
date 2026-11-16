@@ -135,7 +135,7 @@ export interface View {
     undo: boolean;
   };
   /** 我手上的見聞（每局不同）。tag＝「遊戲設定」：遊戲自創的細節，不附章節（DECISIONS 15）。 */
-  tonight: { dial: DialId; title: string; text: string; ref: string | null; verse: string | null; tag: string | null; item: ItemId | null; use: UseId | null }[];
+  tonight: { dial: DialId; value: string; title: string; text: string; ref: string | null; verse: string | null; tag: string | null; item: ItemId | null; use: UseId | null }[];
   clues: { title: string; text: string; role: string; when: 'start' | 'power'; item?: ItemId; need?: NeedId; breakthrough?: number; shared?: boolean }[];
   hint: string | null;
   preferenceHint: string | null; // 油燈：例「帶油燈的 小明 可以照亮面板一次。」

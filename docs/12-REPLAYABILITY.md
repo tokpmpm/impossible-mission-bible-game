@@ -7,7 +7,7 @@
 > 4. 試算結果：262 種局面全部有三星解；把上一局的三星打法原封不動搬到下一局，**只有 13.5% 還能三星**（現在是 100%）；不問隊友只有 27.5%。
 > 5. 這是設計提案：只做過窮舉試算，**沒有改遊戲程式、沒有真人試玩**。有 2 個問題要請使用者決定（見最後一節）。
 
-狀態：AI 設計提案（2026-11-16）。數值未實測。試算腳本：`python3 docs/appendix/replayability_sim.py`（加 `--table` 列出全部通過的組合）。沒有修改 `tools/`、`src/`、`public/`。
+狀態：AI 設計提案（2026-11-16），使用者已核准並於同日實作（分支 feat/replayability，ADR-0007；規則已搬進 `tools/verify_seeds.py`，指標由 `test/golden.test.ts` 逐字核對）。數值未實測、未經真人試玩。試算腳本：`python3 docs/appendix/replayability_sim.py`（加 `--table` 列出全部通過的組合）。沒有修改 `tools/`、`src/`、`public/`。
 
 ---
 

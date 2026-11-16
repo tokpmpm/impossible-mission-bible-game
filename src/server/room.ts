@@ -571,7 +571,7 @@ export class Room {
         return r.game.sweep
           ? '你決定丟什麼：按一下＝丟進海裡。風暴一來，漂著的東西就撈不回來，先問清楚再丟。'
           : '你決定丟什麼：按一下東西＝丟進海裡，再按一下撈回來。';
-      if (this.operatorOf('nav') === pid) return '大家講好了，就由你按「決定好了」。';
+      if (this.operatorOf('nav') === pid) return r.game.locked ? '你決定好了：風暴馬上就來。' : '大家講好了，就由你按「決定好了」。';
       if (this.nextSteps(pid).length) return null; // 「下一步」已經說了要找誰
       return `把你知道的告訴 ${this.nick(this.operatorOf('supply'))}（管倉），他負責丟東西。`;
     }
@@ -719,7 +719,7 @@ export class Room {
     // 見聞：只在拿的人手機上（可以互看）
     v.tonight = DIALS.filter((d) => r.tonightHolders.get(d) === pid).map((d) => {
       const t = (TONIGHT_TEXT[d] as Record<string, { title: string; text: string; ref?: string; verse?: string; item?: ItemId; use?: UseId }>)[g.tonight[d]];
-      return { dial: d, title: t.title, text: t.text, ref: t.ref ?? null, verse: t.verse ?? null, tag: t.ref ? null : '遊戲設定', item: t.item ?? null, use: t.use ?? null };
+      return { dial: d, value: g.tonight[d], title: t.title, text: t.text, ref: t.ref ?? null, verse: t.verse ?? null, tag: t.ref ? null : '遊戲設定', item: t.item ?? null, use: t.use ?? null };
     });
 
     // 線索：自己的職能，加上不在場的拆分職能
@@ -832,7 +832,7 @@ export class Room {
     const g = this.round!.game;
     const p = providers(g);
     const parts = [`力氣靠${p.力氣}`, CARDS[g.cards.a].done?.includes('船身') ? '船身早就捆好了' : `船身靠${p.船身}`, `等天亮靠錨`];
-    const extra = [g.tonight.水 === '淺' ? '水夠淺、拋得了錨' : '水太深、錨拋不下去', g.tonight.胃 === '吃得下' ? '大家吃得下' : '大家暈得吃不下'];
+    const extra = [g.tonight.水 === '淺' ? '水夠淺、拋得了錨' : '水太深、錨拋不下去', g.tonight.胃 === '吃得下' ? '大家吃得下' : '大家暈船、吃不下'];
     return `今晚${parts.join('、')}；${extra.join('，')}。`;
   }
 
