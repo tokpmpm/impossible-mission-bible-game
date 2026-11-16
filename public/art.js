@@ -1200,3 +1200,47 @@ export function landing({ lit = {} } = {}) {
 export function throwSplash(size = 40) {
   return `${svgOpen({ viewBox: '-20 -28 40 36', size, label: '水花', cls: 'art-splash' })}${splashArt(0, 0, 'splash')}</svg>`;
 }
+
+// ───────────────────────── 10. 拋錨、捆船底（天亮前只來得及做一件） ─────────────────────────
+
+/** 約 2 秒：船尾放下四個錨，繩子拉直、沉進夜海（27:29）。靜止時就是錨已沉在水裡。 */
+export function anchorDrop() {
+  const anchors = [0, 1, 2, 3]
+    .map((i) => {
+      const x = 52 + i * 14;
+      return (
+        `<g class="ad-rope" style="animation-delay:${(0.2 + i * 0.15).toFixed(2)}s">${ol(`M${x} 64 L${x} 118`, C.rope, 1.6)}</g>` +
+        `<g class="ad-anchor" style="animation-delay:${(0.2 + i * 0.15).toFixed(2)}s"><g transform="translate(${x - 9} 112) scale(0.45)">${anchorShape(C.steel, 3.4)}</g></g>`
+      );
+    })
+    .join('');
+  return (
+    svgOpen({ viewBox: '0 0 240 160', label: '從船尾拋下四個錨，盼望天亮（使徒行傳 27:29）', cls: 'art-use art-anchor' }) +
+    `<rect width="240" height="160" rx="16" fill="${C.navy}"/>` +
+    `<circle cx="200" cy="28" r="10" fill="${C.sail}" opacity="0.85"/>` +
+    `<path d="M0 80 Q30 74 60 80 T120 80 T180 80 T240 80 V160 H0 Z" fill="${C.seaDark}"/>` +
+    anchors +
+    `<path d="M30 66 L40 52 L200 52 L214 66 Q200 82 170 86 L66 86 Q40 84 30 66 Z" fill="${C.wood}" ${INK}/>` +
+    `<path d="M0 82 Q30 76 60 82 T120 82 T180 82 T240 82" fill="none" stroke="${C.foam}" stroke-width="1.6" opacity="0.7"/>` +
+    `</svg>`
+  );
+}
+
+/** 約 2 秒：繩子一圈一圈繞過船底、拉緊（27:17）。靜止時就是船底已捆好。 */
+export function undergird() {
+  const loops = [0, 1, 2]
+    .map((i) => {
+      const x = 84 + i * 36;
+      return `<g class="ug-loop" style="animation-delay:${(0.2 + i * 0.3).toFixed(2)}s">${ol(`M${x} 48 Q${x - 8} 92 ${x} 112 Q${x + 8} 92 ${x + 2} 48`, C.rope, 2.4)}</g>`;
+    })
+    .join('');
+  return (
+    svgOpen({ viewBox: '0 0 240 160', label: '用繩子捆綁船底（使徒行傳 27:17）', cls: 'art-use art-undergird' }) +
+    `<rect width="240" height="160" rx="16" fill="${C.navy}"/>` +
+    `<path d="M0 104 Q30 98 60 104 T120 104 T180 104 T240 104 V160 H0 Z" fill="${C.seaDark}"/>` +
+    `<path d="M36 52 L48 40 L196 40 L210 52 Q198 106 160 112 L82 112 Q46 106 36 52 Z" fill="${C.wood}" ${INK}/>` +
+    `<path d="M50 70 Q122 78 200 66 M58 92 Q122 100 190 88" fill="none" stroke="${C.woodDark}" stroke-width="1.4"/>` +
+    loops +
+    `</svg>`
+  );
+}

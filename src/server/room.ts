@@ -8,14 +8,19 @@ import {
   dawnOpensAt,
   eliminationClueCount,
   evaluate,
+  providers,
   seedOf,
+  sweepWarning,
   symbolCount,
+  usesNow,
+  usesTonight,
   TIME_UP_AT,
+  UNDO_USE_MS,
   type GameEvent,
   type GameState,
 } from '../engine/game.ts';
-import { REASON_TEXT, evaluatePlan, type Evaluation, type RejectReason } from '../engine/rules.ts';
-import { CARDS, DECK_A, DECK_B, ITEMS, NEEDS, type CardId, type ItemId, type NeedId, type SeedId } from '../engine/seeds.ts';
+import { REASON_TEXT, evaluatePlan, storyOk, validSetups, type Evaluation, type RejectReason, type Setup } from '../engine/rules.ts';
+import { CARDS, CLASSIC, DIALS, ITEMS, NEEDS, USES, type CardId, type DialId, type ItemId, type NeedId, type SeedId, type Tonight, type UseId } from '../engine/seeds.ts';
 import { describeSymbol, makeEliminationClues, makeSlots, parseSymbol, rng } from '../engine/symbols.ts';
 import {
   ASKS,
@@ -34,6 +39,9 @@ import {
   ROLES,
   SPLIT_FROM,
   STORY,
+  TONIGHT_ROLE,
+  TONIGHT_TEXT,
+  USE_TEXT,
   type Preference,
   type RoleId,
 } from './content.ts';
@@ -72,14 +80,19 @@ interface Round {
   thanks: Map<string, string>;
   /** 突破口第 n 段線索在誰手上（三段在三支手機）。 */
   btHolders: Map<number, string>;
+  /** 見聞：哪一張在誰手上（A4 的局不發「繩」）。 */
+  tonightHolders: Map<DialId, string>;
 }
 
 const EXTRA_REASON_TEXT: Record<string, string> = {
   WRONG_PHASE: '現在不能做這個動作',
   TOO_EARLY: '還在認識隊友的時間',
   PINNED: '船主不准丟',
-  NO_FOOD: '糧食不在船上',
-  ALREADY_FED: '已經吃過了',
+  SWEPT: '已經被浪捲走了',
+  NO_ITEM: '那樣東西不在船上',
+  CANNOT_TONIGHT: '今晚做不到',
+  ALREADY_USED: '天亮前只來得及做一件',
+  UNDO_EXPIRED: '已經來不及取消了',
 };
 
 function reasonText(r: string, overweight = 0): string {
@@ -93,9 +106,6 @@ function randomId(len = 16): string {
   for (let i = 0; i < len; i++) s += chars[Math.floor(Math.random() * chars.length)];
   return s;
 }
-
-/** 會改變最佳留法的卡（與 tools/verify_seeds.py 的 changes() 輸出一致，test 有比對）。 */
-export const PLAN_CHANGERS: CardId[] = ['A1', 'A3', 'A4', 'B1', 'B3', 'B5'];
 
 function cardView(id: CardId, alreadyGone: ItemId[] = []): CardView {
   const v = { id, deck: CARDS[id].deck, ...CARD_TEXT[id] };
@@ -120,9 +130,13 @@ export class Room {
   private now: () => number;
   private random: () => number;
 
-  constructor(code: string, opts: { now?: () => number; seed?: number; introMs?: number } = {}) {
+  /** 捲走前提醒幾毫秒（正式遊戲 10 秒；只給自動測試縮短）。 */
+  sweepWarningMs: number | undefined;
+
+  constructor(code: string, opts: { now?: () => number; seed?: number; introMs?: number; sweepWarningMs?: number } = {}) {
     this.code = code;
     this.introMs = opts.introMs ?? INTRO_MS;
+    this.sweepWarningMs = opts.sweepWarningMs;
     this.now = opts.now ?? Date.now;
     this.random = opts.seed !== undefined ? rng(opts.seed) : Math.random;
   }
@@ -228,33 +242,39 @@ export class Room {
     return a;
   }
 
-  /** 抽故事卡：同一個房間盡量不重複最近抽過的。 */
+  /** 抽故事卡與見聞：同一個房間盡量不重複最近抽過的卡、也盡量換一組見聞。 */
   private usedCards: CardId[] = [];
-  /** 測試用：指定下一局的故事卡。 */
-  forceCards: { a: CardId; b: CardId } | null = null;
-  private drawCards(): { a: CardId; b: CardId } {
+  private lastTonight: Tonight | null = null;
+  /** 測試用：指定下一局的故事卡（與見聞；不給見聞＝首局經典配置，之後從表裡挑一組能配的）。 */
+  forceCards: { a: CardId; b: CardId; tonight?: Tonight } | null = null;
+  private drawSetup(): { cards: { a: CardId; b: CardId }; tonight: Tonight } {
+    const table = validSetups();
+    const same = (x: Tonight, y: Tonight | null) => !!y && DIALS.every((d) => x[d] === y[d]);
+    const pickOne = <T>(xs: T[]) => xs[Math.floor(this.random() * xs.length)];
     if (this.forceCards) {
-      const c = this.forceCards;
+      const f = this.forceCards;
       this.forceCards = null;
-      this.usedCards.push(c.a, c.b);
-      return c;
+      const pool = table.filter((x) => x.a === f.a && x.b.includes(f.b) && (f.tonight ? same(x.tonight, f.tonight) : this.roundsPlayed === 0 ? same(x.tonight, CLASSIC) : true));
+      if (!pool.length) throw new Error(`故事卡 ${f.a}+${f.b} 沒有能配的見聞`);
+      const tonight = f.tonight ?? (pool.find((x) => same(x.tonight, CLASSIC)) ?? pickOne(pool)).tonight;
+      this.usedCards.push(f.a, f.b);
+      this.lastTonight = tonight;
+      return { cards: { a: f.a, b: f.b }, tonight: { ...tonight } };
     }
-    const pick = (deck: CardId[]) => {
-      const fresh = deck.filter((c) => !this.usedCards.includes(c));
-      const pool = fresh.length ? fresh : deck;
-      return pool[Math.floor(this.random() * pool.length)];
-    };
-    let a = pick(DECK_A);
-    let b = pick(DECK_B);
-    // 首局至少一張會改變最佳留法的卡（tools/verify_seeds.py 的「改變該怎麼做」清單），第一局就感覺得到卡片的作用
-    if (this.roundsPlayed === 0 && !PLAN_CHANGERS.includes(a) && !PLAN_CHANGERS.includes(b)) {
-      const pool = DECK_B.filter((c) => PLAN_CHANGERS.includes(c));
-      b = pool[Math.floor(this.random() * pool.length)];
-    }
-    this.usedCards.push(a, b);
+    // 首局固定經典配置（新人先學會骨架）；第二局起整張表都可能，盡量換一組見聞（docs/12 3.4）
+    let pool: Setup[] = this.roundsPlayed === 0 ? table.filter((x) => same(x.tonight, CLASSIC)) : table;
+    const freshA = pool.filter((x) => !this.usedCards.includes(x.a));
+    if (freshA.length) pool = freshA;
+    const newTonight = pool.filter((x) => !same(x.tonight, this.lastTonight));
+    if (newTonight.length) pool = newTonight;
+    const setup = pickOne(pool);
+    const freshB = setup.b.filter((b) => !this.usedCards.includes(b));
+    const b = pickOne(freshB.length ? freshB : setup.b);
+    this.usedCards.push(setup.a, b);
     // 一疊 5 張：抽滿一輪就重新開始，但不立刻重複上一局
-    if (this.usedCards.length >= 8) this.usedCards = [a, b];
-    return { a, b };
+    if (this.usedCards.length >= 8) this.usedCards = [setup.a, b];
+    this.lastTonight = setup.tonight;
+    return { cards: { a: setup.a, b }, tonight: { ...setup.tonight } };
   }
 
   private startRound(participants: string[]): void {
@@ -278,17 +298,23 @@ export class Room {
     const carriers = this.shuffle(nonEng.filter((pid) => this.get(pid)?.pref === 'lamp'));
     const prefHolderId = carriers[0] ?? nonEng[Math.floor(this.random() * nonEng.length)] ?? null;
     const grayOrder = slots.map((s) => this.shuffle(s.options));
-    const cards = this.drawCards();
+    const { cards, tonight } = this.drawSetup();
 
     const firstRound = this.roundsPlayed === 0;
     this.roundsPlayed++;
     const btHolders = this.assignBreakthrough(participants, roles);
+    const tonightHolders = new Map<DialId, string>();
+    for (const d of DIALS) {
+      if (CARDS[cards.a].fix?.[d] !== undefined) continue; // A4：船底已捆好，不發「繩」
+      const h = Room.holderIn(participants, roles, TONIGHT_ROLE[d]);
+      if (h) tonightHolders.set(d, h);
+    }
     this.round = {
       no: this.roundsPlayed,
       seedId: SEED_ID,
       startedAt: this.now(),
       firstRound,
-      game: createGame({ seedId: SEED_ID, playerCount: n, firstRound, slots, cards, grayOrder, lockOpensAt: this.introMs }),
+      game: createGame({ seedId: SEED_ID, playerCount: n, firstRound, slots, cards, tonight, sweep: !firstRound, sweepWarningMs: this.sweepWarningMs, grayOrder, lockOpensAt: this.introMs }),
       participants,
       roles,
       engineerId,
@@ -299,6 +325,7 @@ export class Room {
       actors: [],
       thanks: new Map(),
       btHolders,
+      tonightHolders,
     };
     this.touch();
   }
@@ -361,7 +388,8 @@ export class Room {
     const g = this.round?.game;
     if (!g) return '';
     const open = dawnOpensAt(g);
-    return [g.phase, this.elapsed() >= this.introMs, g.hint.shown, g.repair?.assistLevel, g.crisisAt, g.result?.stars, open !== null && g.now >= open].join('|');
+    const undoOpen = !!g.used && g.now - g.used.at <= UNDO_USE_MS;
+    return [g.phase, this.elapsed() >= this.introMs, g.hint.shown, g.warned, g.repair?.assistLevel, g.crisisAt, g.result?.stars, open !== null && g.now >= open, undoOpen].join('|');
   }
 
   private online(pid: string): boolean {
@@ -415,8 +443,13 @@ export class Room {
         return this.operatorOf('eng') === pid;
       case 'useEliminate':
         return this.effectivePrefHolder() === pid;
-      case 'eat':
-        return this.operatorOf('comms') === pid;
+      case 'use':
+        return Object.hasOwn(USE_TEXT, a.use) && this.operatorOf(USE_TEXT[a.use].role) === pid;
+      case 'undoUse': {
+        // 只有按下去的那個人可以取消
+        const last = [...r.actors].reverse().find((x) => x.kind === 'use');
+        return !!last && last.playerId === pid;
+      }
     }
   }
 
@@ -471,10 +504,18 @@ export class Room {
       }
       case 'PINNED':
         return '船主不准丟麥子（風暴變大以前）';
-      case 'NO_FOOD':
-        return `糧食已經丟進海裡了：請${this.whoDoes('supply', pid)}先撈回來`;
-      case 'ALREADY_FED':
-        return '大家已經吃過了';
+      case 'SWEPT':
+        return '風暴來的時候被浪捲走了，撈不回來';
+      case 'NO_ITEM':
+        return `那樣東西不在船上：請${this.whoDoes('supply', pid)}先撈回來`;
+      case 'CANNOT_TONIGHT':
+        return '今晚做不到這件事';
+      case 'ALREADY_USED': {
+        const u = this.round!.game.used;
+        return u ? `天亮前只來得及做一件：${USE_TEXT[u.use].done}` : '天亮前只來得及做一件';
+      }
+      case 'UNDO_EXPIRED':
+        return '已經超過 3 秒，來不及取消了';
       default:
         return reasonText(code);
     }
@@ -511,23 +552,37 @@ export class Room {
     return (pid && this.get(pid)?.nickname) || '隊友';
   }
 
+  /** 線索裡的 {食}{繩}{水}{胃} 換成這局拿那張見聞的人的職能（例：{繩} → 水手長；9 人以下 → 管倉）。 */
+  private fillRoles(text: string): string {
+    const r = this.round!;
+    return text.replace(/\{(食|繩|水|胃)\}/g, (_m, d: DialId) => {
+      const h = r.tonightHolders.get(d) ?? Room.holderIn(r.participants, r.roles, TONIGHT_ROLE[d]);
+      const role = (h && (r.roles.get(h) ?? []).find((x) => x === TONIGHT_ROLE[d] || x === SPLIT_FROM[TONIGHT_ROLE[d]])) || TONIGHT_ROLE[d];
+      return ROLES[role].name;
+    });
+  }
+
   /** 我這局的任務：沒有按鈕的人也知道自己在做什麼。 */
   private myTask(pid: string, phase: ViewPhase): string | null {
     const r = this.round!;
     const mine = r.roles.get(pid) ?? [];
     if (phase === 'intro' || phase === 'planning') {
-      if (this.operatorOf('supply') === pid) return '你決定丟什麼：按一下東西＝丟進海裡，再按一下撈回來。';
-      if (this.operatorOf('nav') === pid) return '大家講好了，就由你按「決定好了」。';
+      if (this.operatorOf('supply') === pid)
+        return r.game.sweep
+          ? '你決定丟什麼：按一下＝丟進海裡。風暴一來，漂著的東西就撈不回來，先問清楚再丟。'
+          : '你決定丟什麼：按一下東西＝丟進海裡，再按一下撈回來。';
+      if (this.operatorOf('nav') === pid) return r.game.locked ? '你決定好了：風暴馬上就來。' : '大家講好了，就由你按「決定好了」。';
       if (this.nextSteps(pid).length) return null; // 「下一步」已經說了要找誰
       return `把你知道的告訴 ${this.nick(this.operatorOf('supply'))}（管倉），他負責丟東西。`;
     }
     if (phase === 'replanning') {
-      if (this.operatorOf('supply') === pid) return '浪更大了，船只能留 4：再決定一次丟什麼。';
+      if (this.operatorOf('supply') === pid) return '浪更大了，船只能留 5：再決定一次留什麼。';
       if (this.operatorOf('nav') === pid) return '大家都準備好了，就由你按「衝向海灘」。';
-      if (this.operatorOf('comms') === pid) return '你管全船的飯。';
+      const mineUses = usesTonight(r.game).filter((u) => this.operatorOf(USE_TEXT[u].role) === pid);
+      if (mineUses.length && !r.game.used) return `天亮前全隊只來得及做一件事：要不要由你${USE_TEXT[mineUses[0]].label}，先和大家商量。`;
       const r2 = this.round!;
       const hasNew = [...r2.btHolders.values()].includes(pid);
-      if (hasNew) return `你有新線索：說給 ${this.nick(this.operatorOf('supply'))}（管倉）和 ${this.nick(this.operatorOf('comms'))}（伙房）聽。`;
+      if (hasNew) return `你有新線索：說給 ${this.nick(this.operatorOf('supply'))}（管倉）聽。`;
       if (mine.length) return `去問問大家：電來了以後，誰有新發現？`;
     }
     return null;
@@ -581,10 +636,11 @@ export class Room {
         depart: false,
         repair: false,
         eliminate: false,
-        eat: false,
         next: false,
+        uses: [],
+        undo: false,
       },
-      eatNeedsFood: false,
+      tonight: [],
       clues: [],
       hint: null,
       preferenceHint: null,
@@ -619,11 +675,14 @@ export class Room {
     const { aboard, pinned, weights } = aboardOf(g);
     const shownReasons = ev.reasons.filter((x) => !(g.phase === 'planning' && x === 'NOT_POWERED'));
     const showNeeds = g.crisisAt !== null;
-    const fedEntry = g.log.find((l) => l.kind === 'eat');
-    const fedActor = [...r.actors].reverse().find((a) => a.kind === 'eat' && fedEntry && a.at === fedEntry.at);
+    const useActor = g.used ? [...r.actors].reverse().find((a) => a.kind === 'use' && a.at === g.used!.at) : undefined;
     const dawn = dawnOpensAt(g);
+    const warn = sweepWarning(g);
     v.ship = {
-      items: ITEMS.map((id) => ({ id, weight: weights[id], onShip: g.plan.items.includes(id), gone: !aboard.includes(id), pinned: pinned.includes(id) })),
+      items: ITEMS.map((id) => ({ id, weight: weights[id], onShip: g.plan.items.includes(id), gone: !aboard.includes(id), pinned: pinned.includes(id), swept: g.swept.includes(id) })),
+      sweep: g.sweep,
+      sweepWarning: warn ? { stormAt: r.startedAt + g.stormAt, floating: warn.floating } : null,
+      provides: powered ? providers(g) : null,
       weight: ev.weight,
       cap: ev.cap,
       overweight: ev.overweight,
@@ -633,9 +692,9 @@ export class Room {
       reasonCodes: shownReasons,
       advice: shownReasons.map((x) => this.advice(x, pid, elapsed, ev)),
       locked: g.locked,
-      fed: g.fed,
-      fedAt: fedEntry ? r.startedAt + fedEntry.at : null,
-      fedBy: fedActor ? this.nick(fedActor.playerId) : null,
+      used: g.used
+        ? { id: g.used.use, item: g.used.item, at: r.startedAt + g.used.at, by: this.nick(useActor?.playerId), mine: useActor?.playerId === pid, undoUntil: r.startedAt + g.used.at + UNDO_USE_MS }
+        : null,
       dawnAt: dawn !== null ? r.startedAt + dawn : null,
       lastRejection: g.lastRejection
         ? { at: r.startedAt + g.lastRejection.at, action: g.lastRejection.action, reasons: g.lastRejection.reasons.map((x) => reasonText(x, ev.overweight)) }
@@ -644,11 +703,24 @@ export class Room {
     v.myTask = this.myTask(pid, phase);
     v.nextSteps = this.nextSteps(pid);
     v.can.items = editable && this.operatorOf('supply') === pid;
-    v.can.lock = g.phase === 'planning' && this.operatorOf('nav') === pid;
+    v.can.lock = g.phase === 'planning' && !g.locked && this.operatorOf('nav') === pid;
     v.can.depart = g.phase === 'replanning' && this.operatorOf('nav') === pid;
-    v.can.eat = g.phase === 'replanning' && !g.fed && this.operatorOf('comms') === pid;
-    v.eatNeedsFood = v.can.eat && !g.plan.items.includes(seed.food);
+    // 用掉：按鈕只出現在今晚真的做得到、而且輪到自己的人手上；全隊用掉一件後就收起來
+    if (g.phase === 'replanning' && !g.used) {
+      const ready = usesNow(g);
+      const prov = providers(g);
+      v.can.uses = usesTonight(g)
+        .filter((u) => this.operatorOf(USE_TEXT[u].role) === pid)
+        .map((u) => ({ id: u, label: USE_TEXT[u].label, icon: USE_TEXT[u].icon, ref: USE_TEXT[u].ref, need: USES[u].need, item: prov[USES[u].need], ready: ready.includes(u) }));
+    }
+    v.can.undo = g.phase === 'replanning' && !!g.used && useActor?.playerId === pid && g.now - g.used.at <= UNDO_USE_MS;
     v.can.next = finished && this.hostId === pid;
+
+    // 見聞：只在拿的人手機上（可以互看）
+    v.tonight = DIALS.filter((d) => r.tonightHolders.get(d) === pid).map((d) => {
+      const t = (TONIGHT_TEXT[d] as Record<string, { title: string; text: string; ref?: string; verse?: string; item?: ItemId; use?: UseId }>)[g.tonight[d]];
+      return { dial: d, value: g.tonight[d], title: t.title, text: t.text, ref: t.ref ?? null, verse: t.verse ?? null, tag: t.ref ? null : '遊戲設定', item: t.item ?? null, use: t.use ?? null };
+    });
 
     // 線索：自己的職能，加上不在場的拆分職能
     const present = new Set(r.participants.flatMap((p) => r.roles.get(p)!));
@@ -671,7 +743,7 @@ export class Room {
         const moved = !!c.breakthrough && !shared && !mine.has(c.role);
         return {
           title: c.title,
-          text: c.text,
+          text: this.fillRoles(c.text),
           role: shared ? `${ROLES[c.role].name}・大家都聽到了` : moved ? `${roleLabel(c.role)}・由你保管` : roleLabel(c.role),
           when: c.when,
           item: c.item,
@@ -681,7 +753,7 @@ export class Room {
         };
       });
 
-    if (g.hint.shown && g.phase === 'planning' && this.holderOf(HINT_ROLE) === pid) v.hint = HINT_TEXT;
+    if (g.hint.shown && g.phase === 'planning' && this.holderOf(HINT_ROLE) === pid) v.hint = this.fillRoles(HINT_TEXT);
 
     const prefHolder = this.effectivePrefHolder();
     if (!finished && prefHolder) {
@@ -692,7 +764,7 @@ export class Room {
 
     if (g.crisisAt !== null) {
       // 揭曉：風暴變大前，你們的方案原本顧好幾件
-      const before = g.planAtCrisis ? evaluatePlan(seed, g.planAtCrisis, { crisis: false, powerOn: true, fed: false, cards: [g.cards.a] }).stars : 0;
+      const before = g.planAtCrisis ? evaluatePlan(seed, g.planAtCrisis, { crisis: false, powerOn: true, cards: [g.cards.a], tonight: g.tonight, used: null }).stars : 0;
       v.crisis = { at: r.startedAt + g.crisisAt, cause: g.crisisCause!, starsBefore: before };
     }
 
@@ -746,12 +818,22 @@ export class Room {
       cause: g.result?.cause ?? 'ended',
       moments: this.moments(),
       bible: BIBLE_THROWS,
-      verse: g.fed ? { ...ENDING_VERSES.fed } : { ...ENDING_VERSES.shore },
+      tonightLine: this.tonightLine(),
+      verse: g.used?.use === '吃飯' ? { ...ENDING_VERSES.fed } : { ...ENDING_VERSES.shore },
       fact: FACTS[k % FACTS.length],
       question: QUESTIONS[k % QUESTIONS.length],
       thanks: [...r.thanks.entries()].map(([from, to]) => ({ from: this.nick(from), to: this.nick(to) })),
       myThanks: r.thanks.get(pid) ?? null,
     };
+  }
+
+  /** 結尾「今晚靠的是……」：只陳述這局的見聞，不指名誰沒說（docs/12 3.C 風險緩解）。 */
+  private tonightLine(): string {
+    const g = this.round!.game;
+    const p = providers(g);
+    const parts = [`力氣靠${p.力氣}`, CARDS[g.cards.a].done?.includes('船身') ? '船身早就捆好了' : `船身靠${p.船身}`, `等天亮靠錨`];
+    const extra = [g.tonight.水 === '淺' ? '水夠淺、拋得了錨' : '水太深、錨拋不下去', g.tonight.胃 === '吃得下' ? '大家吃得下' : '大家暈船、吃不下'];
+    return `今晚${parts.join('、')}；${extra.join('，')}。`;
   }
 
   /** 這局真的發生的事（系統紀錄＋故事卡＋背包物品出場），有名字。不虛構互助、不評誰最重要。 */
@@ -764,8 +846,9 @@ export class Room {
     const finalPlan = g.plan.items;
     const cardGone = new Set<ItemId>();
     for (const l of g.log) if (l.kind === 'card') for (const i of l.data!.gone as ItemId[]) cardGone.add(i);
-    const thrown = ITEMS.filter((i) => !finalPlan.includes(i) && !cardGone.has(i) && !(g.fed && i === seedOf(g).food) && !(CARDS[g.cards.a].remove ?? []).includes(i));
-    if (thrown.length) out.push({ icon: { kind: 'item', ids: thrown }, text: `你們把${thrown.join('、')}丟進了海裡。` });
+    const thrown = ITEMS.filter((i) => !finalPlan.includes(i) && !cardGone.has(i) && g.used?.item !== i && !g.swept.includes(i) && !(CARDS[g.cards.a].remove ?? []).includes(i));
+    if (g.swept.length) out.push({ icon: { kind: 'item', ids: g.swept }, text: `風暴一來，漂在海上的${g.swept.join('、')}被浪捲走了。` });
+    if (thrown.length) out.push({ icon: { kind: 'item', ids: thrown }, text: `你們把${thrown.join('、')}${g.swept.length ? '也' : ''}丟進了海裡。` });
     const restored = g.log.find((l) => l.kind === 'power_restored');
     if (restored) {
       const engPick = [...r.actors].reverse().find((a) => a.kind === 'repairPick');
@@ -776,16 +859,17 @@ export class Room {
     }
     const elim = r.actors.find((a) => a.kind === 'useEliminate');
     if (elim) out.push({ icon: { kind: 'pref', ids: ['lamp'] }, text: `${this.nick(elim.playerId)} 用油燈照亮了面板。` });
-    if (g.fed) {
-      const eater = r.actors.find((a) => a.kind === 'eat' && g.log.some((l) => l.kind === 'eat' && l.at === a.at));
-      const names = [1, 2].map((i) => this.nick(r.btHolders.get(i)));
-      out.push({ icon: { kind: 'scene', ids: ['meal'] }, text: `${names[0]} 說吃了才有力氣、${names[1]} 想到吃了船就輕，${this.nick(eater?.playerId)} 召集大家吃飯。` });
+    if (g.used) {
+      const doer = [...r.actors].reverse().find((a) => a.kind === 'use' && a.at === g.used!.at);
+      const scene = { 吃飯: 'meal', 拋錨: 'anchor', 捆船底: 'undergird' }[g.used.use];
+      const how = g.used.use === '吃飯' ? `召集大家吃了${g.used.item}` : g.used.use === '拋錨' ? '從船尾拋下了錨' : `用${g.used.item === '纜索' ? '纜索' : g.used.item === '器具' ? '器具裡的繩具' : '小船上的拉繩'}捆綁了船底`;
+      out.push({ icon: { kind: 'scene', ids: [scene] }, text: `天亮前，${this.nick(doer?.playerId)} ${how}（${USE_TEXT[g.used.use].ref}）。` });
     }
     const served = (g.result?.served ?? []) as NeedId[];
     const why: Record<NeedId, string> = {
-      力氣: g.fed ? '' : '力氣沒顧到：這局沒吃上飯，上岸時游得很吃力。',
-      船身: '船身沒顧到：沒留纜索，船尾被浪打得更碎。',
-      天亮: '等天亮沒顧到：沒留錨，夜裡差點撞上礁石。',
+      力氣: '力氣沒顧到：上岸時大家游得很吃力。',
+      船身: '船身沒顧到：船尾被浪打得更碎。',
+      天亮: '等天亮沒顧到：夜裡差點撞上礁石。',
     };
     for (const n of NEEDS) if (!served.includes(n) && why[n]) out.push({ icon: { kind: 'need', ids: [n] }, text: why[n] });
     out.push({ icon: { kind: 'scene', ids: ['landing'] }, text: '船擱淺了，大家有的游、有的抱著板子，都上了岸（27:41–44）。' });

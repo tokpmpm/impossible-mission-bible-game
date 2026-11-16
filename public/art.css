@@ -195,3 +195,11 @@
     transition: none !important;
   }
 }
+
+/* ───── 拋錨、捆船底（2026-11-16 三種用掉） ───── */
+.art.art-use { display: block; max-width: 360px; margin: 0 auto; }
+.art-anchor .ad-anchor, .art-anchor .ad-rope { animation: art-anchor-drop 0.9s ease-in both; }
+@keyframes art-anchor-drop { from { transform: translateY(-46px); opacity: 0; } }
+.art-undergird .ug-loop { animation: art-ug-loop 0.7s ease-out both; }
+@keyframes art-ug-loop { from { opacity: 0; transform: scaleY(0.2); } }
+.art-undergird .ug-loop { transform-box: fill-box; transform-origin: 50% 0; }

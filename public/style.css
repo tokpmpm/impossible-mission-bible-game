@@ -849,3 +849,31 @@ cite { display: block; margin-top: 4px; font-style: normal; color: var(--gold-2)
   .tray-item.off .ti-pic { transition: none; }
   .bo-head h1, .bo-bolt { animation: none; }
 }
+
+/* ───── 2026-11-16 重玩性：見聞、三種用掉、風暴捲走 ───── */
+.tonight { display: flex; flex-direction: column; gap: 8px; }
+.tn-card { display: flex; gap: 10px; align-items: center; background: rgba(242, 193, 78, 0.08); border: 2px dashed var(--gold); border-radius: var(--radius-s); padding: 10px 12px; }
+.tn-pic { flex: 0 0 auto; }
+.tn-body { flex: 1; min-width: 0; }
+.tn-body p { margin: 2px 0 0; }
+.tn-k { font-size: 0.72rem; background: var(--gold); color: var(--gold-ink); border-radius: 999px; padding: 1px 8px; font-weight: 800; }
+.tag.tag-set { border-style: dashed; color: var(--muted); font-size: 0.7rem; }
+.tn-verse { font-size: 0.85rem; color: var(--muted); }
+.tn-verse cite { margin-left: 6px; font-style: normal; color: var(--gold-2); }
+.use-card { display: flex; flex-direction: column; gap: 8px; background: var(--card); border: 2px solid var(--gold); border-radius: var(--radius); padding: 10px; }
+.use-card.done { flex-direction: row; align-items: center; }
+.use-card.done > div:last-child { flex: 1; }
+.use-card p { margin: 4px 0 0; }
+.use-rule { margin: 0; font-weight: 700; color: var(--gold-2); }
+.use-row { display: flex; gap: 10px; align-items: center; }
+.use-row > div:last-child { flex: 1; min-width: 0; }
+.banner.sweep { border: 2px solid var(--blue); background: rgba(80, 150, 220, 0.14); }
+.banner.sweep.rule { font-weight: 600; font-size: 0.88rem; }
+.banner.sweep.warn { border-color: var(--warn); background: var(--warn-bg); color: #ffe2d8; animation: sweep-pulse 1s ease-in-out infinite alternate; }
+.banner.sweep.flash { animation: sweep-pulse 0.5s ease-in-out 4 alternate; }
+@keyframes sweep-pulse { from { box-shadow: 0 0 0 0 rgba(255, 140, 100, 0); } to { box-shadow: 0 0 0 4px rgba(255, 140, 100, 0.35); } }
+@media (prefers-reduced-motion: reduce) { .banner.sweep.warn, .banner.sweep.flash { animation: none; } }
+.need { position: relative; }
+.need-via { position: absolute; top: -2px; right: 4px; background: var(--bg-2); border-radius: 999px; padding: 1px; line-height: 0; border: 1px solid var(--line); }
+.tonight-line { margin: 8px 0 0; padding: 8px 10px; border-radius: var(--radius-s); background: rgba(242, 193, 78, 0.1); font-weight: 600; }
+.use-ovl .art { max-width: 360px; }

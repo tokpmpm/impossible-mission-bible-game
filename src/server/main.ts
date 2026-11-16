@@ -26,11 +26,13 @@ export function lanAddress(): string | null {
   return null;
 }
 
-export function startServer(opts: { port?: number; publicUrl?: string; tickMs?: number; introMs?: number } = {}) {
+export function startServer(opts: { port?: number; publicUrl?: string; tickMs?: number; introMs?: number; sweepWarningMs?: number } = {}) {
   const port = opts.port ?? Number(process.env.PORT ?? 3000);
   // INTRO_MS：只給自動測試縮短「認識隊友」時間用；正式遊戲固定 60 秒
   const introMs = opts.introMs ?? (process.env.INTRO_MS ? Number(process.env.INTRO_MS) : undefined);
-  const hub = new Hub({ publicUrl: opts.publicUrl ?? process.env.PUBLIC_URL ?? null, introMs });
+  // SWEEP_WARN_MS：同上，只給自動測試縮短「捲走前 10 秒提醒」
+  const sweepWarningMs = opts.sweepWarningMs ?? (process.env.SWEEP_WARN_MS ? Number(process.env.SWEEP_WARN_MS) : undefined);
+  const hub = new Hub({ publicUrl: opts.publicUrl ?? process.env.PUBLIC_URL ?? null, introMs, sweepWarningMs });
   let actualPort = port;
 
   function originOf(req: IncomingMessage): string {

@@ -4,8 +4,9 @@ import assert from 'node:assert/strict';
 import WebSocket from 'ws';
 import { startServer } from '../src/server/main.ts';
 import type { ServerMessage, View, Action } from '../src/server/view.ts';
-import { Room, PLAN_CHANGERS } from '../src/server/room.ts';
-import { execFileSync } from 'node:child_process';
+import { Room } from '../src/server/room.ts';
+import { validSetups } from '../src/engine/rules.ts';
+import { CLASSIC, type Tonight } from '../src/engine/seeds.ts';
 
 class Phone {
   ws!: WebSocket;
@@ -60,8 +61,9 @@ class Phone {
 }
 
 // introMs 預設 0：大部分測試要馬上鎖定；「前 60 秒不能鎖定」另外測
+// sweepWarningMs：捲走前提醒縮成 300 毫秒（正式 10 秒），測試不用真的等
 async function setup(n: number, introMs = 0) {
-  const srv = await startServer({ port: 0, publicUrl: 'http://test.local', tickMs: 20, introMs });
+  const srv = await startServer({ port: 0, publicUrl: 'http://test.local', tickMs: 20, introMs, sweepWarningMs: 300 });
   const url = `ws://localhost:${srv.port}/ws`;
   const host = await new Phone(url).open();
   host.send({ t: 'create', nickname: '房主' });
@@ -105,8 +107,10 @@ async function keepOnly(sup: Phone, items: string[]): Promise<void> {
   await sup.until((v) => v.ship!.items.filter((x) => x.onShip).map((x) => x.id).join() === ALL.filter((i) => items.includes(i) && sup.view!.ship!.items.find((x) => x.id === i && !x.gone)).join());
 }
 
+const WHEAT_SHALLOW: Tonight = { 食: '麥子', 繩: '纜索', 水: '淺', 胃: '吃得下' };
+
 for (const n of [3, 6, 10]) {
-  test(`${n} 人：開房 → 故事卡 → 丟東西 → 決定好了 → 黑暗補船 → 吃飯 → 三星 → 感謝 → 下一局換卡`, async () => {
+  test(`${n} 人：首局經典配置（不捲走）吃飯三星 → 第二局換見聞、風暴捲走、拋錨可取消、吃麥子三星`, async () => {
     const { srv, phones, host } = await setup(n);
     try {
       phones[1].send({ t: 'pref', value: 'coat' });
@@ -118,53 +122,102 @@ for (const n of [3, 6, 10]) {
         assert.equal(p.view!.cards.a?.id, 'A5');
         assert.equal(p.view!.ship!.items.length, 6);
         assert.equal(p.view!.ship!.needs, null, '危機前不顯示三件事亮不亮');
+        assert.equal(p.view!.ship!.provides, null, '危機前不公開今晚靠哪一樣');
+        assert.equal(p.view!.ship!.sweep, false, '首局不捲走');
       }
+      // 見聞：四張各在一支手機（3 人局每人至少一張）；首局是經典配置
+      const dials = phones.flatMap((p) => p.view!.tonight.map((t) => t.dial));
+      assert.deepEqual([...dials].sort(), ['水', '胃', '繩', '食'].sort());
+      if (n === 3) for (const p of phones) assert.ok(p.view!.tonight.length >= 1, '3 人局每人至少一張見聞');
+      const food = who(phones, (v) => v.tonight.some((t) => t.dial === '食')).view!.tonight.find((t) => t.dial === '食')!;
+      assert.equal(food.item, '糧食');
+      assert.equal(food.tag, '遊戲設定');
       assert.equal(phones.filter((p) => p.view!.can.items).length, 1);
       assert.equal(phones.filter((p) => p.view!.can.lock).length, 1);
-      assert.equal(phones.filter((p) => p.view!.can.eat).length, 0);
+      assert.equal(phones.filter((p) => p.view!.can.uses.length).length, 0);
       const sup = who(phones, (v) => v.can.items);
       const cap = who(phones, (v) => v.can.lock);
-      // 沒按鈕的人有一句任務
       for (const p of phones.filter((x) => x !== sup && x !== cap)) assert.ok(/告訴/.test(p.view!.myTask ?? '') || p.view!.nextSteps.length > 0, '沒有按鈕的人要知道找誰');
-      // 超重時「決定好了」被擋下，只回給按的人
       cap.act({ type: 'lock' });
       await cap.until(() => cap.rejections.length > 0);
       assert.match(cap.rejections[0].reasons[0].text, /超重 7/);
       await keepOnly(sup, ['糧食', '纜索', '錨']);
       cap.act({ type: 'lock' });
       await repair(phones);
-      const v = host.view!;
+      let v = host.view!;
       assert.equal(v.crisis!.starsBefore, 3);
       assert.equal(v.cards.b?.id, 'B4');
-      assert.equal(v.ship!.cap, 4);
-      assert.equal(v.ship!.stars, 3);
+      assert.equal(v.ship!.cap, 5);
+      assert.deepEqual(v.ship!.provides, { 力氣: '糧食', 船身: '纜索', 天亮: '錨' });
       assert.deepEqual(v.ship!.reasonCodes, ['OVERWEIGHT']);
-      // B4：醫生那段「吃了就有力氣」全隊都看得到
       for (const p of phones) assert.ok(p.view!.clues.some((c) => c.breakthrough === 1), `${n} 人 B4 線索公開`);
-      // 突破口三段在三支手機
       const owners = [1, 2, 3].map((b) => phones.filter((p) => p.view!.clues.some((c) => c.breakthrough === b && !c.shared)).length);
       assert.deepEqual(owners, [1, 1, 1]);
-      const cook = who(phones, (x) => x.can.eat);
+      // 水深：沒有人有拋錨按鈕；吃飯在伙房、捆船底在木匠
+      const useOwners = phones.flatMap((p) => p.view!.can.uses.map((u) => u.id)).sort();
+      assert.deepEqual(useOwners, ['吃飯', '捆船底'].sort());
+      const cook = who(phones, (x) => x.can.uses.some((u) => u.id === '吃飯'));
       assert.ok(cook.view!.clues.some((c) => c.breakthrough === 3), '吃飯按鈕與第三段線索在同一支手機');
-      cook.act({ type: 'eat' });
-      await host.until((x) => x.ship!.fed);
-      assert.ok(host.view!.ship!.fedAt);
+      cook.act({ type: 'use', use: '吃飯' });
+      await Promise.all(phones.map((p) => p.until((x) => !!x.ship!.used)));
+      assert.equal(host.view!.ship!.used!.item, '糧食');
+      await Promise.all(phones.map((p) => p.until((x) => x.can.uses.length === 0)));
       await keepOnly(sup, ['纜索', '錨']);
       await cap.until((x) => x.ship!.reasons.length === 0);
       cap.act({ type: 'depart' });
       await Promise.all(phones.map((p) => p.until((x) => x.phase === 'settled')));
-      const res = host.view!.result!;
+      let res = host.view!.result!;
       assert.equal(res.stars, 3);
       assert.equal(res.title, '上岸很順利！');
-      assert.ok(res.moments.some((m) => m.text.includes('召集大家吃飯')));
+      assert.ok(res.moments.some((m) => m.text.includes('召集大家吃了糧食')));
       assert.ok(res.moments.some((m) => m.text.includes('外衣')));
+      assert.match(res.tonightLine, /力氣靠糧食/);
       assert.match(res.verse.ref, /27:35/);
       phones[1].send({ t: 'thank', to: host.playerId });
       await host.until((x) => x.result!.thanks.length === 1);
+
+      // ---------- 第二局：今晚靠麥子、水淺；風暴捲走 ----------
+      roomOf(srv, host.code).forceCards = { a: 'A2', b: 'B1', tonight: WHEAT_SHALLOW };
       host.send({ t: 'next' });
-      await Promise.all(phones.map((p) => p.until((x) => x.phase === 'intro' || x.phase === 'planning')));
-      assert.equal(host.view!.round!.no, 2);
-      assert.ok(host.view!.cards.a?.id !== 'A5', '第二局換一張起風卡');
+      await Promise.all(phones.map((p) => p.until((x) => x.round?.no === 2 && x.phase === 'planning')));
+      assert.equal(host.view!.ship!.sweep, true);
+      const wheat = who(phones, (x) => x.tonight.some((t) => t.dial === '食')).view!.tonight.find((t) => t.dial === '食')!;
+      assert.match(wheat.text, /麥子/);
+      const water = who(phones, (x) => x.tonight.some((t) => t.dial === '水')).view!.tonight.find((t) => t.dial === '水')!;
+      assert.equal(water.ref, '徒 27:28');
+      assert.equal(water.tag, null);
+      const sup2 = who(phones, (x) => x.can.items);
+      const cap2 = who(phones, (x) => x.can.lock);
+      await keepOnly(sup2, ['纜索', '錨', '麥子']);
+      cap2.act({ type: 'lock' });
+      // 捲走前提醒：所有手機都看到漂著的東西
+      await Promise.all(phones.map((p) => p.until((x) => !!x.ship?.sweepWarning || x.phase === 'blackout')));
+      await repair(phones);
+      v = host.view!;
+      assert.deepEqual(v.ship!.items.filter((i) => i.swept).map((i) => i.id), ['糧食', '器具', '小船']);
+      const before = sup2.rejections.length;
+      sup2.act({ type: 'setItem', item: '糧食', on: true });
+      await sup2.until(() => sup2.rejections.length > before);
+      assert.match(sup2.rejections.at(-1)!.reasons[0].text, /捲走/);
+      // 拋錨：按下 3 秒內本人可以取消；別人不能取消
+      const anchor = who(phones, (x) => x.can.uses.some((u) => u.id === '拋錨'));
+      anchor.act({ type: 'use', use: '拋錨' });
+      await anchor.until((x) => x.can.undo);
+      const other = phones.find((p) => p !== anchor)!;
+      other.act({ type: 'undoUse' });
+      await other.until(() => other.errors.length > 0);
+      anchor.act({ type: 'undoUse' });
+      await Promise.all(phones.map((p) => p.until((x) => x.ship!.used === null && x.ship!.items.find((i) => i.id === '錨')!.onShip)));
+      const cook2 = who(phones, (x) => x.can.uses.some((u) => u.id === '吃飯'));
+      cook2.act({ type: 'use', use: '吃飯' });
+      await host.until((x) => x.ship!.used?.item === '麥子');
+      await cap2.until((x) => x.ship!.reasons.length === 0 && x.ship!.stars === 3);
+      cap2.act({ type: 'depart' });
+      await Promise.all(phones.map((p) => p.until((x) => x.phase === 'settled')));
+      res = host.view!.result!;
+      assert.equal(res.stars, 3);
+      assert.ok(res.moments.some((m) => m.text.includes('被浪捲走')));
+      assert.match(res.tonightLine, /力氣靠麥子/);
     } finally {
       phones.forEach((p) => p.close());
       await srv.close();
@@ -175,7 +228,7 @@ for (const n of [3, 6, 10]) {
 test('故事卡 A1＋B5：危機前麥子丟不掉；補好船後錨已拋下、留著糧食不算力氣', async () => {
   const { srv, phones, host } = await setup(4);
   try {
-    roomOf(srv, host.code).forceCards = { a: 'A1', b: 'B5' };
+    roomOf(srv, host.code).forceCards = { a: 'A1', b: 'B5', tonight: { 食: '麥子', 繩: '纜索', 水: '深', 胃: '吃得下' } };
     host.send({ t: 'start' });
     await Promise.all(phones.map((p) => p.until((v) => v.phase === 'planning')));
     const sup = who(phones, (v) => v.can.items);
@@ -184,10 +237,10 @@ test('故事卡 A1＋B5：危機前麥子丟不掉；補好船後錨已拋下、
     await sup.until(() => sup.rejections.length > 0);
     assert.match(sup.rejections[0].reasons[0].text, /船主不准丟麥子/);
     const cap = who(phones, (v) => v.can.lock);
-    await keepOnly(sup, ['糧食', '纜索', '麥子']);
+    await keepOnly(sup, ['纜索', '錨', '麥子']);
     cap.act({ type: 'lock' });
     await repair(phones);
-    await keepOnly(sup, ['糧食', '纜索']);
+    await keepOnly(sup, ['纜索', '麥子']);
     assert.ok(cap.view!.ship!.items.find((i) => i.id === '錨')!.gone);
     assert.deepEqual(cap.view!.ship!.needs!.filter((n) => n.lit).map((n) => n.id), ['船身', '天亮']);
     cap.act({ type: 'depart' });
@@ -199,7 +252,7 @@ test('故事卡 A1＋B5：危機前麥子丟不掉；補好船後錨已拋下、
   }
 });
 
-test('吃飯：糧食丟了不能吃，伙房看到要先撈回；伙房以外的人沒有吃飯按鈕', async () => {
+test('用掉：東西丟了不能用，按的人看到要先撈回；按鈕只在今晚做得到的人手上', async () => {
   const { srv, phones, host } = await setup(6);
   try {
     roomOf(srv, host.code).forceCards = { a: 'A2', b: 'B2' };
@@ -209,10 +262,11 @@ test('吃飯：糧食丟了不能吃，伙房看到要先撈回；伙房以外�
     await keepOnly(sup, ['纜索', '錨']);
     who(phones, (v) => v.can.lock).act({ type: 'lock' });
     await repair(phones);
-    const cook = who(phones, (v) => v.can.eat);
-    assert.equal(cook.view!.eatNeedsFood, true);
-    assert.equal(phones.filter((p) => p.view!.can.eat).length, 1);
-    cook.act({ type: 'eat' });
+    const cook = who(phones, (v) => v.can.uses.some((u) => u.id === '吃飯'));
+    assert.equal(cook.view!.can.uses.find((u) => u.id === '吃飯')!.ready, false);
+    assert.equal(phones.filter((p) => p.view!.can.uses.some((u) => u.id === '吃飯')).length, 1);
+    assert.equal(phones.filter((p) => p.view!.can.uses.some((u) => u.id === '拋錨')).length, 0, '水深：沒有拋錨按鈕');
+    cook.act({ type: 'use', use: '吃飯' });
     await cook.until(() => cook.rejections.length > 0);
     assert.match(cook.rejections[0].reasons[0].text, /撈回/);
     // B2：小船自動離船
@@ -320,15 +374,16 @@ test('F02／F03：3–10 每種人數，每人都有職能與開局線索；有�
         // 6 人以下不出現玩家沒聽過的拆分職能名稱
         if (n <= 6) for (const c of p.view!.clues) assert.ok(!/測水深|船主|水手長|舵手/.test(c.role), `${n} 人出現 ${c.role}`);
       }
-      // 三件事的對應線索都在場、且不全在同一個人
-      const needHolders = (['力氣', '船身', '天亮'] as const).map((need) => phones.filter((p) => p.view!.clues.some((c) => c.need === need)));
-      for (const hs of needHolders) assert.equal(hs.length, 1, `${n} 人：三件事的線索各一人`);
-      assert.ok(new Set(needHolders.map((h) => h[0])).size >= 2, `${n} 人：三件事線索至少分在兩支手機`);
-      // 每人至少有一條會影響決定的線索（三件事或誘答），或有操作
+      // 四張見聞各在一支手機，至少分在兩個人；線索裡的 {繩} 等已換成職能名稱
+      const dialHolders = (['食', '繩', '水', '胃'] as const).map((d) => phones.filter((p) => p.view!.tonight.some((t) => t.dial === d)));
+      for (const hs of dialHolders) assert.equal(hs.length, 1, `${n} 人：每張見聞恰一人`);
+      assert.ok(new Set(dialHolders.map((h) => h[0])).size >= (n >= 4 ? 3 : 2), `${n} 人：見聞分散`);
+      for (const p of phones) for (const c of p.view!.clues) assert.ok(!/\{/.test(c.text), c.text);
+      // 每人至少有一條會影響決定的線索、見聞，或有操作
       for (const p of phones) {
         const v = p.view!;
         const tips = ['黑暗中', '補船小撇步'];
-        const useful = v.clues.some((c) => !tips.includes(c.title)) || v.can.items || v.can.lock;
+        const useful = v.tonight.length > 0 || v.clues.some((c) => !tips.includes(c.title)) || v.can.items || v.can.lock;
         assert.ok(useful, `${n} 人：${v.me.roles.map((r) => r.name)} 沒有有效線索也沒有操作`);
       }
       who(phones, (v) => v.can.lock);
@@ -435,17 +490,52 @@ test('故事卡：連續 4 局，起風卡、風暴卡都不和上一局重複',
   }
 });
 
-test('會改變留法的卡片清單和 tools/verify_seeds.py 一致；首局至少抽到一張', () => {
-  const out = execFileSync('python3', ['tools/verify_seeds.py'], { encoding: 'utf8' });
-  const fromScript = [...out.matchAll(/^  ([AB]\d)：改變/gm)].map((m) => m[1]);
-  assert.deepEqual([...PLAN_CHANGERS].sort(), fromScript.sort());
+test('抽卡與見聞：首局都是經典配置、不捲走；第二局起都捲走，見聞照表抽、自創細節只在部分局生效', () => {
+  const table = validSetups();
+  const key = (a: string, t: Tonight, b: string) => `${a}|${Object.values(t).join('/')}|${b}`;
+  const legal = new Set(table.flatMap((x) => x.b.map((b) => key(x.a, x.tonight, b))));
+  let later = 0;
+  let invented = 0;
+  let changed = 0;
   for (let seed = 1; seed <= 40; seed++) {
-    const room = new Room('FRST', { seed, introMs: 0 });
+    const room = new Room('DRAW', { seed, introMs: 0 });
+    for (let i = 0; i < 3; i++) room.addPlayer('p' + i);
+    let prev: Tonight | null = null;
+    for (let k = 0; k < 4; k++) {
+      if (k === 0) room.start(room.hostId!);
+      else {
+        room.round!.game = { ...room.round!.game, phase: 'settled' };
+        room.next(room.hostId!);
+      }
+      const g = room.round!.game;
+      assert.ok(legal.has(key(g.cards.a, g.tonight, g.cards.b)), `seed ${seed} 第 ${k + 1} 局不在表裡`);
+      if (k === 0) {
+        assert.deepEqual(g.tonight, CLASSIC);
+        assert.equal(g.sweep, false);
+        assert.notEqual(g.cards.a, 'A1', '首局經典配置不會配 A1');
+      } else {
+        assert.equal(g.sweep, true);
+        later++;
+        if (g.tonight.食 === '麥子' || g.tonight.繩 !== '纜索' || g.tonight.胃 === '吃不下' || g.tonight.水 === '深') invented++;
+        if (prev && JSON.stringify(prev) !== JSON.stringify(g.tonight)) changed++;
+      }
+      prev = g.tonight;
+    }
+  }
+  // 自創細節（麥子、器具／小船的繩子、暈船）只在部分局生效
+  const wheatOrRope = (t: Tonight) => t.食 === '麥子' || t.繩 !== '纜索';
+  let custom = 0;
+  for (let seed = 1; seed <= 40; seed++) {
+    const room = new Room('CUST', { seed, introMs: 0 });
     for (let i = 0; i < 3; i++) room.addPlayer('p' + i);
     room.start(room.hostId!);
-    const c = room.round!.game.cards;
-    assert.ok(PLAN_CHANGERS.includes(c.a) || PLAN_CHANGERS.includes(c.b), `seed ${seed}: ${c.a}+${c.b}`);
+    room.round!.game = { ...room.round!.game, phase: 'settled' };
+    room.next(room.hostId!);
+    if (wheatOrRope(room.round!.game.tonight)) custom++;
   }
+  assert.ok(custom > 0 && custom < 40, `第二局用到自創細節的比例 ${custom}/40`);
+  assert.ok(invented > 0 && later > 0);
+  assert.equal(changed, later, '第二局起每局都換一組見聞');
 });
 
 test('風暴卡要帶走的東西早就丟了：卡面照實說沒有影響', async () => {
