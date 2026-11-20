@@ -402,8 +402,8 @@ input:focus { outline: none; border-color: var(--gold); }
 .bo-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 0.85rem; color: #8b93ad; }
 .bo-head { text-align: center; padding: 0; }
 .bo-head p { font-size: 0.95rem; }
-.bo-bolt { font-size: 2.2rem; line-height: 1; animation: flicker 2.4s infinite; }
-.bo-head h1 { font-size: 1.8rem; margin: 4px 0; color: var(--gold-2); letter-spacing: 0.2em; animation: flicker 3.1s infinite; }
+.bo-bolt { font-size: 2.2rem; line-height: 1; animation: flicker 2.4s ease-out 1; }
+.bo-head h1 { font-size: 1.8rem; margin: 4px 0; color: var(--gold-2); letter-spacing: 0.2em; animation: flicker 2.4s ease-out 1; }
 .bo-head h2 { color: #fff; }
 .bo-extra { color: var(--gold-2); font-weight: 700; }
 .no-flicker .bo-bolt, .no-flicker h1 { animation: none; }
@@ -869,7 +869,7 @@ cite { display: block; margin-top: 4px; font-style: normal; color: var(--gold-2)
 .use-row > div:last-child { flex: 1; min-width: 0; }
 .banner.sweep { border: 2px solid var(--blue); background: rgba(80, 150, 220, 0.14); }
 .banner.sweep.rule { font-weight: 600; font-size: 0.88rem; }
-.banner.sweep.warn { border-color: var(--warn); background: var(--warn-bg); color: #ffe2d8; animation: sweep-pulse 1s ease-in-out infinite alternate; }
+.banner.sweep.warn { border-color: var(--warn); background: var(--warn-bg); color: #ffe2d8; animation: sweep-pulse 1s ease-in-out 3 alternate; }
 .banner.sweep.flash { animation: sweep-pulse 0.5s ease-in-out 4 alternate; }
 @keyframes sweep-pulse { from { box-shadow: 0 0 0 0 rgba(255, 140, 100, 0); } to { box-shadow: 0 0 0 4px rgba(255, 140, 100, 0.35); } }
 @media (prefers-reduced-motion: reduce) { .banner.sweep.warn, .banner.sweep.flash { animation: none; } }
