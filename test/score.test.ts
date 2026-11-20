@@ -13,8 +13,9 @@ import { PLAYER_FACTOR, REPAIR_MS_PER_SLOT, SCORE_MAX, computeScore, difficultyK
 /** 一份「中等」的原始資料，各測試只改要測的欄位。 */
 function raw(over: Partial<ScoreRaw> = {}): ScoreRaw {
   return {
-    formula: 'v1-trial',
+    formula: 'v2-trial',
     stars: 3,
+    safe: true,
     repairMs: 30_000,
     repairLimitMs: 60_000,
     assistLevel: 0,
@@ -49,8 +50,20 @@ function playToShore(repairAfterMs: number, departAt: number): GameState {
 
 // ---------- computeScore ----------
 
-test('計分：任務成果每星 200', () => {
-  for (const stars of [0, 1, 2, 3] as const) assert.equal(computeScore(raw({ stars })).mission, 200 * stars);
+test('計分：任務成果每星 200；沒能平安上岸（0–1 件或時間到）任務、時間、難度都是 0，只留合作（DECISIONS 18）', () => {
+  for (const stars of [2, 3] as const) assert.equal(computeScore(raw({ stars })).mission, 200 * stars);
+  for (const stars of [0, 1] as const) {
+    const b = computeScore(raw({ stars, safe: false }));
+    assert.deepEqual([b.mission, b.time, b.difficulty], [0, 0, 0]);
+    assert.equal(b.teamwork, computeScore(raw()).teamwork, '補船的合作分照算');
+  }
+  // 舊紀錄沒有 safe：重算時依星數判斷
+  const old = raw({ stars: 1 });
+  delete old.safe;
+  assert.equal(computeScore(old).mission, 0);
+  const oldOk = raw({ stars: 2 });
+  delete oldOk.safe;
+  assert.equal(computeScore(oldOk).mission, 400);
 });
 
 test('計分：合作順暢＝補船速度 140×(1−用時/標準時間) 四捨五入＋協助分 60/30/0', () => {
@@ -129,8 +142,8 @@ test('計分：難度＝min(100, 難度分＋風暴捲走 20)×星數/3，難度
   assert.equal(computeScore(raw({ difficultyPoints: 80, sweep: true, stars: 3 })).difficulty, 100);
   assert.equal(computeScore(raw({ difficultyPoints: 500, sweep: true, stars: 3 })).difficulty, 100, '難度分超過 80 也只算 80');
   assert.equal(computeScore(raw({ difficultyPoints: 60, sweep: false, stars: 2 })).difficulty, 40);
-  assert.equal(computeScore(raw({ difficultyPoints: 60, sweep: false, stars: 1 })).difficulty, 20);
-  assert.equal(computeScore(raw({ difficultyPoints: 80, sweep: true, stars: 0 })).difficulty, 0, '一件都沒顧好拿不到難度分');
+  assert.equal(computeScore(raw({ difficultyPoints: 60, sweep: false, stars: 1, safe: false })).difficulty, 0, '沒能平安上岸拿不到難度分');
+  assert.equal(computeScore(raw({ difficultyPoints: 80, sweep: true, stars: 0, safe: false })).difficulty, 0);
 });
 
 test('計分：總分是四項相加×人數係數，且回傳公式版本與試行標記', () => {
@@ -138,7 +151,7 @@ test('計分：總分是四項相加×人數係數，且回傳公式版本與試
   assert.equal(b.total, b.mission + b.teamwork + b.time + b.difficulty);
   assert.equal(b.factor, 1);
   assert.equal(b.trial, true);
-  assert.equal(b.formula, 'v1-trial');
+  assert.equal(b.formula, 'v2-trial');
 });
 
 test('計分：滿分情境剛好 1000，不會超過', () => {
@@ -210,8 +223,9 @@ test('rawOf：真的跑完一局三星上岸，原始資料各欄位正確', () 
   const s = playToShore(5_000, 200_000);
   assert.equal(s.phase, 'settled');
   const r = rawOf(s)!;
-  assert.equal(r.formula, 'v1-trial');
+  assert.equal(r.formula, 'v2-trial');
   assert.equal(r.stars, 3);
+  assert.equal(r.safe, true);
   assert.equal(r.repairMs, 5_000);
   assert.equal(r.repairLimitMs, s.repair!.limitMs);
   assert.equal(r.assistLevel, 0);
@@ -277,7 +291,8 @@ test('rawOf：風暴捲走局 sweep 為 true，難度加 20', () => {
   const settled = { ...g, phase: 'ended' as const, repair: null, result: null };
   const r = rawOf(settled)!;
   assert.equal(r.sweep, true);
-  assert.equal(computeScore({ ...r, stars: 3 }).difficulty, Math.min(100, Math.min(DIFF_MAX, r.difficultyPoints) + SWEEP_BONUS));
+  assert.equal(r.safe, false, '時間到還沒出發＝沒能平安上岸');
+  assert.equal(computeScore({ ...r, stars: 3, safe: true }).difficulty, Math.min(100, Math.min(DIFF_MAX, r.difficultyPoints) + SWEEP_BONUS));
 });
 
 test('rawOf：時間到還在黑暗中 → repairMs null、assistLevel 2、finishedAt 8:00，總分 0', () => {
@@ -342,7 +357,7 @@ test('難度表：validSetups() 的每一種局面（起風卡×見聞×允許�
   assert.ok(n > 0);
 });
 
-// ---------- docs/13 的範例（903／753／607）與公平性對照 ----------
+// ---------- docs/13 的範例（916／753／607／130）與公平性對照 ----------
 
 test('docs/13 範例 A／B／C 與公平性對照：逐項與文件一致', () => {
   const ex = (a: CardId, b: CardId, tonight: ScoreRaw['tonight'], over: Partial<ScoreRaw>) => {
@@ -351,7 +366,7 @@ test('docs/13 範例 A／B／C 與公平性對照：逐項與文件一致', () =
   };
   const shallow = { ...CLASSIC, 水: '淺' as const };
   const A = ex('A3', 'B1', CLASSIC, { firstRound: true, repairLimitMs: 75_000, repairMs: 30_000, finishedAt: 150_000 });
-  assert.deepEqual([A.mission, A.teamwork, A.time, A.difficulty, A.total], [600, 144, 92, 67, 903]);
+  assert.deepEqual([A.mission, A.teamwork, A.time, A.difficulty, A.total], [600, 144, 92, 80, 916]);
   const B = ex('A4', 'B5', shallow, { repairMs: 50_000, finishedAt: 300_000, sweep: true });
   assert.deepEqual([B.mission, B.teamwork, B.time, B.difficulty, B.total], [600, 83, 50, 20, 753]);
   const B2 = ex('A4', 'B5', shallow, { repairMs: 70_000, assistLevel: 1, finishedAt: 300_000, sweep: true });
@@ -362,4 +377,6 @@ test('docs/13 範例 A／B／C 與公平性對照：逐項與文件一致', () =
   const c6 = ex('A2', 'B2', CLASSIC, { playerCount: 6, slots: 4, repairLimitMs: 60_000, repairMs: 30_000, finishedAt: 360_000, sweep: true });
   assert.equal(c3.total, 863);
   assert.equal(c6.total, 863);
+  const D = ex('A2', 'B2', CLASSIC, { repairMs: 30_000, stars: 1, safe: false, finishedAt: 360_000, sweep: true });
+  assert.deepEqual([D.mission, D.teamwork, D.time, D.difficulty, D.total], [0, 130, 0, 0, 130]);
 });

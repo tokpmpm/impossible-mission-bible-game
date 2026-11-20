@@ -2,12 +2,13 @@
 // 伺服器權威：只從一局的規則狀態（GameState）取原始資料 → 用公式算分。手機送不進分數。
 // 公式只吃「原始計分資料」（ScoreRaw），所以將來改公式時，排行榜可以用存下來的原始資料重算，不必清榜。
 // 只排團隊、不排個人；分數與信仰、聖經答題無關。
+// v2-trial（2026-11-20，DECISIONS 18）：這局沒能平安上岸（顧好 0–1 件或時間到還沒出發）→ 任務成果、時間、難度加成都是 0，只留合作順暢。
 import { DIFFICULTY, DIFF_MAX, SWEEP_BONUS } from './difficulty.ts';
-import { FIRST_ROUND_EXTRA, SECOND_ASSIST_AFTER, TIME_UP_AT, symbolCount, type GameState } from './game.ts';
+import { FIRST_ROUND_EXTRA, SAFE_MIN_STARS, SECOND_ASSIST_AFTER, TIME_UP_AT, symbolCount, type GameState } from './game.ts';
 import { DIALS, type CardId, type Tonight } from './seeds.ts';
 
 /** 公式版本：改公式就換版本號，舊紀錄可用新版本重算。 */
-export const FORMULA_VERSION = 'v1-trial';
+export const FORMULA_VERSION = 'v2-trial';
 export const SCORE_MAX = 1000;
 
 /** 四項的滿分。 */
@@ -36,6 +37,8 @@ export const PLAYER_FACTOR: Record<number, number> = { 3: 1.0, 4: 1.0, 5: 1.0, 6
 export interface ScoreRaw {
   formula: string; // 算分當時的公式版本
   stars: 0 | 1 | 2 | 3;
+  /** 這局有沒有平安上岸（v2 起；舊紀錄沒有這個欄位，重算時依星數判斷：0–1 件＝沒有）。 */
+  safe?: boolean;
   /** 補船花了幾毫秒；沒補好（時間到還在黑暗中）＝null。 */
   repairMs: number | null;
   /** 這局補船的限時（含首局＋15 秒、A5＋10 秒）。 */
@@ -90,6 +93,7 @@ export function rawOf(g: GameState): ScoreRaw | null {
   return {
     formula: FORMULA_VERSION,
     stars: g.result?.stars ?? 0,
+    safe: g.phase === 'settled' && !!g.result?.safe,
     repairMs: done ? r!.doneAt! - r!.startedAt : null,
     repairLimitMs: r?.limitMs ?? 0,
     assistLevel: done ? r!.assistLevel : 2,
@@ -122,8 +126,14 @@ export function scoredAssist(raw: Pick<ScoreRaw, 'repairMs' | 'repairLimitMs'>):
 }
 
 /** 公式（只看原始資料）。每項各自封頂，總分上限 1000。 */
+/** 原始資料裡這局是否平安上岸（舊紀錄沒有 safe：看星數）。 */
+export function safeOf(raw: Pick<ScoreRaw, 'safe' | 'stars'>): boolean {
+  return raw.safe ?? raw.stars >= SAFE_MIN_STARS;
+}
+
 export function computeScore(raw: ScoreRaw): ScoreBreakdown {
-  const mission = PER_STAR * raw.stars;
+  const safe = safeOf(raw);
+  const mission = safe ? PER_STAR * raw.stars : 0;
 
   let teamwork = 0;
   const standard = standardRepairMs(raw);
@@ -132,11 +142,11 @@ export function computeScore(raw: ScoreRaw): ScoreBreakdown {
     teamwork = speed + NO_ASSIST_POINTS[scoredAssist(raw)];
   }
 
-  const time = Math.round(PARTS.time * clamp01((TIME_UP_AT - raw.finishedAt) / (TIME_UP_AT - TIME_FULL_AT)));
+  const time = !safe ? 0 : Math.round(PARTS.time * clamp01((TIME_UP_AT - raw.finishedAt) / (TIME_UP_AT - TIME_FULL_AT)));
 
   // 難度加成：這局局面的難度分＋風暴捲走加分，再乘「顧好幾件 ÷ 3」（沒顧好事情就拿不到難度加成）
   const base = Math.min(DIFF_MAX, Math.max(0, raw.difficultyPoints)) + (raw.sweep ? SWEEP_BONUS : 0);
-  const difficulty = Math.round(Math.min(PARTS.difficulty, base) * (raw.stars / 3));
+  const difficulty = safe ? Math.round(Math.min(PARTS.difficulty, base) * (raw.stars / 3)) : 0;
 
   const factor = PLAYER_FACTOR[raw.playerCount] ?? 1;
   const total = Math.min(SCORE_MAX, Math.max(0, Math.round((mission + teamwork + time + difficulty) * factor)));

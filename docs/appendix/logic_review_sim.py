@@ -11,6 +11,8 @@
   V2  V1 ＋ 危機後載重 5→4（讓拋錨／捆船底的取捨回來）
   V3  只把力氣改成只能靠吃飯，其餘不動（吃飯仍佔那一件）——示範為什麼不能只改一行
   V5  V2 ＋ B3 改成「276 人吃飽了，把麥子拋在海裡」（27:37–38）：麥子自動離船，不和「今晚靠麥子」同局（建議案）
+  D18 使用者 2026-11-20 決定採用（DECISIONS 18）：力氣只能靠吃飯（危機後才算）、吃飯也佔「只來得及一件」、
+      拿掉「胃」、載重維持 5、B3 改成吃飽後拋麥子。已搬進 tools/verify_seeds.py；--setups 給 golden 測試比對。
   V4  V2 ＋ B3 改成「276 人一起吃，吃飯花比較久：這局吃飯也佔掉那一件」（B3 原本的糧食變重在 V2 會失效）
 """
 import sys
@@ -64,6 +66,13 @@ def variant(name):
         v["uses"] = {"吃飯": ("力氣", None), "捆船底": ("船身", None), "拋錨": ("天亮", ("水", "深"))}
         v["cards"]["B5"] = dict(deck="B", remove=["錨"], done=["天亮"])
         v["cards"]["B3"] = dict(deck="B", slow_meal=True)
+    if name == "D18":
+        v["eat_only"] = {"力氣"}
+        v["eat_only_crisis_only"] = True
+        v["tonight"] = {k: x for k, x in v["tonight"].items() if k != "胃"}
+        v["uses"] = {"吃飯": ("力氣", None), "捆船底": ("船身", None), "拋錨": ("天亮", ("水", "深"))}
+        v["cards"]["B5"] = dict(deck="B", remove=["錨"], done=["天亮"])
+        v["cards"]["B3"] = dict(deck="B", remove=["麥子"], exclude={"食": "麥子"})
     if name == "V3":
         v["eat_only"] = {"力氣"}
         v["cards"]["B5"] = dict(deck="B", remove=["錨"], done=["天亮"], exclude={"胃": "吃不下"})
@@ -100,7 +109,8 @@ class Sim:
     def world(self, a, b, tn, crisis, used=frozenset()):
         cards = [a] + ([b] if crisis else [])
         w = dict(self.c["weights"])
-        removed, done, pinned, eo = set(), set(), set(), set(self.c["eat_only"])
+        removed, done, pinned = set(), set(), set()
+        eo = set(self.c["eat_only"]) if (crisis or not self.c.get("eat_only_crisis_only")) else set()
         for c in cards:
             cd = self.c["cards"][c]
             for k, d in cd.get("weight", {}).items():
@@ -255,7 +265,12 @@ class Sim:
 
 
 def main():
-    names = [a for a in sys.argv[1:] if a.startswith("V")] or ["V0", "V1", "V2", "V3", "V4", "V5"]
+    if "--setups" in sys.argv:
+        s = Sim(variant("D18"))
+        for a, tn, bs, _r in s.setups()[0]:
+            print(f"{a} {'/'.join(tn.values())}｜{''.join(bs)}")
+        return
+    names = [a for a in sys.argv[1:] if a.startswith("V") or a == "D18"] or ["V0", "V1", "V2", "V3", "V4", "V5", "D18"]
     print("方案｜試過｜通過｜局面｜三星有解｜二星保底｜照抄成功率｜最強固定打法｜不問隊友｜不吃飯也三星的局面｜首局可用起風卡")
     for nm in names:
         m = Sim(variant(nm)).metrics()

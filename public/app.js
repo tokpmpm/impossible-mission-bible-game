@@ -75,7 +75,8 @@ const ui = {
   board: null, // null＝沒開；{ loading, entries, error }
 };
 
-const ACTION_LABEL = { lock: '決定好了', depart: '衝向海灘', use: '天亮前要做的事', undoUse: '取消', setItem: '丟東西' };
+const ACTION_LABEL = { lock: '決定好了', depart: '衝向海灘', use: '天亮前要做的事', setItem: '丟東西' };
+const VOTE_CHOICE = { yes: '同意', wait: '等一下', info: '我有情報' };
 const USE_DONE = { 吃飯: '召集大家吃了', 拋錨: '從船尾拋下了', 捆船底: '用來捆綁船底：' };
 const USE_REF = { 吃飯: '徒 27:33–36', 拋錨: '徒 27:29', 捆船底: '徒 27:17' };
 const FLASH_BLOCK = { OVERWEIGHT: 'load', PINNED: 'items', NO_FOOD: 'items' };
@@ -375,7 +376,7 @@ function renderHome() {
       <div class="hero-art">${art.scene({ sky: 'storm', onDeck: ['糧食', '纜索', '錨', '麥子', '器具', '小船'], afloat: [], load: { weight: 6, cap: 6 }, rock: 'storm' })}</div>
       <div class="hero-badge">第一關・使徒行傳 27 章</div>
       <h1 class="logo">不可能的任務</h1>
-      <p class="hero-sub">保羅海難：每人一支手機，一起讓全船平安上岸</p>
+      <p class="hero-sub">保羅海難：每人一支手機，一起把船上的事顧好</p>
     </div>
     <div class="seg" role="tablist">
       <button role="tab" aria-selected="${!isJoin}" class="seg-btn ${!isJoin ? 'on' : ''}" data-action="home-mode" data-mode="create">建立房間</button>
@@ -557,7 +558,7 @@ function tonightCards(v) {
   if (!v.tonight || !v.tonight.length) return '';
   return `<section class="tonight" aria-label="你今晚看到的事">${v.tonight
     .map((t) => `<article class="tn-card" data-dial="${esc(t.dial)}" data-value="${esc(t.value)}">
-      <div class="tn-pic" aria-hidden="true">${t.item ? art.item(t.item, 40) : t.dial === '胃' ? art.need('力氣', true, 40) : ''}</div>
+      <div class="tn-pic" aria-hidden="true">${t.item ? art.item(t.item, 40) : ''}</div>
       <div class="tn-body"><div class="clue-head"><span class="tn-k">今晚你看到</span><span class="clue-title">${esc(t.title)}</span>${t.tag ? `<span class="tag tag-set">${esc(t.tag)}</span>` : ''}</div>
       <p>${esc(t.text)}</p>${t.verse ? `<p class="tn-verse">${esc(t.verse)}<cite>${esc(t.ref)}</cite></p>` : ''}</div>
     </article>`)
@@ -566,19 +567,47 @@ function tonightCards(v) {
 
 /** 天亮前的三種用掉：只有今晚做得到、輪到自己的人看得到按鈕；全隊只能做一件。 */
 function useCards(v) {
-  const s = v.ship;
-  if (v.can.undo && s.used) {
-    return `<section class="use-card done"><div class="use-art" aria-hidden="true">${art.item(s.used.item, 40)}</div>
-      <div><p><strong>你${esc(USE_DONE[s.used.id])}${esc(s.used.item)}</strong></p>
-      <button class="btn ghost block" data-action="undo-use">按錯了，取消（<span data-cd="undo">3</span> 秒內）</button></div></section>`;
-  }
   if (!v.can.uses || !v.can.uses.length) return '';
+  const busy = !!v.vote;
   const btns = v.can.uses
     .map((u) => `<div class="use-row"><div class="use-art" aria-hidden="true">${art.item(u.item, 40)}</div><div>
-      <button class="btn secondary block" data-action="use" data-use="${esc(u.id)}" ${u.ready ? '' : 'disabled'}>${esc(u.icon)} ${esc(u.label)}</button>
+      <button class="btn secondary block" data-action="use" data-use="${esc(u.id)}" ${u.ready && !busy ? '' : 'disabled'}>${esc(u.icon)} ${forceLabel(v, 'use:' + u.id, u.label)}</button>
       <p class="muted small">${u.ready ? `用掉${esc(u.item)}，${esc(NEED_LABEL[u.need])}就顧好了（${esc(u.ref)}）` : `${esc(u.item)}不在船上：先請管倉撈回來`}</p></div></div>`)
     .join('');
-  return `<section class="use-card"><p class="use-rule">天亮前全隊只來得及做<strong>一件</strong>：先和大家商量</p>${btns}</section>`;
+  return `<section class="use-card"><p class="use-rule">天亮前全隊只來得及做<strong>一件</strong>（吃飯也算）：按下去要大家都同意</p>${btns}</section>`;
+}
+
+/** 已經 2 次沒通過的動作：按鈕改成「強制執行」（不用再表決）。 */
+function forceLabel(v, key, label) {
+  return (v.can.force || []).includes(key) ? `強制：${esc(label)}` : esc(label);
+}
+
+/** 表決（DECISIONS 18）：其他人跳出同意／不同意；提案的人看到等待中。沒回應的時間到算同意。不點名誰不同意。 */
+function voteCard(v) {
+  const p = v.vote;
+  if (!p) return '';
+  const head = `<p class="vote-q"><strong>${esc(p.mine ? '你' : p.by)}</strong> 想「${esc(p.label)}」${p.attempt > 1 ? `（第 ${p.attempt} 次提）` : ''}</p>`;
+  const meter = `<p class="vote-meter">已同意 <strong>${p.agreed}</strong>／${p.total}・<span data-cd="vote">${Math.max(0, Math.ceil((p.deadline - now()) / 1000))}</span> 秒後沒回應的算同意</p>`;
+  if (p.canVote) {
+    return `<section class="vote-card ask" role="alertdialog" aria-label="表決：${esc(p.label)}">${head}<p class="muted small">同意嗎？不同意的話，說出你的理由。</p>
+      <div class="vote-btns">
+        <button class="btn primary" data-action="vote" data-vote="${esc(p.id)}" data-choice="yes">同意</button>
+        <button class="btn secondary" data-action="vote" data-vote="${esc(p.id)}" data-choice="wait">等一下</button>
+        <button class="btn secondary" data-action="vote" data-vote="${esc(p.id)}" data-choice="info">我有情報</button>
+      </div>${meter}</section>`;
+  }
+  const mine = p.myVote ? `<p class="muted small">你投了「${esc(VOTE_CHOICE[p.myVote])}」，等其他人。</p>` : p.mine ? '<p class="muted small">等大家同意；有人不同意就聽聽他的理由。</p>' : '';
+  return `<section class="vote-card wait" role="status">${head}${mine}${meter}</section>`;
+}
+
+function voteResultBanner(v) {
+  const r = v.voteResult;
+  if (!r || v.vote) return '';
+  if (r.outcome === 'forced') return `<div class="banner vote-res forced" role="status">⚖️ ${esc(r.by)} 在 ${r.tries} 次沒通過後，強制「${esc(r.label)}」</div>`;
+  if (r.outcome === 'cancelled') return `<div class="banner vote-res" role="status">⚖️「${esc(r.label)}」的表決取消了（情況變了）</div>`;
+  const why = [r.wait ? `${r.wait} 人說「等一下」` : '', r.info ? `${r.info} 人說「我有情報」` : ''].filter(Boolean).join('、');
+  const tail = r.tries >= 2 ? `；${esc(r.by)} 再按一次就會強制執行` : '（再沒通過一次，負責的人就可以強制）';
+  return `<div class="banner vote-res no" role="status">⚖️「${esc(r.label)}」沒通過：${esc(why)}。先聽聽理由${tail}</div>`;
 }
 
 function sweepBanner(v) {
@@ -614,12 +643,13 @@ function renderShip(v) {
     ? `<div class="banner dawn" role="status">⚓ 拋了錨，等天亮：<strong data-cd="dawn">${mmss(s.dawnAt - now())}</strong></div>`
     : '';
   let button = '';
-  if (v.can.lock) button = `<button class="btn primary block big" data-action="lock" ${lockOpen(v) ? '' : 'aria-disabled="true"'}>決定好了</button>`;
-  if (v.can.depart) button = `<button class="btn primary block big" data-action="depart">衝向海灘</button>`;
+  if (v.can.lock) button = `<button class="btn primary block big" data-action="lock" ${lockOpen(v) && !v.vote ? '' : 'aria-disabled="true"'}>${forceLabel(v, 'lock', '決定好了')}</button>`;
+  if (v.can.depart) button = `<button class="btn primary block big" data-action="depart" ${v.vote ? 'aria-disabled="true"' : ''}>${forceLabel(v, 'depart', '衝向海灘')}</button>`;
   const task = v.myTask ? `<p class="my-task">${esc(v.myTask)}</p>` : '';
   return `<main class="screen ship ${button ? 'has-bar' : ''}">
     <div class="ship-meta">${loadGauge(s)}${needsRow(v)}</div>
     ${cardChips(v)}
+    ${voteCard(v)}${voteResultBanner(v)}
     ${sweepBanner(v)}${hint}${crisis}${fedLine}${dawnWait}
     ${useCards(v)}
     ${v.can.items ? itemTray(v) : ''}
@@ -680,7 +710,7 @@ function renderBlackout(v) {
       <button class="btn tiny ghost" data-action="flicker" aria-label="${ui.noFlicker ? '開啟閃光效果' : '關閉閃光效果（怕閃的人用）'}">${ui.noFlicker ? '閃光：關' : '閃光：開'}</button>
     </div>
     ${v.story ? `<p class="bo-story">${esc(v.story.text)}<cite>${esc(v.story.ref)}</cite></p>` : ''}
-    ${c ? `<p class="bo-reveal">原本顧好 <strong>${c.starsBefore}</strong>／3 件・浪更大了，船只能留 4</p>` : ''}
+    ${c ? `<p class="bo-reveal">原本顧好 <strong>${c.starsBefore}</strong>／3 件・浪更大了，船只能留 ${v.ship ? v.ship.cap : 5}</p>` : ''}
     ${
       r
         ? `<div class="bo-timer"><span>補船 <strong data-cd="repair">${mmss(r.startedAt + r.limitMs - now())}</strong></span><span>進度 <strong>${r.progress}／${total}</strong></span></div>
@@ -930,10 +960,10 @@ function renderResult(v) {
     : '';
   const action = v.can.next ? `<button class="btn primary block" data-action="next">再來一局：新的故事卡</button>` : '';
   return `<main class="screen result">
-    <section class="card result-hero">
+    <section class="card result-hero ${res.safe ? '' : 'unsafe'}">
       <h1>${esc(res.title)}</h1>
       <div class="result-needs" aria-label="${res.stars}／3 件顧好">${needs}</div>
-      <p class="saved">船上 276 人，全都得救上了岸<cite>徒 27:37、44</cite></p>
+      <p class="saved">${esc(res.saved.text)}<cite>${esc(res.saved.ref)}</cite></p>
     </section>
     ${res.score ? renderScore(v, res.score) : ''}
     <section class="card"><h2>這局發生的事</h2><ul class="moments">${moments}</ul>
@@ -995,6 +1025,7 @@ function cardOverlay(c, deckLabel) {
 function overlayHtml(v) {
   if (!v || !v.round) return '';
   if (ui.revealAt && Date.now() - ui.revealAt < REVEAL_MS && v.result) {
+    if (!v.result.safe) return `<div class="ovl landing-ovl unsafe" aria-hidden="true">${art.darkness()}<p class="ovl-cap">這一局，沒能平安上岸</p></div>`;
     return `<div class="ovl landing-ovl" aria-hidden="true">${art.landing({ lit: v.result.lit })}<p class="ovl-cap">天亮了，衝向海灘！<cite>徒 27:39–41</cite></p></div>`;
   }
   if (ui.mealAt && Date.now() - ui.mealAt < MEAL_MS) {
@@ -1144,9 +1175,8 @@ setInterval(() => {
     else if (k === 'sweep' && v.ship && v.ship.sweepWarning) {
       el.textContent = String(Math.max(0, Math.ceil((v.ship.sweepWarning.stormAt - now()) / 1000)));
       continue;
-    } else if (k === 'undo' && v.ship && v.ship.used) {
-      const left = v.ship.used.undoUntil - now();
-      el.textContent = String(Math.max(0, Math.ceil(left / 1000)));
+    } else if (k === 'vote' && v.vote) {
+      el.textContent = String(Math.max(0, Math.ceil((v.vote.deadline - now()) / 1000)));
       continue;
     }
     if (ms != null) {
@@ -1169,8 +1199,6 @@ setInterval(() => {
     ui.useAt = 0;
     redraw = true;
   }
-  // 取消的 3 秒過了：收起取消鍵
-  if (v.ship && v.ship.used && v.can.undo && now() > v.ship.used.undoUntil) redraw = true;
   if (ui.cardOpen && Date.now() - ui.cardOpenAt > CARD_AUTO_CLOSE_MS) {
     ui.cardOpen = null;
     redraw = true;
@@ -1316,8 +1344,8 @@ document.addEventListener('click', (e) => {
     case 'use':
       conn.act({ type: 'use', use: el.getAttribute('data-use') });
       break;
-    case 'undo-use':
-      conn.act({ type: 'undoUse' });
+    case 'vote':
+      conn.send({ t: 'vote', id: el.getAttribute('data-vote'), choice: el.getAttribute('data-choice') });
       break;
     case 'pick':
       conn.act({ type: 'repairPick', option: el.getAttribute('data-opt') });

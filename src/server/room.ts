@@ -15,7 +15,7 @@ import {
   usesNow,
   usesTonight,
   TIME_UP_AT,
-  UNDO_USE_MS,
+  isSafe,
   type GameEvent,
   type GameState,
 } from '../engine/game.ts';
@@ -46,12 +46,32 @@ import {
   type Preference,
   type RoleId,
 } from './content.ts';
-import type { Action, CardView, MomentView, Rejection, View, ViewPhase } from './view.ts';
+import type { Action, CardView, MomentView, Rejection, View, ViewPhase, VoteChoice } from './view.ts';
 
 export const INTRO_MS = 60_000;
 export const MIN_PLAYERS = 3;
 export const MAX_PLAYERS = 10;
 export const SEED_ID: SeedId = 'ship 001';
+/** 表決：其他人幾毫秒沒回應就算同意（DECISIONS 18）。 */
+export const VOTE_MS = 10_000;
+/** 同一個動作表決沒通過幾次後，負責人可以強制執行。 */
+export const FORCE_AFTER = 2;
+/** 表決結果（沒通過／強制）在畫面上顯示多久。 */
+export const VOTE_RESULT_SHOW_MS = 8_000;
+/** 要全員同意的動作。丟東西、撈東西、補船、油燈不用。 */
+const VOTED: Action['type'][] = ['lock', 'use', 'depart'];
+
+interface Proposal {
+  id: string;
+  key: string; // 'lock'、'depart'、'use:吃飯'…（沒通過次數照這個算）
+  action: Action;
+  by: string;
+  at: number; // 局內毫秒
+  deadline: number; // 局內毫秒
+  voters: string[]; // 提案當時在線的其他參與者
+  votes: Map<string, VoteChoice>;
+  attempt: number; // 第幾次提
+}
 
 export interface Player {
   id: string;
@@ -87,6 +107,14 @@ interface Round {
   tonightHolders: Map<DialId, string>;
   /** 已登記上榜（每局只能一次）。 */
   submitted: { name: string; rank: number; best: boolean; bestScore: number } | null;
+  /** 進行中的表決（一次只有一個）。 */
+  proposal: Proposal | null;
+  /** 各動作表決沒通過幾次（通過或強制後歸零）。 */
+  fails: Map<string, number>;
+  /** 最近一次表決結果。 */
+  lastVote: { key: string; by: string; outcome: 'rejected' | 'forced' | 'cancelled'; wait: number; info: number; at: number; tries: number } | null;
+  /** 這局表決的紀錄（結尾回顧用）。 */
+  voteLog: { key: string; by: string; outcome: 'passed' | 'rejected' | 'forced' | 'cancelled'; at: number }[];
 }
 
 const EXTRA_REASON_TEXT: Record<string, string> = {
@@ -97,7 +125,7 @@ const EXTRA_REASON_TEXT: Record<string, string> = {
   NO_ITEM: '那樣東西不在船上',
   CANNOT_TONIGHT: '今晚做不到',
   ALREADY_USED: '天亮前只來得及做一件',
-  UNDO_EXPIRED: '已經來不及取消了',
+  VOTING: '大家正在表決',
 };
 
 function reasonText(r: string, overweight = 0): string {
@@ -139,9 +167,12 @@ export class Room {
   sweepWarningMs: number | undefined;
   /** 練習房（單機試玩 solo.html 開的）：分數照算照顯示，但不能登記排行榜。 */
   practice: boolean;
+  /** 表決沒回應算同意的時間（正式 10 秒；只給自動測試縮短）。 */
+  voteMs: number;
 
-  constructor(code: string, opts: { now?: () => number; seed?: number; introMs?: number; sweepWarningMs?: number; practice?: boolean } = {}) {
+  constructor(code: string, opts: { now?: () => number; seed?: number; introMs?: number; sweepWarningMs?: number; voteMs?: number; practice?: boolean } = {}) {
     this.code = code;
+    this.voteMs = opts.voteMs ?? VOTE_MS;
     this.practice = !!opts.practice;
     this.introMs = opts.introMs ?? INTRO_MS;
     this.sweepWarningMs = opts.sweepWarningMs;
@@ -338,6 +369,10 @@ export class Room {
       btHolders,
       tonightHolders,
       submitted: null,
+      proposal: null,
+      fails: new Map(),
+      lastVote: null,
+      voteLog: [],
     };
     this.touch();
   }
@@ -390,6 +425,7 @@ export class Room {
     const r = this.round;
     if (!r || r.game.phase === 'settled' || r.game.phase === 'ended') return false;
     r.game = apply(r.game, { type: 'tick', at: this.elapsed() });
+    if (r.proposal) this.settleVote();
     const sig = this.signature();
     if (sig === this.lastSig) return false;
     this.lastSig = sig;
@@ -399,9 +435,11 @@ export class Room {
   private signature(): string {
     const g = this.round?.game;
     if (!g) return '';
+    const r = this.round!;
     const open = dawnOpensAt(g);
-    const undoOpen = !!g.used && g.now - g.used.at <= UNDO_USE_MS;
-    return [g.phase, this.elapsed() >= this.introMs, g.hint.shown, g.warned, g.repair?.assistLevel, g.crisisAt, g.result?.stars, open !== null && g.now >= open, undoOpen].join('|');
+    const p = r.proposal;
+    const voteShown = !!r.lastVote && this.elapsed() - r.lastVote.at <= VOTE_RESULT_SHOW_MS;
+    return [g.phase, this.elapsed() >= this.introMs, g.hint.shown, g.warned, g.repair?.assistLevel, g.crisisAt, g.result?.stars, open !== null && g.now >= open, p?.id, p?.votes.size, voteShown, g.used?.at].join('|');
   }
 
   private online(pid: string): boolean {
@@ -457,11 +495,8 @@ export class Room {
         return this.effectivePrefHolder() === pid;
       case 'use':
         return Object.hasOwn(USE_TEXT, a.use) && this.operatorOf(USE_TEXT[a.use].role) === pid;
-      case 'undoUse': {
-        // 只有按下去的那個人可以取消
-        const last = [...r.actors].reverse().find((x) => x.kind === 'use');
-        return !!last && last.playerId === pid;
-      }
+      default:
+        return false;
     }
   }
 
@@ -478,6 +513,13 @@ export class Room {
     const r = this.round;
     if (!r) throw new Error('還沒開始');
     if (!this.permitted(pid, a)) throw new Error('這不是你負責的操作');
+    if (VOTED.includes(a.type)) return this.propose(pid, a);
+    return this.execute(pid, a);
+  }
+
+  /** 真的交給規則執行（表決通過、強制、或不用表決的動作）。 */
+  private execute(pid: string, a: Action): Rejection | null {
+    const r = this.round!;
     const at = this.elapsed();
     const event = { ...a, at } as GameEvent;
     const before = r.game;
@@ -488,6 +530,99 @@ export class Room {
       return { action: a.type, reasons: r.game.lastRejection.reasons.map((code) => ({ code, text: this.advice(code, pid, at) })) };
     }
     return null;
+  }
+
+  private static voteKey(a: Action): string {
+    return a.type === 'use' ? `use:${a.use}` : a.type;
+  }
+
+  private static voteLabel(key: string): string {
+    if (key === 'lock') return '決定好了';
+    if (key === 'depart') return '衝向海灘';
+    const u = key.slice(4) as UseId;
+    return USE_TEXT[u]?.label ?? key;
+  }
+
+  /**
+   * 提案（DECISIONS 18）：規則會擋的直接回原因（不用表決）；同一個動作已經 2 次沒通過＝強制執行；
+   * 沒有其他在線隊員＝直接執行；否則開表決，其他在線參與者同意／不同意，10 秒沒回應算同意。
+   */
+  private propose(pid: string, a: Action): Rejection | null {
+    const r = this.round!;
+    const at = this.elapsed();
+    if (r.proposal) {
+      r.game = apply(r.game, { type: 'tick', at });
+      return { action: a.type, reasons: [{ code: 'VOTING', text: `大家正在表決「${Room.voteLabel(r.proposal.key)}」：等結果出來` }] };
+    }
+    // 先試一次：規則會擋（超重、還在黑暗中…）就直接告訴按的人，不必讓大家表決
+    const trial = apply(r.game, { ...a, at } as GameEvent);
+    if (trial.rejections > r.game.rejections && trial.lastRejection) {
+      r.game = trial;
+      return { action: a.type, reasons: trial.lastRejection.reasons.map((code) => ({ code, text: this.advice(code, pid, at) })) };
+    }
+    const key = Room.voteKey(a);
+    const fails = r.fails.get(key) ?? 0;
+    const voters = r.participants.filter((p) => p !== pid && this.online(p));
+    if (fails >= FORCE_AFTER) {
+      r.fails.delete(key);
+      r.lastVote = { key, by: pid, outcome: 'forced', wait: 0, info: 0, at, tries: fails };
+      r.voteLog.push({ key, by: pid, outcome: 'forced', at });
+      return this.execute(pid, a);
+    }
+    if (!voters.length) return this.execute(pid, a);
+    r.proposal = { id: randomId(8), key, action: a, by: pid, at, deadline: at + this.voteMs, voters, votes: new Map(), attempt: fails + 1 };
+    this.touch();
+    return null;
+  }
+
+  /** 投票。重複投同一個表決會被忽略；表決已經結束會丟錯誤。 */
+  vote(pid: string, proposalId: string, choice: VoteChoice): void {
+    const r = this.round;
+    const p = r?.proposal;
+    if (!r || !p || p.id !== proposalId) throw new Error('這個表決已經結束了');
+    if (!p.voters.includes(pid)) throw new Error('你不用表決這件事');
+    if (choice !== 'yes' && choice !== 'wait' && choice !== 'info') throw new Error('看不懂這一票');
+    if (p.votes.has(pid)) return;
+    p.votes.set(pid, choice);
+    this.touch();
+    this.settleVote();
+  }
+
+  /** 表決還能不能成立（階段變了、提案的人離線＝取消）。 */
+  private proposalValid(p: Proposal): boolean {
+    const g = this.round!.game;
+    if (!this.online(p.by) || this.operatorOf(p.action.type === 'use' ? USE_TEXT[p.action.use].role : 'nav') !== p.by) return false;
+    if (p.action.type === 'lock') return g.phase === 'planning' && !g.locked;
+    return g.phase === 'replanning';
+  }
+
+  /** 看表決有沒有結果：有人不同意＝沒通過；在線的都同意或時間到＝通過（沒回應算同意）。 */
+  private settleVote(): void {
+    const r = this.round!;
+    const p = r.proposal;
+    if (!p) return;
+    const at = this.elapsed();
+    if (!this.proposalValid(p)) {
+      r.proposal = null;
+      r.lastVote = { key: p.key, by: p.by, outcome: 'cancelled', wait: 0, info: 0, at, tries: r.fails.get(p.key) ?? 0 };
+      r.voteLog.push({ key: p.key, by: p.by, outcome: 'cancelled', at });
+      return;
+    }
+    const no = [...p.votes.values()].filter((v) => v !== 'yes');
+    if (no.length) {
+      const tries = (r.fails.get(p.key) ?? 0) + 1;
+      r.fails.set(p.key, tries);
+      r.proposal = null;
+      r.lastVote = { key: p.key, by: p.by, outcome: 'rejected', wait: no.filter((v) => v === 'wait').length, info: no.filter((v) => v === 'info').length, at, tries };
+      r.voteLog.push({ key: p.key, by: p.by, outcome: 'rejected', at });
+      return;
+    }
+    const pending = p.voters.filter((v) => this.online(v) && !p.votes.has(v));
+    if (pending.length && at < p.deadline) return;
+    r.proposal = null;
+    r.fails.delete(p.key);
+    r.voteLog.push({ key: p.key, by: p.by, outcome: 'passed', at });
+    this.execute(p.by, p.action);
   }
 
   /** 操作者的稱呼：自己就說「你」，別人就說「暱稱（職能）」。 */
@@ -526,8 +661,6 @@ export class Room {
         const u = this.round!.game.used;
         return u ? `天亮前只來得及做一件：${USE_TEXT[u.use].done}` : '天亮前只來得及做一件';
       }
-      case 'UNDO_EXPIRED':
-        return '已經超過 3 秒，來不及取消了';
       default:
         return reasonText(code);
     }
@@ -590,10 +723,10 @@ export class Room {
     return (pid && this.get(pid)?.nickname) || '隊友';
   }
 
-  /** 線索裡的 {食}{繩}{水}{胃} 換成這局拿那張見聞的人的職能（例：{繩} → 水手長；9 人以下 → 管倉）。 */
+  /** 線索裡的 {食}{繩}{水} 換成這局拿那張見聞的人的職能（例：{繩} → 水手長；9 人以下 → 管倉）。 */
   private fillRoles(text: string): string {
     const r = this.round!;
-    return text.replace(/\{(食|繩|水|胃)\}/g, (_m, d: DialId) => {
+    return text.replace(/\{(食|繩|水)\}/g, (_m, d: DialId) => {
       const h = r.tonightHolders.get(d) ?? Room.holderIn(r.participants, r.roles, TONIGHT_ROLE[d]);
       const role = (h && (r.roles.get(h) ?? []).find((x) => x === TONIGHT_ROLE[d] || x === SPLIT_FROM[TONIGHT_ROLE[d]])) || TONIGHT_ROLE[d];
       return ROLES[role].name;
@@ -609,7 +742,7 @@ export class Room {
         return r.game.sweep
           ? '你決定丟什麼：按一下＝丟進海裡。風暴一來，漂著的東西就撈不回來，先問清楚再丟。'
           : '你決定丟什麼：按一下東西＝丟進海裡，再按一下撈回來。';
-      if (this.operatorOf('nav') === pid) return r.game.locked ? '你決定好了：風暴馬上就來。' : '大家講好了，就由你按「決定好了」。';
+      if (this.operatorOf('nav') === pid) return r.game.locked ? '你決定好了：風暴馬上就來。' : '大家講好了，就由你按「決定好了」（大家都要同意）。';
       if (this.nextSteps(pid).length) return null; // 「下一步」已經說了要找誰
       return `把你知道的告訴 ${this.nick(this.operatorOf('supply'))}（管倉），他負責丟東西。`;
     }
@@ -617,7 +750,7 @@ export class Room {
       if (this.operatorOf('supply') === pid) return '浪更大了，船只能留 5：再決定一次留什麼。';
       if (this.operatorOf('nav') === pid) return '大家都準備好了，就由你按「衝向海灘」。';
       const mineUses = usesTonight(r.game).filter((u) => this.operatorOf(USE_TEXT[u].role) === pid);
-      if (mineUses.length && !r.game.used) return `天亮前全隊只來得及做一件事：要不要由你${USE_TEXT[mineUses[0]].label}，先和大家商量。`;
+      if (mineUses.length && !r.game.used) return `要不要由你${USE_TEXT[mineUses[0]].label}？先和大家商量。`;
       const r2 = this.round!;
       const hasNew = [...r2.btHolders.values()].includes(pid);
       if (hasNew) return `你有新線索：說給 ${this.nick(this.operatorOf('supply'))}（管倉）聽。`;
@@ -677,8 +810,10 @@ export class Room {
         next: false,
         submit: false,
         uses: [],
-        undo: false,
+        force: [],
       },
+      vote: null,
+      voteResult: null,
       tonight: [],
       clues: [],
       hint: null,
@@ -732,7 +867,7 @@ export class Room {
       advice: shownReasons.map((x) => this.advice(x, pid, elapsed, ev)),
       locked: g.locked,
       used: g.used
-        ? { id: g.used.use, item: g.used.item, at: r.startedAt + g.used.at, by: this.nick(useActor?.playerId), mine: useActor?.playerId === pid, undoUntil: r.startedAt + g.used.at + UNDO_USE_MS }
+        ? { id: g.used.use, item: g.used.item, at: r.startedAt + g.used.at, by: this.nick(useActor?.playerId), mine: useActor?.playerId === pid }
         : null,
       dawnAt: dawn !== null ? r.startedAt + dawn : null,
       lastRejection: g.lastRejection
@@ -752,7 +887,27 @@ export class Room {
         .filter((u) => this.operatorOf(USE_TEXT[u].role) === pid)
         .map((u) => ({ id: u, label: USE_TEXT[u].label, icon: USE_TEXT[u].icon, ref: USE_TEXT[u].ref, need: USES[u].need, item: prov[USES[u].need], ready: ready.includes(u) }));
     }
-    v.can.undo = g.phase === 'replanning' && !!g.used && useActor?.playerId === pid && g.now - g.used.at <= UNDO_USE_MS;
+    // 表決：我負責、已經 2 次沒通過的動作，再按就強制
+    v.can.force = [...r.fails.entries()].filter(([k, n]) => n >= FORCE_AFTER && this.operatorOf(k === 'lock' || k === 'depart' ? 'nav' : USE_TEXT[k.slice(4) as UseId].role) === pid).map(([k]) => k);
+    const prop = r.proposal;
+    if (prop && !finished) {
+      v.vote = {
+        id: prop.id,
+        label: Room.voteLabel(prop.key),
+        by: this.nick(prop.by),
+        mine: prop.by === pid,
+        deadline: r.startedAt + prop.deadline,
+        total: prop.voters.filter((x) => this.online(x)).length,
+        agreed: [...prop.votes.values()].filter((x) => x === 'yes').length,
+        myVote: prop.votes.get(pid) ?? null,
+        canVote: prop.voters.includes(pid) && !prop.votes.has(pid),
+        attempt: prop.attempt,
+      };
+    }
+    const lv = r.lastVote;
+    if (lv && !finished && elapsed - lv.at <= VOTE_RESULT_SHOW_MS) {
+      v.voteResult = { label: Room.voteLabel(lv.key), by: this.nick(lv.by), outcome: lv.outcome, wait: lv.wait, info: lv.info, at: r.startedAt + lv.at, tries: lv.tries };
+    }
     v.can.next = finished && this.hostId === pid;
     // 登記上榜：只有房主看得到；練習房、已登記過都不顯示按鈕
     v.can.submit = finished && this.hostId === pid && !this.practice && !r.submitted;
@@ -850,11 +1005,16 @@ export class Room {
     const g = r.game;
     const stars = g.result?.stars ?? 0;
     const served = (g.result?.served ?? []) as NeedId[];
-    const titles = { 3: '上岸很順利！', 2: '平安上岸', 1: '上岸了，有點狼狽', 0: '大家還是都上了岸' } as const;
+    // DECISIONS 18：0–1 件或時間到還沒出發＝這局沒能平安上岸（遊戲結果）；經文裡 276 人都上了岸，saved 那行一定寫明
+    const safe = isSafe(g) === true;
+    const title = !safe ? '這一局，你們沒能平安上岸' : stars === 3 ? '全船平安上岸・一路準備周全' : '全船平安上岸・準備了大半';
+    const saved = safe ? { text: '船上 276 人，全都得救上了岸', ref: '徒 27:37、44' } : { text: '經文裡，船上 276 人全都上了岸。再試一次？', ref: '徒 27:37、44' };
     const k = r.no - 1;
     return {
       stars,
-      title: titles[stars],
+      safe,
+      title,
+      saved,
       lit: { 力氣: served.includes('力氣'), 船身: served.includes('船身'), 天亮: served.includes('天亮') },
       cause: g.result?.cause ?? 'ended',
       moments: this.moments(),
@@ -878,7 +1038,7 @@ export class Room {
       total: score.total,
       max: 1000,
       parts: [
-        { id: 'mission', points: score.mission, max: 600, detail: `顧好 ${raw.stars} 件` },
+        { id: 'mission', points: score.mission, max: 600, detail: raw.safe ? `顧好 ${raw.stars} 件` : '沒能平安上岸' },
         {
           id: 'teamwork',
           points: score.teamwork,
@@ -886,7 +1046,7 @@ export class Room {
           // 不寫協助等級數字，避免矛頭指向木匠一個人（公平性審查）
           detail: raw.repairMs === null ? '天亮前沒補好船' : `大家一起補船 ${Math.round(raw.repairMs / 1000)} 秒`,
         },
-        { id: 'time', points: score.time, max: 100, detail: `${Math.floor(raw.finishedAt / 60000)}:${String(Math.floor((raw.finishedAt % 60000) / 1000)).padStart(2, '0')} 上岸` },
+        { id: 'time', points: score.time, max: 100, detail: raw.safe ? `${Math.floor(raw.finishedAt / 60000)}:${String(Math.floor((raw.finishedAt % 60000) / 1000)).padStart(2, '0')} 上岸` : '沒能平安上岸' },
         { id: 'difficulty', points: score.difficulty, max: 100, detail: `三星解 ${raw.solutions} 種` + (raw.sweep ? '・風暴捲走' : '') },
       ],
       factor: score.factor,
@@ -902,8 +1062,8 @@ export class Room {
     const g = this.round!.game;
     const p = providers(g);
     const parts = [`力氣靠${p.力氣}`, CARDS[g.cards.a].done?.includes('船身') ? '船身早就捆好了' : `船身靠${p.船身}`, `等天亮靠錨`];
-    const extra = [g.tonight.水 === '淺' ? '水夠淺、拋得了錨' : '水太深、錨拋不下去', g.tonight.胃 === '吃得下' ? '大家吃得下' : '大家暈船、吃不下'];
-    return `今晚${parts.join('、')}；${extra.join('，')}。`;
+    const extra = g.tonight.水 === '淺' ? '水夠淺、拋得了錨' : '水太深，錨要留到快靠岸時再拋';
+    return `今晚${parts.join('、')}；${extra}。力氣要吃了才有。`;
   }
 
   /** 這局真的發生的事（系統紀錄＋故事卡＋背包物品出場），有名字。不虛構互助、不評誰最重要。 */
@@ -937,12 +1097,18 @@ export class Room {
     }
     const served = (g.result?.served ?? []) as NeedId[];
     const why: Record<NeedId, string> = {
-      力氣: '力氣沒顧到：上岸時大家游得很吃力。',
-      船身: '船身沒顧到：船尾被浪打得更碎。',
-      天亮: '等天亮沒顧到：夜裡差點撞上礁石。',
+      力氣: '力氣沒顧到：大家沒吃東西，沒有力氣游。',
+      船身: '船身沒顧到：船還沒靠近海灘就散開了。',
+      天亮: '等天亮沒顧到：船在黑夜裡被風浪推著走。',
     };
     for (const n of NEEDS) if (!served.includes(n) && why[n]) out.push({ icon: { kind: 'need', ids: [n] }, text: why[n] });
-    out.push({ icon: { kind: 'scene', ids: ['landing'] }, text: '船擱淺了，大家有的游、有的抱著板子，都上了岸（27:41–44）。' });
+    // 表決：只陳述次數與誰強制，不點名誰不同意
+    const rejected = r.voteLog.filter((x) => x.outcome === 'rejected').length;
+    if (rejected) out.push({ icon: { kind: 'role', ids: ['nav'] }, text: `有 ${rejected} 次有人喊「等一下」或「我有情報」，大家停下來重新商量。` });
+    for (const f of r.voteLog.filter((x) => x.outcome === 'forced')) out.push({ icon: { kind: 'role', ids: ['nav'] }, text: `${this.nick(f.by)} 在 2 次沒通過後，強制「${Room.voteLabel(f.key)}」。` });
+    // DECISIONS 18：遊戲可以失敗，但不畫、不寫有人死亡；經文的結局另外寫明
+    if (isSafe(g)) out.push({ icon: { kind: 'scene', ids: ['landing'] }, text: '船擱淺了，大家有的游、有的抱著板子，都上了岸（27:41–44）。' });
+    else out.push({ icon: { kind: 'scene', ids: ['landing'] }, text: g.result ? '天亮時，船卡在礁石之間撐不住——這一局沒能平安上岸。' : '時間到了，船還沒能出發——這一局沒能平安上岸。' });
     for (const item of ['coat', 'nuts', 'song'] as const) {
       const p = this.players.find((x) => r.participants.includes(x.id) && x.pref === item);
       if (p) out.push({ icon: { kind: 'pref', ids: [item] }, text: CAMEOS[item].replace('{name}', p.nickname) });

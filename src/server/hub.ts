@@ -30,14 +30,16 @@ export class Hub {
   private fixedBaseUrl: string | null;
   private introMs: number | undefined;
   private sweepWarningMs: number | undefined;
+  private voteMs: number | undefined;
   /** 團隊排行榜（Node：記憶體或 JSON 檔；Cloudflare：Durable Object 的 SQLite）。 */
   leaderboard: LeaderboardStore;
 
-  constructor(opts: { publicUrl?: string | null; introMs?: number; sweepWarningMs?: number; leaderboard?: LeaderboardStore } = {}) {
+  constructor(opts: { publicUrl?: string | null; introMs?: number; sweepWarningMs?: number; voteMs?: number; leaderboard?: LeaderboardStore } = {}) {
     this.leaderboard = opts.leaderboard ?? new MemoryStore();
     this.fixedBaseUrl = opts.publicUrl || null;
     this.introMs = opts.introMs;
     this.sweepWarningMs = opts.sweepWarningMs;
+    this.voteMs = opts.voteMs;
   }
 
   joinUrl(code: string): string {
@@ -119,7 +121,7 @@ export class Hub {
         return this.send(conn, { t: 'leaderboard', ...this.leaderboardJson() });
       case 'create': {
         const code = this.newCode();
-        const r = new Room(code, { introMs: this.introMs, sweepWarningMs: this.sweepWarningMs, practice: msg.practice === true });
+        const r = new Room(code, { introMs: this.introMs, sweepWarningMs: this.sweepWarningMs, voteMs: this.voteMs, practice: msg.practice === true });
         this.rooms.set(code, r);
         this.roomOrigin.set(code, conn.origin);
         const p = r.addPlayer(String(msg.nickname ?? ''));
@@ -174,6 +176,10 @@ export class Hub {
         }
         return;
       }
+      case 'vote':
+        // 全員同意（DECISIONS 18）：重複送出同一票會被忽略
+        room.vote(pid, String(msg.id ?? ''), msg.choice);
+        break;
       case 'thank':
         room.thank(pid, msg.to);
         break;

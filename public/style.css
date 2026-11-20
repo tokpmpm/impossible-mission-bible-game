@@ -926,3 +926,13 @@ cite { display: block; margin-top: 4px; font-style: normal; color: var(--gold-2)
   .sc-row, .sc-total { transition: none; }
   .sc-row.pop .sc-ico, .sc-total.boom { animation: none; }
 }
+
+/* 表決（DECISIONS 18）：全員同意，2 次沒通過可強制 */
+.vote-card { border: 2px solid var(--gold); border-radius: 14px; padding: 12px; margin: 8px 0; background: rgba(242, 193, 78, 0.14); }
+.vote-card.ask { box-shadow: 0 0 0 4px rgba(242, 193, 78, 0.25); }
+.vote-q { margin: 0 0 4px; font-size: 1.05rem; }
+.vote-btns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 8px 0 4px; }
+.vote-meter { margin: 4px 0 0; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+.banner.vote-res.no { border-color: var(--warn); }
+.banner.vote-res.forced { border-color: var(--gold); }
+.result-hero.unsafe h1 { color: #ffd2c2; }

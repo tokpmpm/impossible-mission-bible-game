@@ -1,6 +1,7 @@
 // 一局的規則狀態機（ADR-0001、0002、0003、0006、0007）。
 // 純函式：apply(狀態, 事件) → 新狀態。不讀時鐘、不認識玩家；時間由事件的 at（房間倒數已過毫秒）帶入。
 // 2026-11-16：見聞（今晚靠哪一樣）、風暴捲走（第二局起）、三種用掉只來得及一件（docs/12 第 3 節）。
+// 2026-11-20（DECISIONS 18）：顧好 0–1 件或時間到還沒出發＝這局沒能平安上岸；拿掉「用掉後 3 秒取消」（改由房間層全員同意）。
 import { effective, evaluatePlan, storyOk, usesAvailable, type Evaluation, type Plan, type RejectReason, type World } from './rules.ts';
 import { CARDS, CLASSIC, ITEMS, SEEDS, USES, providerOf, type CardId, type ItemId, type SeedDef, type SeedId, type Tonight, type UseId } from './seeds.ts';
 
@@ -11,7 +12,8 @@ export const FIRST_ROUND_EXTRA = 15_000;
 export const SECOND_ASSIST_AFTER = 15_000; // 逾時再 15 秒，只留正確＋1 個錯誤選項
 export const LOCK_OPENS_AT = 60_000; // 前 60 秒可以丟東西但不能「決定好了」，先認識隊友
 export const SWEEP_WARNING_MS = 10_000; // 風暴捲走前 10 秒提醒（DECISIONS 16）
-export const UNDO_USE_MS = 3_000; // 用掉後 3 秒內本人可以取消（docs/12 3.C）
+/** 至少顧好幾件才算平安上岸（DECISIONS 18：0–1 件＝沒能平安上岸；這是遊戲結果，經文裡 276 人都上了岸）。 */
+export const SAFE_MIN_STARS = 2;
 
 export type Phase = 'planning' | 'blackout' | 'replanning' | 'settled' | 'ended';
 
@@ -55,7 +57,7 @@ export interface RepairState {
 
 export interface LogEntry {
   at: number;
-  kind: 'hint' | 'storm_warning' | 'crisis' | 'swept' | 'assist' | 'eliminate' | 'power_restored' | 'card' | 'throw' | 'rescue' | 'use' | 'undo_use' | 'rejected' | 'settled' | 'time_up';
+  kind: 'hint' | 'storm_warning' | 'crisis' | 'swept' | 'assist' | 'eliminate' | 'power_restored' | 'card' | 'throw' | 'rescue' | 'use' | 'rejected' | 'settled' | 'time_up';
   data?: Record<string, unknown>;
 }
 
@@ -65,9 +67,8 @@ export type ExtraReason =
   | 'PINNED'
   | 'SWEPT' // 已經被浪捲走，撈不回來
   | 'NO_ITEM' // 要用掉的東西不在船上
-  | 'CANNOT_TONIGHT' // 今晚做不到（吃不下、水太深）或那件事已經顧好
-  | 'ALREADY_USED' // 天亮前只來得及做一件
-  | 'UNDO_EXPIRED'; // 超過 3 秒不能取消
+  | 'CANNOT_TONIGHT' // 今晚做不到（水太深）或那件事已經顧好
+  | 'ALREADY_USED'; // 天亮前只來得及做一件
 
 export interface GameState {
   seedId: SeedId;
@@ -97,7 +98,8 @@ export interface GameState {
   lockOpensAt: number;
   lastRejection: { at: number; action: Exclude<GameEvent['type'], 'tick'>; reasons: (RejectReason | ExtraReason)[] } | null;
   rejections: number;
-  result: { stars: 0 | 1 | 2 | 3; served: string[]; weight: number; at: number; cause: 'depart' | 'time_up' } | null;
+  /** 出發的結果；時間到還沒能出發（phase＝ended）時是 null，也算沒能平安上岸。 */
+  result: { stars: 0 | 1 | 2 | 3; served: string[]; weight: number; at: number; cause: 'depart' | 'time_up'; safe: boolean } | null;
   log: LogEntry[];
 }
 
@@ -108,7 +110,6 @@ export type GameEvent =
   | { type: 'repairPick'; at: number; option: string }
   | { type: 'useEliminate'; at: number }
   | { type: 'use'; at: number; use: UseId }
-  | { type: 'undoUse'; at: number }
   | { type: 'depart'; at: number };
 
 export function symbolCount(playerCount: number): 2 | 3 | 4 {
@@ -365,8 +366,9 @@ function advanceTime(s: GameState, at: number): void {
 
 function settle(s: GameState, at: number, ev: Evaluation, cause: 'depart' | 'time_up'): void {
   s.phase = 'settled';
-  s.result = { stars: ev.stars, served: ev.served, weight: ev.weight, at, cause };
-  s.log.push({ at, kind: 'settled', data: { stars: ev.stars, served: ev.served, cause } });
+  const safe = ev.stars >= SAFE_MIN_STARS;
+  s.result = { stars: ev.stars, served: ev.served, weight: ev.weight, at, cause, safe };
+  s.log.push({ at, kind: 'settled', data: { stars: ev.stars, served: ev.served, cause, safe } });
 }
 
 function reject(s: GameState, action: Exclude<GameEvent['type'], 'tick'>, at: number, reasons: NonNullable<GameState['lastRejection']>['reasons']): GameState {
@@ -454,16 +456,6 @@ export function apply(prev: GameState, event: GameEvent): GameState {
       return s;
     }
 
-    case 'undoUse': {
-      if (s.phase !== 'replanning' || !s.used) return reject(s, event.type, at, ['WRONG_PHASE']);
-      if (at - s.used.at > UNDO_USE_MS) return reject(s, event.type, at, ['UNDO_EXPIRED']);
-      const { item, use } = s.used;
-      s.used = null;
-      s.plan.items = ITEMS.filter((i) => i === item || s.plan.items.includes(i));
-      s.log.push({ at, kind: 'undo_use', data: { use, item } });
-      return s;
-    }
-
     case 'depart': {
       if (s.phase === 'settled' || s.phase === 'ended') return s; // 只結算一次
       if (s.phase === 'planning') return reject(s, event.type, at, ['WRONG_PHASE']);
@@ -477,6 +469,13 @@ export function apply(prev: GameState, event: GameEvent): GameState {
       return s;
     }
   }
+}
+
+/** 這局是否平安上岸：還沒結束＝null；時間到還沒出發＝false；出發了看顧好幾件。 */
+export function isSafe(state: GameState): boolean | null {
+  if (state.phase === 'settled') return state.result!.safe;
+  if (state.phase === 'ended') return false;
+  return null;
 }
 
 export function applyAll(state: GameState, events: GameEvent[]): GameState {

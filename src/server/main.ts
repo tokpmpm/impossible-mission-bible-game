@@ -45,7 +45,7 @@ export function lanAddress(): string | null {
   return null;
 }
 
-export function startServer(opts: { port?: number; publicUrl?: string; tickMs?: number; introMs?: number; sweepWarningMs?: number; leaderboardFile?: string } = {}) {
+export function startServer(opts: { port?: number; publicUrl?: string; tickMs?: number; introMs?: number; sweepWarningMs?: number; voteMs?: number; leaderboardFile?: string } = {}) {
   const port = opts.port ?? Number(process.env.PORT ?? 3000);
   // INTRO_MS：只給自動測試縮短「認識隊友」時間用；正式遊戲固定 60 秒
   const introMs = opts.introMs ?? (process.env.INTRO_MS ? Number(process.env.INTRO_MS) : undefined);
@@ -53,7 +53,9 @@ export function startServer(opts: { port?: number; publicUrl?: string; tickMs?: 
   const sweepWarningMs = opts.sweepWarningMs ?? (process.env.SWEEP_WARN_MS ? Number(process.env.SWEEP_WARN_MS) : undefined);
   // LEADERBOARD_FILE：排行榜存檔位置（例如 data/leaderboard.json）；不給就只在記憶體，伺服器重開會清空
   const leaderboard = fileLeaderboard(opts.leaderboardFile ?? process.env.LEADERBOARD_FILE);
-  const hub = new Hub({ publicUrl: opts.publicUrl ?? process.env.PUBLIC_URL ?? null, introMs, sweepWarningMs, leaderboard });
+  // VOTE_MS：同上，只給自動測試縮短「沒回應就算同意」的 10 秒
+  const voteMs = opts.voteMs ?? (process.env.VOTE_MS ? Number(process.env.VOTE_MS) : undefined);
+  const hub = new Hub({ publicUrl: opts.publicUrl ?? process.env.PUBLIC_URL ?? null, introMs, sweepWarningMs, voteMs, leaderboard });
   let actualPort = port;
 
   function originOf(req: IncomingMessage): string {

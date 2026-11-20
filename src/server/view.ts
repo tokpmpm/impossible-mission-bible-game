@@ -14,6 +14,8 @@ export type ClientMessage =
   | { t: 'pref'; value: Preference | null }
   | { t: 'start' } // 房主；至少 3 人
   | { t: 'act'; id: string; ev: Action } // id：手機產生的唯一代號，重送不會重複執行
+  /** 對進行中的表決投票：id＝表決代號。 */
+  | { t: 'vote'; id: string; choice: VoteChoice }
   | { t: 'thank'; to: string | null }
   | { t: 'next' } // 房主：再來一局（新的故事卡）
   /** 房主：把這局登記上排行榜（每局一次、練習房不行）。 */
@@ -29,9 +31,11 @@ export type Action =
   | { type: 'lock' }
   | { type: 'repairPick'; option: string }
   | { type: 'useEliminate' }
-  | { type: 'use'; use: UseId } // 補好船後：吃飯／拋錨／捆船底（全隊只來得及一件）
-  | { type: 'undoUse' } // 按下後 3 秒內本人取消
+  | { type: 'use'; use: UseId } // 補好船後：吃飯／拋錨／捆船底（全隊只來得及一件，吃飯也算）
   | { type: 'depart' };
+
+/** 表決（DECISIONS 18）：決定好了、三種用掉、衝向海灘要其他在線隊員都同意。yes＝同意；wait／info＝不同意（等一下／我有情報）。 */
+export type VoteChoice = 'yes' | 'wait' | 'info';
 
 /** 伺服器 → 手機 */
 export type ServerMessage =
@@ -121,7 +125,7 @@ export interface View {
     advice: string[]; // 原因＋下一步（依看的人換成「你」或隊友暱稱）
     locked: boolean;
     /** 天亮前用掉的那一件（所有手機播動畫）；at 為伺服器時間。 */
-    used: null | { id: UseId; item: ItemId; at: number; by: string; mine: boolean; undoUntil: number };
+    used: null | { id: UseId; item: ItemId; at: number; by: string; mine: boolean };
     dawnAt: number | null; // 伺服器時間：幾點起可以衝向海灘
     lastRejection: null | { at: number; action: Action['type']; reasons: string[] };
   };
@@ -142,9 +146,13 @@ export interface View {
     submit: boolean;
     /** 我今晚能做的用掉（只有今晚真的做得到、且輪到我的才有）；ready＝那樣東西還在船上。 */
     uses: { id: UseId; label: string; icon: string; ref: string; need: NeedId; item: ItemId; ready: boolean }[];
-    /** 我剛用掉，3 秒內可以取消。 */
-    undo: boolean;
+    /** 我負責、而且已經 2 次沒通過的動作：再按就強制執行（不用表決）。值：'lock'、'depart'、'use:吃飯'… */
+    force: string[];
   };
+  /** 進行中的表決（所有參與者都看得到；不是提案的人才有同意／不同意按鈕）。deadline＝伺服器時間，過了沒回應的算同意。 */
+  vote: null | { id: string; label: string; by: string; mine: boolean; deadline: number; total: number; agreed: number; myVote: VoteChoice | null; canVote: boolean; attempt: number };
+  /** 最近一次表決的結果（沒通過／強制執行／取消），顯示幾秒。不點名誰不同意。 */
+  voteResult: null | { label: string; by: string; outcome: 'rejected' | 'forced' | 'cancelled'; wait: number; info: number; at: number; tries: number };
   /** 我手上的見聞（每局不同）。tag＝「遊戲設定」：遊戲自創的細節，不附章節（DECISIONS 15）。 */
   tonight: { dial: DialId; value: string; title: string; text: string; ref: string | null; verse: string | null; tag: string | null; item: ItemId | null; use: UseId | null }[];
   clues: { title: string; text: string; role: string; when: 'start' | 'power'; item?: ItemId; need?: NeedId; breakthrough?: number; shared?: boolean }[];
@@ -169,7 +177,10 @@ export interface View {
   };
   result: null | {
     stars: 0 | 1 | 2 | 3;
+    /** 這局有沒有平安上岸（DECISIONS 18：0–1 件或時間到還沒出發＝沒有；經文裡 276 人都上了岸，saved 那行寫明）。 */
+    safe: boolean;
     title: string;
+    saved: { text: string; ref: string };
     lit: Record<NeedId, boolean>;
     cause: 'depart' | 'time_up' | 'ended';
     moments: MomentView[];

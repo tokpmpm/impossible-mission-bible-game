@@ -66,7 +66,8 @@ export function effective(seed: SeedDef, world: World): Effective {
   const removed = new Set<ItemId>();
   const done = new Set<NeedId>();
   const pinned = new Set<ItemId>();
-  const eatOnly = new Set<NeedId>();
+  // 力氣只能靠吃飯：危機後才算（危機前還不能吃，留著今晚的食物＝準備好了）。與 tools/verify_seeds.py 相同
+  const eatOnly = new Set<NeedId>(world.crisis ? seed.eatOnly : []);
   for (const id of cards) {
     const c = CARDS[id];
     for (const i of c.remove ?? []) removed.add(i);
