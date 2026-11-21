@@ -1082,6 +1082,50 @@ function renderStatus() {
   el.textContent = ui.status === 'connecting' ? '連線中…' : '連線中斷，正在重新連線…';
 }
 
+
+// ───────── 輕量 DOM 差異更新：只改有變的節點，其餘（含進行中的動畫、捲動、焦點）原封不動 ─────────
+function morphAttrs(a, b) {
+  for (const { name, value } of Array.from(b.attributes)) {
+    if (name === 'class' && a.classList.contains('flash') && !b.classList.contains('flash')) {
+      // 'flash' 是 render 之後才由程式加上的，保留才不會重播
+      const keep = value ? `${value} flash` : 'flash';
+      if (a.getAttribute('class') !== keep) a.setAttribute('class', keep);
+    } else if (a.getAttribute(name) !== value) a.setAttribute(name, value);
+  }
+  for (const { name } of Array.from(a.attributes)) if (!b.hasAttribute(name)) a.removeAttribute(name);
+}
+function morphChildren(a, b) {
+  const ac = Array.from(a.childNodes);
+  const bc = Array.from(b.childNodes);
+  for (let i = 0; i < bc.length; i++) {
+    const x = ac[i];
+    const y = bc[i];
+    if (!x) a.appendChild(y);
+    else if (x.nodeType !== y.nodeType || x.nodeName !== y.nodeName || x.getAttribute?.('data-key') !== y.getAttribute?.('data-key')) a.replaceChild(y, x);
+    else if (y.nodeType !== 1) {
+      if (x.nodeValue !== y.nodeValue) x.nodeValue = y.nodeValue;
+    } else if (x.nodeName.toLowerCase() === 'svg' || x.namespaceURI !== 'http://www.w3.org/1999/xhtml') {
+      if (x.outerHTML !== y.outerHTML) a.replaceChild(y, x);
+    } else {
+      morphAttrs(x, y);
+      if (x === document.activeElement && (x.tagName === 'INPUT' || x.tagName === 'TEXTAREA')) continue; // 正在輸入的欄位不動
+      if (x.tagName === 'INPUT' || x.tagName === 'TEXTAREA' || x.tagName === 'SELECT') {
+        if (x.value !== y.value && y.hasAttribute('value')) x.value = y.getAttribute('value');
+        if (x.tagName === 'INPUT' && x.checked !== y.hasAttribute('checked')) x.checked = y.hasAttribute('checked');
+      }
+      morphChildren(x, y);
+    }
+  }
+  while (a.childNodes.length > bc.length) a.removeChild(a.lastChild);
+}
+function setHtml(el, html) {
+  if (el.__html === html) return;
+  el.__html = html;
+  const t = document.createElement(el.tagName);
+  t.innerHTML = html;
+  morphChildren(el, t);
+}
+
 function render() {
   const v = ui.view;
   const active = document.activeElement;
@@ -1130,7 +1174,7 @@ function render() {
     hudEl.innerHTML = hud;
     lastHud = hudKey;
   }
-  bodyEl.innerHTML = html;
+  setHtml(bodyEl, html);
   const ovlKey = overlayKey(v);
   const ovl = ovlKey && ovlKey !== lastOvl ? overlayHtml(v) : null;
   if (ovlKey !== lastOvl) {

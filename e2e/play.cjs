@@ -8,6 +8,23 @@ require('fs').mkdirSync(require('path').dirname(OUT + 'x'), { recursive: true })
 const BASE = process.env.BASE_URL || 'http://localhost:' + (process.env.PORT || 3100);
 const N = Number(process.env.N || 3);
 const W = Number(process.env.W || 390);
+// 閃爍量測：#body 被整批換掉幾次、進場動畫（同一內容）重播幾次。結果印在最後一行。
+const FLICKER_PROBE = () => {
+  const st = (window.__flicker = { bodyReplace: 0, anim: 0, repeat: 0, seen: {} });
+  document.addEventListener('animationstart', (e) => {
+    const path = [];
+    for (let n = e.target; n && n.nodeType === 1 && n.id !== 'body' && n.id !== 'hud' && n.id !== 'ovl'; n = n.parentNode) path.push(n.nodeName + ':' + Array.prototype.indexOf.call(n.parentNode.children, n));
+    const key = e.animationName + '|' + (e.target.closest && e.target.closest('#hud') ? 'hud' : e.target.closest('#ovl') ? 'ovl' : 'body') + '|' + path.join('/');
+    st.anim++;
+    st.names = st.names || {};
+    st.names[e.animationName] = (st.names[e.animationName] || 0) + 1;
+    if (st.seen[key]) st.repeat++;
+    st.seen[key] = (st.seen[key] || 0) + 1;
+  }, true);
+  new MutationObserver((ms) => {
+    for (const m of ms) if (m.target.id === 'body' && m.addedNodes.length) st.bodyReplace++;
+  }).observe(document, { childList: true, subtree: true });
+};
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 (async () => {
   const proxy = process.env.BASE_URL && process.env.HTTPS_PROXY ? { server: process.env.HTTPS_PROXY } : undefined;
@@ -17,6 +34,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   for (let i = 0; i < N; i++) {
     const ctx = await browser.newContext({ viewport: { width: W, height: 844 }, deviceScaleFactor: Number(process.env.DSF || 1), ignoreHTTPSErrors: !!proxy });
     const p = await ctx.newPage();
+    await p.addInitScript(FLICKER_PROBE);
     p.on('pageerror', (e) => errs.push(`p${i}: ${e.message}`));
     p.on('console', (m) => { if (m.type() === 'error') errs.push(`p${i} console: ${m.text()}`); });
     pages.push(p);
@@ -387,6 +405,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     });
     ws.on('error', (e) => { errs.push('練習房 ws：' + e.message); clearTimeout(timer); resolve(); });
   });
+  const fl = { bodyReplace: 0, anim: 0, repeat: 0 };
+  for (const p of pages) { const f = await p.evaluate(() => window.__flicker).catch(() => null); if (f) for (const k of Object.keys(fl)) fl[k] += f[k]; }
+  if (process.env.FLICKER_DETAIL) { const names = {}; for (const p of pages) { const f = await p.evaluate(() => window.__flicker.names).catch(() => null); for (const [k, v] of Object.entries(f || {})) names[k] = (names[k] || 0) + v; } console.log('動畫分布', JSON.stringify(names)); }
+  console.log(`閃爍量測（${N} 支手機合計）：body 整批替換 ${fl.bodyReplace} 次、進場動畫 ${fl.anim} 次、其中重複播放 ${fl.repeat} 次`);
   await browser.close();
   if (errs.length) {
     console.error('失敗：', errs);
