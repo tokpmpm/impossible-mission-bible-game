@@ -15,7 +15,8 @@ import {
   CRISIS_AT,
   HINT_AT,
   SWEEP_WARNING_MS,
-  UNDO_USE_MS,
+  SAFE_MIN_STARS,
+  isSafe,
   LOCK_OPENS_AT,
   TIME_UP_AT,
   type GameEvent,
@@ -203,36 +204,55 @@ test('今晚靠器具的繩子：捆船底用掉器具，船身顧好；纜索�
   assert.deepEqual(evaluate(s).served, ['船身', '天亮']);
 });
 
-test('水淺可以拋錨（錨離船、天亮顧好）；水深、吃不下時那個用掉不能做', () => {
+test('水淺可以拋錨（錨離船、天亮顧好）；水深不能拋；吃飯每局都能做（沒有「吃不下」）', () => {
   let s = afterCrisis({ tonight: { 水: '淺' } }, ['糧食', '纜索', '錨']);
   assert.deepEqual(usesNow(s), ['吃飯', '捆船底', '拋錨']);
   s = apply(s, { type: 'use', at: s.now + 1000, use: '拋錨' });
   assert.deepEqual(s.plan.items, ['糧食', '纜索']);
-  assert.equal(evaluate(s).stars, 3);
+  // 拋了錨就不能吃飯：糧食留著不算力氣，只剩二星
+  assert.deepEqual(evaluate(s).served, ['船身', '天亮']);
   let deep = afterCrisis({}, ['糧食', '纜索', '錨']);
+  assert.deepEqual(usesTonight(deep), ['吃飯', '捆船底']);
   deep = apply(deep, { type: 'use', at: deep.now + 1000, use: '拋錨' });
   assert.deepEqual(deep.lastRejection?.reasons, ['CANNOT_TONIGHT']);
-  let full = afterCrisis({ tonight: { 胃: '吃不下' } }, ['糧食', '纜索', '錨']);
-  assert.deepEqual(usesTonight(full), ['捆船底']);
-  full = apply(full, { type: 'use', at: full.now + 1000, use: '吃飯' });
-  assert.deepEqual(full.lastRejection?.reasons, ['CANNOT_TONIGHT']);
 });
 
-test('天亮前只來得及做一件；東西不在船上不能用掉；3 秒內可以取消，過了就不行', () => {
+test('力氣只能靠吃飯（DECISIONS 18）：糧食留在船上不算力氣，吃了才算', () => {
+  let s = afterCrisis({}, ['糧食', '纜索', '錨']);
+  assert.deepEqual(evaluate(keep(s, ['糧食', '纜索'])).served, ['船身']);
+  s = apply(s, { type: 'use', at: s.now + 1000, use: '吃飯' });
+  assert.equal(s.used?.item, '糧食');
+  assert.deepEqual(evaluate(s).served, ['力氣', '船身', '天亮']);
+});
+
+test('天亮前只來得及做一件（吃飯也算）；東西不在船上不能用掉；沒有取消', () => {
   let s = afterCrisis({ tonight: { 水: '淺' } }, ['糧食', '纜索', '錨']);
   s = keep(s, ['纜索', '錨']);
   s = apply(s, { type: 'use', at: s.now + 1000, use: '吃飯' });
   assert.deepEqual(s.lastRejection?.reasons, ['NO_ITEM']);
-  s = apply(s, { type: 'use', at: s.now + 1000, use: '拋錨' });
-  s = apply(s, { type: 'use', at: s.now + 500, use: '捆船底' });
+  s = keep(s, ['糧食', '纜索', '錨']);
+  s = apply(s, { type: 'use', at: s.now + 1000, use: '吃飯' });
+  s = apply(s, { type: 'use', at: s.now + 500, use: '拋錨' });
   assert.deepEqual(s.lastRejection?.reasons, ['ALREADY_USED']);
-  s = apply(s, { type: 'undoUse', at: s.used!.at + UNDO_USE_MS });
-  assert.equal(s.used, null);
-  assert.deepEqual(s.plan.items, ['纜索', '錨']);
-  s = apply(s, { type: 'use', at: s.now + 100, use: '捆船底' });
-  s = apply(s, { type: 'undoUse', at: s.used!.at + UNDO_USE_MS + 1 });
-  assert.deepEqual(s.lastRejection?.reasons, ['UNDO_EXPIRED']);
-  assert.equal(s.used?.use, '捆船底');
+  assert.equal(s.used?.use, '吃飯');
+});
+
+test('顧好 0–1 件＝沒能平安上岸；2 件以上平安；時間到還沒出發也算沒能平安上岸', () => {
+  assert.equal(SAFE_MIN_STARS, 2);
+  let one = keep(afterCrisis(), ['纜索']);
+  one = apply(one, { type: 'depart', at: one.now + 1000 });
+  assert.equal(one.result!.stars, 1);
+  assert.equal(one.result!.safe, false);
+  assert.equal(isSafe(one), false);
+  let two = keep(afterCrisis(), ['纜索', '錨']);
+  two = apply(two, { type: 'depart', at: two.now + 1000 });
+  assert.equal(two.result!.safe, true);
+  assert.equal(isSafe(two), true);
+  let late = apply(newGame({ sweep: false }), { type: 'tick', at: CRISIS_AT });
+  late = apply(late, { type: 'tick', at: TIME_UP_AT });
+  assert.equal(late.phase, 'ended');
+  assert.equal(isSafe(late), false);
+  assert.equal(isSafe(newGame()), null);
 });
 
 test('黑暗中不能用掉、不能衝向海灘；結算只一次', () => {
@@ -248,16 +268,17 @@ test('黑暗中不能用掉、不能衝向海灘；結算只一次', () => {
   assert.equal(again.result!.stars, 1);
 });
 
-test('零件也能衝向海灘（大家照樣上岸）', () => {
+test('零件也能衝向海灘（但這局沒能平安上岸）', () => {
   let s = keep(afterCrisis(), []);
   s = apply(s, { type: 'depart', at: s.now + 1000 });
   assert.equal(s.phase, 'settled');
   assert.equal(s.result!.stars, 0);
+  assert.equal(s.result!.safe, false);
 });
 
-test('故事卡和見聞不能同局時拒絕開局（A4 只配繩＝纜索、B5 不配吃不下）', () => {
+test('故事卡和見聞不能同局時拒絕開局（A4 只配繩＝纜索、B3 不配今晚靠麥子）', () => {
   assert.throws(() => newGame({ a: 'A4', tonight: { 繩: '器具' } }));
-  assert.throws(() => newGame({ b: 'B5', tonight: { 胃: '吃不下' } }));
+  assert.throws(() => newGame({ b: 'B3', tonight: { 食: '麥子' } }));
 });
 
 test('故事卡 A1：危機前麥子丟不掉；風暴變大後就能丟', () => {
@@ -287,7 +308,7 @@ test('故事卡 A5：補船多 10 秒', () => {
   assert.equal(helped.repair!.limitMs - plain.repair!.limitMs, 10_000);
 });
 
-test('風暴卡 B1／B2：補好船時器具、小船自動離船，麥子變輕；B3 糧食變重（3→5）', () => {
+test('風暴卡 B1／B2／B3：補好船時器具、小船、麥子自動離船，B1 麥子變輕', () => {
   const b1 = afterCrisis({ b: 'B1' });
   assert.ok(!b1.plan.items.includes('器具'));
   assert.ok(b1.log.some((l) => l.kind === 'card' && (l.data!.gone as string[]).includes('器具')));
@@ -295,13 +316,14 @@ test('風暴卡 B1／B2：補好船時器具、小船自動離船，麥子變輕
   const b2 = afterCrisis({ b: 'B2' });
   assert.ok(!b2.plan.items.includes('小船'));
   const b3 = afterCrisis({ b: 'B3' });
-  assert.equal(evaluate(keep(b3, ['糧食'])).weight, 5);
+  assert.ok(!b3.plan.items.includes('麥子'));
+  assert.equal(evaluate(keep(b3, ['糧食'])).weight, 3);
   // 黑暗中還沒翻開風暴卡
   const dark = apply(newGame({ b: 'B2' }), { type: 'tick', at: CRISIS_AT });
   assert.ok(dark.plan.items.includes('小船') || dark.swept.includes('小船'));
 });
 
-test('風暴卡 B5：錨已拋下（等天亮顧好、錨離船、不能再拋）；留著糧食不算力氣，要真的吃', () => {
+test('風暴卡 B5：錨已拋下（等天亮顧好、錨離船、不能再拋）；力氣一樣要真的吃', () => {
   let s = afterCrisis({ b: 'B5', tonight: { 水: '淺' } });
   assert.ok(!s.plan.items.includes('錨'));
   assert.ok(!usesTonight(s).includes('拋錨'));

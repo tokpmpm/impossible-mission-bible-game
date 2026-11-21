@@ -62,8 +62,9 @@ class Phone {
 
 // introMs 預設 0：大部分測試要馬上鎖定；「前 60 秒不能鎖定」另外測
 // sweepWarningMs：捲走前提醒縮成 300 毫秒（正式 10 秒），測試不用真的等
-async function setup(n: number, introMs = 0) {
-  const srv = await startServer({ port: 0, publicUrl: 'http://test.local', tickMs: 20, introMs, sweepWarningMs: 300 });
+// voteMs：表決「沒回應算同意」縮成 60 毫秒（正式 10 秒）；表決本身另外測（voteMs 加長）
+async function setup(n: number, introMs = 0, voteMs = 60) {
+  const srv = await startServer({ port: 0, publicUrl: 'http://test.local', tickMs: 20, introMs, sweepWarningMs: 300, voteMs });
   const url = `ws://localhost:${srv.port}/ws`;
   const host = await new Phone(url).open();
   host.send({ t: 'create', nickname: '房主' });
@@ -107,10 +108,10 @@ async function keepOnly(sup: Phone, items: string[]): Promise<void> {
   await sup.until((v) => v.ship!.items.filter((x) => x.onShip).map((x) => x.id).join() === ALL.filter((i) => items.includes(i) && sup.view!.ship!.items.find((x) => x.id === i && !x.gone)).join());
 }
 
-const WHEAT_SHALLOW: Tonight = { 食: '麥子', 繩: '纜索', 水: '淺', 胃: '吃得下' };
+const WHEAT_SHALLOW: Tonight = { 食: '麥子', 繩: '纜索', 水: '淺' };
 
 for (const n of [3, 6, 10]) {
-  test(`${n} 人：首局經典配置（不捲走）吃飯三星 → 第二局換見聞、風暴捲走、拋錨可取消、吃麥子三星`, async () => {
+  test(`${n} 人：首局經典配置（不捲走）吃飯三星 → 第二局換見聞、風暴捲走、吃麥子三星（表決沒回應算同意）`, async () => {
     const { srv, phones, host } = await setup(n);
     try {
       phones[1].send({ t: 'pref', value: 'coat' });
@@ -125,9 +126,9 @@ for (const n of [3, 6, 10]) {
         assert.equal(p.view!.ship!.provides, null, '危機前不公開今晚靠哪一樣');
         assert.equal(p.view!.ship!.sweep, false, '首局不捲走');
       }
-      // 見聞：四張各在一支手機（3 人局每人至少一張）；首局是經典配置
+      // 見聞：三張各在一支手機（3 人局每人至少一張）；首局是經典配置
       const dials = phones.flatMap((p) => p.view!.tonight.map((t) => t.dial));
-      assert.deepEqual([...dials].sort(), ['水', '胃', '繩', '食'].sort());
+      assert.deepEqual([...dials].sort(), ['水', '繩', '食'].sort());
       if (n === 3) for (const p of phones) assert.ok(p.view!.tonight.length >= 1, '3 人局每人至少一張見聞');
       const food = who(phones, (v) => v.tonight.some((t) => t.dial === '食')).view!.tonight.find((t) => t.dial === '食')!;
       assert.equal(food.item, '糧食');
@@ -168,7 +169,9 @@ for (const n of [3, 6, 10]) {
       await Promise.all(phones.map((p) => p.until((x) => x.phase === 'settled')));
       let res = host.view!.result!;
       assert.equal(res.stars, 3);
-      assert.equal(res.title, '上岸很順利！');
+      assert.equal(res.safe, true);
+      assert.equal(res.title, '全船平安上岸・一路準備周全');
+      assert.match(res.saved.text, /276 人，全都得救上了岸/);
       assert.ok(res.moments.some((m) => m.text.includes('召集大家吃了糧食')));
       assert.ok(res.moments.some((m) => m.text.includes('外衣')));
       assert.match(res.tonightLine, /力氣靠糧食/);
@@ -199,15 +202,9 @@ for (const n of [3, 6, 10]) {
       sup2.act({ type: 'setItem', item: '糧食', on: true });
       await sup2.until(() => sup2.rejections.length > before);
       assert.match(sup2.rejections.at(-1)!.reasons[0].text, /捲走/);
-      // 拋錨：按下 3 秒內本人可以取消；別人不能取消
-      const anchor = who(phones, (x) => x.can.uses.some((u) => u.id === '拋錨'));
-      anchor.act({ type: 'use', use: '拋錨' });
-      await anchor.until((x) => x.can.undo);
-      const other = phones.find((p) => p !== anchor)!;
-      other.act({ type: 'undoUse' });
-      await other.until(() => other.errors.length > 0);
-      anchor.act({ type: 'undoUse' });
-      await Promise.all(phones.map((p) => p.until((x) => x.ship!.used === null && x.ship!.items.find((i) => i.id === '錨')!.onShip)));
+      // 水淺：拋錨按鈕在測水深／瞭望手上；但要三星就得吃飯（力氣只能靠吃，天亮前只來得及一件）
+      assert.ok(phones.some((p) => p.view!.can.uses.some((u) => u.id === '拋錨')));
+      assert.deepEqual(host.view!.ship!.needs!.filter((x) => x.lit).map((x) => x.id), ['船身', '天亮'], '麥子留著也不算力氣');
       const cook2 = who(phones, (x) => x.can.uses.some((u) => u.id === '吃飯'));
       cook2.act({ type: 'use', use: '吃飯' });
       await host.until((x) => x.ship!.used?.item === '麥子');
@@ -225,10 +222,10 @@ for (const n of [3, 6, 10]) {
   });
 }
 
-test('故事卡 A1＋B5：危機前麥子丟不掉；補好船後錨已拋下、留著糧食不算力氣', async () => {
+test('故事卡 A1＋B5：危機前麥子丟不掉；補好船後錨已拋下、留著麥子不算力氣（二星仍平安上岸）', async () => {
   const { srv, phones, host } = await setup(4);
   try {
-    roomOf(srv, host.code).forceCards = { a: 'A1', b: 'B5', tonight: { 食: '麥子', 繩: '纜索', 水: '深', 胃: '吃得下' } };
+    roomOf(srv, host.code).forceCards = { a: 'A1', b: 'B5', tonight: { 食: '麥子', 繩: '纜索', 水: '深' } };
     host.send({ t: 'start' });
     await Promise.all(phones.map((p) => p.until((v) => v.phase === 'planning')));
     const sup = who(phones, (v) => v.can.items);
@@ -246,6 +243,8 @@ test('故事卡 A1＋B5：危機前麥子丟不掉；補好船後錨已拋下、
     cap.act({ type: 'depart' });
     await Promise.all(phones.map((p) => p.until((v) => v.phase === 'settled')));
     assert.equal(host.view!.result!.stars, 2);
+    assert.equal(host.view!.result!.safe, true);
+    assert.equal(host.view!.result!.title, '全船平安上岸・準備了大半');
   } finally {
     phones.forEach((p) => p.close());
     await srv.close();
@@ -374,10 +373,10 @@ test('F02／F03：3–10 每種人數，每人都有職能與開局線索；有�
         // 6 人以下不出現玩家沒聽過的拆分職能名稱
         if (n <= 6) for (const c of p.view!.clues) assert.ok(!/測水深|船主|水手長|舵手/.test(c.role), `${n} 人出現 ${c.role}`);
       }
-      // 四張見聞各在一支手機，至少分在兩個人；線索裡的 {繩} 等已換成職能名稱
-      const dialHolders = (['食', '繩', '水', '胃'] as const).map((d) => phones.filter((p) => p.view!.tonight.some((t) => t.dial === d)));
+      // 三張見聞各在一支手機，至少分在兩個人；線索裡的 {繩} 等已換成職能名稱
+      const dialHolders = (['食', '繩', '水'] as const).map((d) => phones.filter((p) => p.view!.tonight.some((t) => t.dial === d)));
       for (const hs of dialHolders) assert.equal(hs.length, 1, `${n} 人：每張見聞恰一人`);
-      assert.ok(new Set(dialHolders.map((h) => h[0])).size >= (n >= 4 ? 3 : 2), `${n} 人：見聞分散`);
+      assert.ok(new Set(dialHolders.map((h) => h[0])).size >= (n >= 5 ? 3 : 2), `${n} 人：見聞分散`);
       for (const p of phones) for (const c of p.view!.clues) assert.ok(!/\{/.test(c.text), c.text);
       // 每人至少有一條會影響決定的線索、見聞，或有操作
       for (const p of phones) {
@@ -516,7 +515,7 @@ test('抽卡與見聞：首局都是經典配置、不捲走；第二局起都�
       } else {
         assert.equal(g.sweep, true);
         later++;
-        if (g.tonight.食 === '麥子' || g.tonight.繩 !== '纜索' || g.tonight.胃 === '吃不下' || g.tonight.水 === '深') invented++;
+        if (g.tonight.食 === '麥子' || g.tonight.繩 !== '纜索' || g.tonight.水 === '深') invented++;
         if (prev && JSON.stringify(prev) !== JSON.stringify(g.tonight)) changed++;
       }
       prev = g.tonight;
@@ -549,6 +548,147 @@ test('風暴卡要帶走的東西早就丟了：卡面照實說沒有影響', as
     who(phones, (v) => v.can.lock).act({ type: 'lock' });
     await repair(phones);
     assert.match(host.view!.cards.b!.effect, /早就丟進海裡/);
+  } finally {
+    phones.forEach((p) => p.close());
+    await srv.close();
+  }
+});
+
+
+// ---------- 表決（DECISIONS 18）：決定好了、三種用掉、衝向海灘要其他在線隊員都同意；2 次沒通過可強制；10 秒沒回應算同意 ----------
+
+test('表決：其他人跳出同意／不同意；全部同意才執行；不點名誰不同意', async () => {
+  const { srv, phones, host } = await setup(4, 0, 5_000);
+  try {
+    roomOf(srv, host.code).forceCards = { a: 'A5', b: 'B4' };
+    host.send({ t: 'start' });
+    await Promise.all(phones.map((p) => p.until((v) => v.phase === 'planning')));
+    const sup = who(phones, (v) => v.can.items);
+    const cap = who(phones, (v) => v.can.lock);
+    await keepOnly(sup, ['糧食', '纜索', '錨']);
+    cap.act({ type: 'lock' });
+    await Promise.all(phones.map((p) => p.until((v) => !!v.vote)));
+    assert.equal(cap.view!.vote!.mine, true);
+    assert.equal(cap.view!.vote!.canVote, false, '提案的人不用投');
+    assert.equal(cap.view!.vote!.label, '決定好了');
+    assert.equal(cap.view!.vote!.total, 3);
+    const voters = phones.filter((p) => p !== cap);
+    for (const p of voters) assert.equal(p.view!.vote!.canVote, true);
+    // 表決中再按一次：被擋
+    cap.act({ type: 'lock' });
+    await cap.until(() => cap.rejections.length > 0);
+    assert.match(cap.rejections.at(-1)!.reasons[0].text, /正在表決/);
+    // 重複投票會被忽略
+    voters[0].send({ t: 'vote', id: cap.view!.vote!.id, choice: 'yes' });
+    voters[0].send({ t: 'vote', id: cap.view!.vote!.id, choice: 'wait' });
+    await cap.until((v) => v.vote?.agreed === 1);
+    voters[1].send({ t: 'vote', id: cap.view!.vote!.id, choice: 'yes' });
+    await cap.until((v) => v.vote?.agreed === 2);
+    assert.equal(cap.view!.phase, 'planning', '還有一人沒投，不會執行');
+    voters[2].send({ t: 'vote', id: cap.view!.vote!.id, choice: 'yes' });
+    await Promise.all(phones.map((p) => p.until((v) => v.phase === 'blackout')));
+    assert.equal(host.view!.vote, null);
+  } finally {
+    phones.forEach((p) => p.close());
+    await srv.close();
+  }
+});
+
+test('表決：有人不同意就沒通過；同一個動作 2 次沒通過，負責人再按就強制執行（不用表決）', async () => {
+  const { srv, phones, host } = await setup(3, 0, 5_000);
+  try {
+    roomOf(srv, host.code).forceCards = { a: 'A5', b: 'B4' };
+    host.send({ t: 'start' });
+    await Promise.all(phones.map((p) => p.until((v) => v.phase === 'planning')));
+    const sup = who(phones, (v) => v.can.items);
+    const cap = who(phones, (v) => v.can.lock);
+    await keepOnly(sup, ['糧食', '纜索', '錨']);
+    const other = phones.find((p) => p !== cap)!;
+    for (const [i, choice] of (['wait', 'info'] as const).entries()) {
+      cap.act({ type: 'lock' });
+      await other.until((v) => !!v.vote?.canVote);
+      assert.equal(other.view!.vote!.attempt, i + 1);
+      other.send({ t: 'vote', id: other.view!.vote!.id, choice });
+      await Promise.all(phones.map((p) => p.until((v) => !v.vote && v.voteResult?.outcome === 'rejected' && v.voteResult.tries === i + 1)));
+      const r = host.view!.voteResult!;
+      assert.equal(r.wait + r.info, 1);
+      assert.ok(!JSON.stringify(r).includes(other.view!.me.nickname), '不點名誰不同意');
+    }
+    assert.equal(cap.view!.phase, 'planning');
+    assert.deepEqual(cap.view!.can.force, ['lock']);
+    assert.deepEqual(other.view!.can.force, [], '強制只出現在負責人手上');
+    cap.act({ type: 'lock' });
+    await Promise.all(phones.map((p) => p.until((v) => v.phase === 'blackout')));
+    assert.equal(host.view!.vote, null);
+    await repair(phones);
+    // 結尾回顧寫出強制的人與沒通過的次數
+    const cook = who(phones, (v) => v.can.uses.some((u) => u.id === '吃飯'));
+    cook.act({ type: 'use', use: '吃飯' });
+    const voters = phones.filter((p) => p !== cook);
+    await Promise.all(voters.map((p) => p.until((v) => !!v.vote?.canVote)));
+    for (const p of voters) p.send({ t: 'vote', id: p.view!.vote!.id, choice: 'yes' });
+    await host.until((v) => !!v.ship!.used);
+    await keepOnly(sup, ['纜索', '錨']);
+    cap.act({ type: 'depart' });
+    const v2 = phones.filter((p) => p !== cap);
+    await Promise.all(v2.map((p) => p.until((v) => !!v.vote?.canVote)));
+    for (const p of v2) p.send({ t: 'vote', id: p.view!.vote!.id, choice: 'yes' });
+    await Promise.all(phones.map((p) => p.until((v) => v.phase === 'settled')));
+    const res = host.view!.result!;
+    assert.ok(res.moments.some((m) => m.text.includes('2 次沒通過後，強制「決定好了」')));
+    assert.ok(res.moments.some((m) => m.text.includes('有 2 次有人喊')));
+  } finally {
+    phones.forEach((p) => p.close());
+    await srv.close();
+  }
+});
+
+test('表決：沒回應的時間到算同意；離線的人不算進表決', async () => {
+  const { srv, phones, host } = await setup(4, 0, 400);
+  try {
+    roomOf(srv, host.code).forceCards = { a: 'A5', b: 'B4' };
+    host.send({ t: 'start' });
+    await Promise.all(phones.map((p) => p.until((v) => v.phase === 'planning')));
+    const sup = who(phones, (v) => v.can.items);
+    const cap = who(phones, (v) => v.can.lock);
+    await keepOnly(sup, ['糧食', '纜索', '錨']);
+    const quiet = phones.find((p) => p !== cap && p !== sup)!;
+    quiet.close();
+    await cap.until((v) => v.players.some((p) => !p.connected));
+    cap.act({ type: 'lock' });
+    await cap.until((v) => !!v.vote);
+    assert.equal(cap.view!.vote!.total, 2, '離線的人不算');
+    // 沒人投：400 毫秒後算同意
+    await cap.until((v) => v.phase === 'blackout', 3000);
+  } finally {
+    phones.forEach((p) => p.close());
+    await srv.close();
+  }
+});
+
+test('沒能平安上岸：顧好 1 件就衝向海灘 → 標題寫沒能平安上岸、經文那行仍寫 276 人都上了岸、任務分 0', async () => {
+  const { srv, phones, host } = await setup(3);
+  try {
+    roomOf(srv, host.code).forceCards = { a: 'A5', b: 'B4' };
+    host.send({ t: 'start' });
+    await Promise.all(phones.map((p) => p.until((v) => v.phase === 'planning')));
+    const sup = who(phones, (v) => v.can.items);
+    const cap = who(phones, (v) => v.can.lock);
+    await keepOnly(sup, ['纜索']);
+    cap.act({ type: 'lock' });
+    await repair(phones);
+    cap.act({ type: 'depart' });
+    await Promise.all(phones.map((p) => p.until((v) => v.phase === 'settled')));
+    const res = host.view!.result!;
+    assert.equal(res.stars, 1);
+    assert.equal(res.safe, false);
+    assert.equal(res.title, '這一局，你們沒能平安上岸');
+    assert.match(res.saved.text, /經文裡，船上 276 人全都上了岸/);
+    assert.ok(res.moments.some((m) => m.text.includes('沒能平安上岸')));
+    assert.ok(!res.moments.some((m) => /死|喪命|淹死/.test(m.text)), '不寫有人死亡');
+    const mission = res.score!.parts.find((x) => x.id === 'mission')!;
+    assert.equal(mission.points, 0);
+    assert.equal(mission.detail, '沒能平安上岸');
   } finally {
     phones.forEach((p) => p.close());
     await srv.close();

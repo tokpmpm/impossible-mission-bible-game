@@ -55,9 +55,9 @@ export interface Clue {
   onlyPresent?: boolean;
 }
 
-// 文字裡的 {食}{繩}{水}{胃} 會換成這局拿那張見聞的人的職能名稱（房間層處理）。
+// 文字裡的 {食}{繩}{水} 會換成這局拿那張見聞的人的職能名稱（房間層處理）。
 export const CLUES: Clue[] = [
-  { role: 'nav', when: 'start', title: '安全載重', text: '船最多只能留 8 重的東西，超過就會進水。' },
+  { role: 'nav', when: 'start', title: '安全載重', text: '船最多只能留 8 重的東西，超過了船吃水太深，不能開船。' },
   { role: 'liaison', when: 'start', title: '船主的話', item: '麥子', text: '船主要保住麥子：這船就是要把麥子運去意大利的（27:6、11）。' },
   { role: 'supply', when: 'start', title: '上岸三件事', text: '上岸要顧好：力氣、船身、等天亮。今晚各靠哪一樣東西，每次都不一樣，要問隊友。' },
   { role: 'store', when: 'start', title: '器具', item: '器具', text: '器具是開船用的帆具和繩具，很佔重量；裡面的繩具也捆得了船。' },
@@ -65,17 +65,17 @@ export const CLUES: Clue[] = [
   { role: 'backup', when: 'start', title: '小船', item: '小船', text: '小船是逃生用的，水手都很想留著；小船上的拉繩也是一條好繩子。' },
   { role: 'eng', when: 'start', title: '捆綁船底', need: '船身', text: '要用繩子捆綁船底，船身才撐得住（27:17）。今晚用哪一條繩子，問{繩}。' },
   { role: 'eng', when: 'start', untilPower: true, title: '黑暗中', text: '天黑時看不見，要靠隊友形容記號，你來選。' },
-  { role: 'medic', when: 'start', title: '力氣', need: '力氣', text: '人要吃東西才有力氣，上岸時才游得動。今晚吃哪一樣，問{食}。' },
+  { role: 'medic', when: 'start', title: '力氣', need: '力氣', text: '人要真的吃下去才有力氣，上岸時才游得動；食物留在船上不吃，不會變成力氣。今晚吃哪一樣，問{食}。' },
   { role: 'observer', when: 'start', title: '風浪', text: '風浪會越來越大，之後船能留的東西會更少（8 → 5）。' },
   { role: 'scout', when: 'start', title: '錨', item: '錨', need: '天亮', text: '快靠岸時要從船尾拋錨，才不會撞上石頭，等到天亮（27:29）。' },
   { role: 'backup', when: 'start', untilPower: true, onlyPresent: true, title: '補船小撇步', text: '每格選項都很像：先用排除線索刪掉不可能的，再請隊友形容。' },
-  { role: 'medic', when: 'power', breakthrough: 1, title: '十四天', need: '力氣', text: '大家已經十四天沒吃東西了（27:33）。吃了就有力氣——力氣不一定要把食物帶到上岸。' },
-  { role: 'supply', when: 'power', breakthrough: 2, title: '用掉就輕了', text: '吃進肚子的食物、拋下去的錨、捆在船底的繩子，都不再佔船的重量。可是天亮前只來得及做一件。' },
-  { role: 'comms', when: 'power', breakthrough: 3, title: '開飯', need: '力氣', text: '吃不吃得下，{胃}最清楚；能吃的話，召集大家吃飯的就是你（今晚的食物要還在船上）。' },
+  { role: 'medic', when: 'power', breakthrough: 1, title: '十四天', need: '力氣', text: '大家已經十四天沒吃東西了（27:33）。船上有食物也沒用，要真的吃了才有力氣。' },
+  { role: 'supply', when: 'power', breakthrough: 2, title: '用掉就輕了', text: '吃進肚子的食物、拋下去的錨、捆在船底的繩子，都不再佔船的重量。可是天亮前只來得及做一件；錨和繩子留在船上，靠岸前還來得及用。' },
+  { role: 'comms', when: 'power', breakthrough: 3, title: '開飯', need: '力氣', text: '召集大家吃飯的就是你（今晚的食物要還在船上）。按下去以前要大家都同意。' },
 ];
 
 /** 見聞：誰拿（不在場時照 SPLIT_FROM 回到原職能）。docs/12 3.2。 */
-export const TONIGHT_ROLE: Record<DialId, RoleId> = { 食: 'comms', 繩: 'store', 水: 'scout', 胃: 'medic' };
+export const TONIGHT_ROLE: Record<DialId, RoleId> = { 食: 'comms', 繩: 'store', 水: 'scout' };
 
 /**
  * 見聞的文字：「你看到的事」，只陳述、不說好壞。自創細節不附章節、標「遊戲設定」（DECISIONS 15）；有經文的才附章節。
@@ -93,11 +93,7 @@ export const TONIGHT_TEXT: { [D in DialId]: Record<Tonight[D], { title: string; 
   },
   水: {
     淺: { title: '水深', text: '水變淺了：現在就可以從船尾拋錨。', ref: '徒 27:28', verse: '稍往前行，又探深淺，探得有九丈。', item: '錨', use: '拋錨' },
-    深: { title: '水深', text: '還探不到底：錨現在拋不下去，要留到上岸前。', item: '錨' },
-  },
-  胃: {
-    吃得下: { title: '大家的胃', text: '大家還吃得下：現在就可以吃飯。', use: '吃飯' },
-    吃不下: { title: '大家的胃', text: '大家暈船暈得厲害，現在吃不下：食物要帶到上岸再吃。' },
+    深: { title: '水深', text: '還探不到底：錨先留著，等水變淺、快靠岸時再拋。', item: '錨' },
   },
 };
 
@@ -132,7 +128,7 @@ export const CARD_TEXT: Record<CardId, { title: string; ref: string; verse: stri
     title: '朋友的照應',
     ref: '徒 27:3',
     verse: '第二天，到了西頓；猶流寬待保羅，准他往朋友那裏去，受他們的照應。',
-    effect: '朋友準備了乾糧：糧食變輕（3→2）。',
+    effect: '朋友幫忙把乾糧烤乾、分成小包（遊戲設定）：糧食比較好搬（3→2）。',
     tone: 'good',
   },
   A4: {
@@ -164,11 +160,11 @@ export const CARD_TEXT: Record<CardId, { title: string; ref: string; verse: stri
     tone: 'mixed',
   },
   B3: {
-    title: '船上共有 276 人',
-    ref: '徒 27:37',
-    verse: '我們在船上的共有二百七十六個人。',
-    effect: '人多，口糧也多：糧食變重（3→5）。',
-    tone: 'bad',
+    title: '吃飽了，把麥子拋在海裡',
+    ref: '徒 27:37–38',
+    verse: '我們在船上的共有二百七十六個人。他們吃飽了，就把船上的麥子拋在海裏，為要叫船輕一點。',
+    effect: '麥子已經拋進海裡了（經文裡是大家吃飽以後才拋）。',
+    tone: 'mixed',
   },
   B4: {
     title: '保羅說：你們可以放心',
@@ -181,8 +177,8 @@ export const CARD_TEXT: Record<CardId, { title: string; ref: string; verse: stri
     title: '探深淺，拋錨盼天亮',
     ref: '徒 27:28–29',
     verse: '就探深淺，探得有十二丈；稍往前行，又探深淺，探得有九丈。恐怕撞在石頭上，就從船尾拋下四個錨，盼望天亮。',
-    effect: '錨已經從船尾拋下去了：等天亮顧好了，錨不在船上。天快亮了，大家卻已經餓了十四天（27:33）：留著食物不夠，要真的吃了才有力氣。',
-    tone: 'bad',
+    effect: '錨已經從船尾拋下去了：等天亮顧好了，錨不在船上。',
+    tone: 'good',
   },
 };
 
@@ -250,7 +246,7 @@ export const ASKS: Record<RoleId, Ask[]> = {
     { to: 'store', verb: '問', text: '今晚捆船用哪一條繩子？' },
     { to: 'supply', verb: '告訴', text: '船身要靠繩子捆綁船底' },
   ],
-  medic: [{ to: 'comms', verb: '告訴', text: '大家現在吃不吃得下' }],
+  medic: [{ to: 'comms', verb: '告訴', text: '食物要吃下去才有力氣，留著不算' }],
   observer: [{ to: 'supply', verb: '告訴', text: '錨顧的是等天亮；水有多深' }],
   scout: [{ to: 'supply', verb: '告訴', text: '錨要留；水有多深' }],
   liaison: [{ to: 'nav', verb: '告訴', text: '船主要保住麥子' }],

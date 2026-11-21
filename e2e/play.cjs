@@ -1,12 +1,30 @@
 const { chromium } = require('playwright');
 // 瀏覽器端對端：N 支模擬手機玩完兩局保羅海難。由 e2e/run.mjs 啟動（會先開伺服器）。
 // 檢查：按鈕只出現在負責的人手機上、丟東西、決定好了、黑暗補船、用掉一件、衝向海灘、三星、下一局換卡、無 JS 錯誤與橫向捲動。
+// 2026-11-20（DECISIONS 18）：決定好了／用掉／衝向海灘要其他人在對話框按同意；第一局先有人按「等一下」讓表決沒通過一次。
 // 第一局：經典配置（不捲走）。第二局：照各手機上的「見聞」決定帶什麼，風暴前丟的會被捲走（捲走前 10 秒提醒）。
 const OUT = (process.env.SHOTS || require('os').tmpdir() + '/im-shots') + '/' + (process.env.TAG || '');
 require('fs').mkdirSync(require('path').dirname(OUT + 'x'), { recursive: true });
 const BASE = process.env.BASE_URL || 'http://localhost:' + (process.env.PORT || 3100);
 const N = Number(process.env.N || 3);
 const W = Number(process.env.W || 390);
+// 閃爍量測：#body 被整批換掉幾次、進場動畫（同一內容）重播幾次。結果印在最後一行。
+const FLICKER_PROBE = () => {
+  const st = (window.__flicker = { bodyReplace: 0, anim: 0, repeat: 0, seen: {} });
+  document.addEventListener('animationstart', (e) => {
+    const path = [];
+    for (let n = e.target; n && n.nodeType === 1 && n.id !== 'body' && n.id !== 'hud' && n.id !== 'ovl'; n = n.parentNode) path.push(n.nodeName + ':' + Array.prototype.indexOf.call(n.parentNode.children, n));
+    const key = e.animationName + '|' + (e.target.closest && e.target.closest('#hud') ? 'hud' : e.target.closest('#ovl') ? 'ovl' : 'body') + '|' + path.join('/');
+    st.anim++;
+    st.names = st.names || {};
+    st.names[e.animationName] = (st.names[e.animationName] || 0) + 1;
+    if (st.seen[key]) st.repeat++;
+    st.seen[key] = (st.seen[key] || 0) + 1;
+  }, true);
+  new MutationObserver((ms) => {
+    for (const m of ms) if (m.target.id === 'body' && m.addedNodes.length) st.bodyReplace++;
+  }).observe(document, { childList: true, subtree: true });
+};
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 (async () => {
   const proxy = process.env.BASE_URL && process.env.HTTPS_PROXY ? { server: process.env.HTTPS_PROXY } : undefined;
@@ -16,6 +34,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   for (let i = 0; i < N; i++) {
     const ctx = await browser.newContext({ viewport: { width: W, height: 844 }, deviceScaleFactor: Number(process.env.DSF || 1), ignoreHTTPSErrors: !!proxy });
     const p = await ctx.newPage();
+    await p.addInitScript(FLICKER_PROBE);
     p.on('pageerror', (e) => errs.push(`p${i}: ${e.message}`));
     p.on('console', (m) => { if (m.type() === 'error') errs.push(`p${i} console: ${m.text()}`); });
     pages.push(p);
@@ -57,6 +76,26 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const findPage = async (sel) => {
     for (const p of pages) if (await p.$(sel + ':not([disabled])')) return p;
     return null;
+  };
+  // 表決：其他人都在對話框按「同意」（提案的人手機上不會有同意鍵）
+  const agreeAll = async (proposer, shotName) => {
+    for (const p of pages) if (p !== proposer) await p.waitForSelector('.vote-card.ask [data-choice=yes]', { timeout: 5000 });
+    if (await proposer.$('.vote-card.ask')) errs.push('提案的人手機上出現同意鍵');
+    if (shotName) {
+      await shot(pages.find((p) => p !== proposer), shotName + '-ask');
+      await shot(proposer, shotName + '-wait');
+    }
+    for (const p of pages) {
+      if (p === proposer) continue;
+      for (let t = 0; t < 4; t++) {
+        try {
+          await p.click('.vote-card.ask [data-choice=yes]', { timeout: 1500 });
+          break;
+        } catch {
+          if (!(await p.$('.vote-card.ask'))) break;
+        }
+      }
+    }
   };
   /** 只留下 keep 裡的東西（每次都重新找元素，畫面重畫後舊的元素會失效）。 */
   const setKeep = async (p, keep) => {
@@ -135,7 +174,19 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await shot(sup, '06-thrown');
   for (let i = 0; i < N; i++) await shot(pages[i], `07-plan-p${i}`);
   await cap.waitForSelector('.status-line[data-lock-open="1"]', { timeout: 75000 });
+  // 表決：有一個人按「等一下」→ 沒通過（所有手機看到結果、不點名）；再提一次，大家同意
   await cap.click('[data-action=lock]');
+  const objector = pages.find((p) => p !== cap);
+  await objector.waitForSelector('.vote-card.ask [data-choice=wait]', { timeout: 5000 });
+  await shot(objector, '07b-vote-ask');
+  await shot(cap, '07c-vote-wait');
+  await objector.click('.vote-card.ask [data-choice=wait]');
+  for (const p of pages) await p.waitForSelector('.banner.vote-res.no', { timeout: 5000 });
+  await shot(cap, '07d-vote-rejected');
+  const objName = await objector.evaluate(() => document.querySelector('.tb-nick')?.textContent || '');
+  if (objName && (await cap.textContent('.banner.vote-res.no')).includes(objName)) errs.push('表決結果點名了不同意的人');
+  await cap.click('[data-action=lock]');
+  await agreeAll(cap);
   await pages[0].waitForSelector('.blackout');
   await sleep(300);
   for (let i = 0; i < N; i++) await shot(pages[i], `08-blackout-p${i}`);
@@ -194,6 +245,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   if ((await countPages('.banner.sweep')) !== 0) errs.push('首局不該有風暴捲走');
   const cook = await findPage('[data-action=use][data-use="吃飯"]');
   await cook.click('[data-action=use][data-use="吃飯"]');
+  await agreeAll(cook, '12b-vote-meal');
   await pages[0].waitForSelector('.meal-ovl', { timeout: 3000 });
   await sleep(1200);
   await shot(pages[0], '13-meal');
@@ -206,13 +258,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   // 等天亮（B5）時可能要等一下
   await capPage.waitForSelector('.status-line.ok', { timeout: 30000 });
   await capPage.click('[data-action=depart]');
+  await agreeAll(capPage);
   await pages[0].waitForSelector('.landing-ovl', { timeout: 3000 });
   await sleep(2200);
   await shot(pages[0], '15a-landing');
   await pages[0].waitForSelector('.result-hero', { timeout: 8000 });
   await pages[0].waitForSelector('.landing-ovl', { state: 'detached', timeout: 6000 });
   const result = await pages[0].textContent('.result');
-  if (!result.includes('上岸很順利')) errs.push('第一局沒有三星：' + result.trim().slice(0, 60));
+  if (!result.includes('全船平安上岸・一路準備周全')) errs.push('第一局沒有三星：' + result.trim().slice(0, 60));
+  if (!result.includes('276 人，全都得救上了岸')) errs.push('結尾沒有寫 276 人都上了岸');
   if (!result.includes('外衣')) errs.push('結尾沒有點名背包裡的外衣');
   if (!/27:\d+/.test(result) || !result.includes('你知道嗎')) errs.push('結尾缺經文或小知識');
   const score1 = await checkScore('第一局分數');
@@ -233,7 +287,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const tonight = {};
   for (const p of pages) for (const el of await p.$$('.tn-card')) tonight[await el.getAttribute('data-dial')] = await el.getAttribute('data-value');
   for (let i = 0; i < N; i++) await shot(pages[i], `r2-04-tonight-p${i}`);
-  if (!tonight['食'] || !tonight['水'] || !tonight['胃']) errs.push('第二局見聞不齊：' + JSON.stringify(tonight));
+  if (!tonight['食'] || !tonight['水'] || tonight['胃']) errs.push('第二局見聞不對（應有食、水，沒有胃）：' + JSON.stringify(tonight));
   if ((await countPages('.banner.sweep.rule')) !== N) errs.push('第二局沒有提醒「風暴一來撈不回來」');
   const sup2 = await findPage('.tray');
   const pinned2 = !!(await sup2.$('.tray-item.pinned'));
@@ -243,6 +297,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const cap2 = await findPage('[data-action=lock]');
   await cap2.waitForSelector('.status-line[data-lock-open="1"]', { timeout: 75000 });
   await cap2.click('[data-action=lock]');
+  await agreeAll(cap2);
   // 捲走前 10 秒提醒：每支手機都看得到
   for (const p of pages) await p.waitForSelector('.banner.sweep.warn', { timeout: 5000 });
   for (let i = 0; i < N; i++) await shot(pages[i], `r2-07-sweep-warning-p${i}`);
@@ -275,23 +330,19 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const todo = Object.keys(provides).filter((n) => !cardDone.includes(n));
   const useOf = { 力氣: '吃飯', 船身: '捆船底', 天亮: '拋錨' };
   const wsum = (ns) => ns.reduce((t, n) => t + (weights[provides[n]] ?? 99), 0);
+  // 力氣只能靠吃飯（DECISIONS 18）：天亮前那一件一定是吃飯，其餘留在船上
   let plan = null;
-  if (bCard !== 'B5' && wsum(todo) <= 5) plan = { use: null, land: todo };
-  for (const n of todo) {
-    if (plan) break;
-    const u = useOf[n];
-    const btnPage = await findPage(`[data-action=use][data-use="${u}"]`);
-    if (!btnPage) continue;
-    const rest = todo.filter((x) => x !== n);
-    if (wsum(rest) <= 5) plan = { use: u, land: rest, page: btnPage };
-  }
+  const cookPage = await findPage('[data-action=use][data-use="吃飯"]');
+  const rest = todo.filter((x) => x !== '力氣');
+  if (cookPage && todo.includes('力氣') && wsum(rest) <= 5) plan = { use: '吃飯', land: rest, page: cookPage };
+  void useOf;
   if (!plan) errs.push(`第二局找不到三星做法：${JSON.stringify({ tonight, provides, weights, bCard, cardDone })}`);
   else {
     if (plan.use) {
       await plan.page.click(`[data-action=use][data-use="${plan.use}"]`);
-      await plan.page.waitForSelector('[data-action=undo-use]', { timeout: 3000 });
-      await shot(plan.page, 'r2-13-used-undo');
-      for (const p of pages) await p.waitForSelector('.banner.fed', { timeout: 3000 });
+      await agreeAll(plan.page);
+      for (const p of pages) await p.waitForSelector('.banner.fed', { timeout: 5000 });
+      await shot(plan.page, 'r2-13-used');
       if ((await countPages('[data-action=use]')) !== 0) errs.push('用掉一件後還有其他用掉按鈕');
       await sleep(3000);
     }
@@ -301,11 +352,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const dep2 = await findPage('[data-action=depart]');
     await dep2.waitForSelector('.status-line.ok', { timeout: 30000 });
     await dep2.click('[data-action=depart]');
+    await agreeAll(dep2);
     await pages[0].waitForSelector('.result-hero', { timeout: 10000 });
     await pages[0].waitForSelector('.landing-ovl', { state: 'detached', timeout: 6000 });
     await shot(pages[0], 'r2-15-result');
     const res2 = await pages[0].textContent('.result');
-    if (!res2.includes('上岸很順利')) errs.push('第二局照見聞做應該三星：' + res2.trim().slice(0, 60));
+    if (!res2.includes('全船平安上岸・一路準備周全')) errs.push('第二局照見聞做應該三星：' + res2.trim().slice(0, 60));
     if (!res2.includes('被浪捲走')) errs.push('第二局結尾沒有提到被浪捲走');
     if (!/今晚力氣靠/.test(res2)) errs.push('結尾沒有「今晚靠的是……」');
     const score2 = await checkScore('第二局分數');
@@ -353,6 +405,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     });
     ws.on('error', (e) => { errs.push('練習房 ws：' + e.message); clearTimeout(timer); resolve(); });
   });
+  const fl = { bodyReplace: 0, anim: 0, repeat: 0 };
+  for (const p of pages) { const f = await p.evaluate(() => window.__flicker).catch(() => null); if (f) for (const k of Object.keys(fl)) fl[k] += f[k]; }
+  if (process.env.FLICKER_DETAIL) { const names = {}; for (const p of pages) { const f = await p.evaluate(() => window.__flicker.names).catch(() => null); for (const [k, v] of Object.entries(f || {})) names[k] = (names[k] || 0) + v; } console.log('動畫分布', JSON.stringify(names)); }
+  console.log(`閃爍量測（${N} 支手機合計）：body 整批替換 ${fl.bodyReplace} 次、進場動畫 ${fl.anim} 次、其中重複播放 ${fl.repeat} 次`);
   await browser.close();
   if (errs.length) {
     console.error('失敗：', errs);

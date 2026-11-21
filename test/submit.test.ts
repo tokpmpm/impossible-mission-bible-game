@@ -34,6 +34,11 @@ function send(hub: Hub, c: FakeConn, msg: unknown): void {
 function act(hub: Hub, c: FakeConn, ev: unknown): void {
   send(hub, c, { t: 'act', id: `a${++actN}`, ev });
 }
+/** 要表決的動作（決定好了、用掉、衝向海灘）：按下後其他人都按同意（DECISIONS 18）。 */
+function actVoted(hub: Hub, c: FakeConn, ev: unknown, conns: FakeConn[]): void {
+  act(hub, c, ev);
+  for (const o of conns) if (o !== c && o.view.vote?.canVote) send(hub, o, { t: 'vote', id: o.view.vote.id, choice: 'yes' });
+}
 
 /** 建房（房主＋2 位隊員），開局，一路玩到三星上岸（首局經典配置 A5＋B4）。 */
 function playToSettled(opts: { practice?: boolean; board?: MemoryStore; players?: number } = {}) {
@@ -56,13 +61,14 @@ function playToSettled(opts: { practice?: boolean; board?: MemoryStore; players?
   };
   const sup = find((v) => v.can.items);
   for (const item of ['麥子', '器具', '小船']) act(hub, sup, { type: 'setItem', item, on: false });
-  act(hub, find((v) => v.can.lock), { type: 'lock' });
+  actVoted(hub, find((v) => v.can.lock), { type: 'lock' }, conns);
   assert.equal(host.view.phase, 'blackout');
   const eng = find((v) => v.can.repair);
   for (const slot of room.round!.game.repair!.slots) act(hub, eng, { type: 'repairPick', option: slot.answer });
   assert.equal(host.view.phase, 'replanning');
-  act(hub, find((v) => v.can.uses.some((u) => u.id === '吃飯')), { type: 'use', use: '吃飯' });
-  act(hub, find((v) => v.can.depart), { type: 'depart' });
+  actVoted(hub, find((v) => v.can.uses.some((u) => u.id === '吃飯')), { type: 'use', use: '吃飯' }, conns);
+  act(hub, find((v) => v.can.items), { type: 'setItem', item: '糧食', on: false });
+  actVoted(hub, find((v) => v.can.depart), { type: 'depart' }, conns);
   assert.equal(host.view.phase, 'settled');
   return { hub, conns, host, room, code };
 }
@@ -126,7 +132,7 @@ test('登記：房主成功登記 → 收到 submitted、view 帶 submitted、ca
   assert.equal(top[0].players, 3);
   // 存的是原始計分資料與公式版本
   const saved = hub.leaderboard.all()[0];
-  assert.equal(saved.formula, 'v1-trial');
+  assert.equal(saved.formula, 'v2-trial');
   assert.equal(saved.raw.stars, 3);
   assert.equal(saved.score, total);
 });
@@ -166,7 +172,7 @@ test('登記：result.score 的 parts 依序 mission、teamwork、time、difficu
     assert.equal(sc.total, Math.min(1000, Math.max(0, Math.round(sc.parts.reduce((s, p) => s + p.points, 0) * sc.factor))));
     assert.equal(sc.max, 1000);
     assert.equal(sc.trial, true);
-    assert.equal(sc.formula, 'v1-trial');
+    assert.equal(sc.formula, 'v2-trial');
   }
 });
 
@@ -198,7 +204,7 @@ test('排行榜訊息：{t:"leaderboard"} 回傳前 10 名、公式版本與試�
   assert.equal(m.entries[0].score, 220);
   assert.equal(m.entries[0].rank, 1);
   assert.equal(m.entries[9].score, 130);
-  assert.equal(m.formula, 'v1-trial');
+  assert.equal(m.formula, 'v2-trial');
   assert.equal(m.trial, true);
   assert.deepEqual(hub.leaderboardJson().entries, m.entries);
 });

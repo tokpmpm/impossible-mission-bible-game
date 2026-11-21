@@ -8,17 +8,20 @@
       python3 tools/verify_seeds.py --difficulty        # 只印每種局面的難度表（JSON；計分用，docs/13-SCORING.md）
       python3 tools/verify_seeds.py --difficulty-ts 路徑.ts  # 產生引擎讀的難度表（src/engine/difficulty.ts）
 
-規則（docs/11-MISSION_01_SHIPWRECK.md、docs/12-REPLAYABILITY.md 第 3 節；2026-11-16 使用者核准，DECISIONS 15、16）：
+規則（docs/11-MISSION_01_SHIPWRECK.md、docs/12-REPLAYABILITY.md 第 3 節；2026-11-16 使用者核准，DECISIONS 15、16；
+2026-11-20 使用者決定 DECISIONS 18：力氣只能靠吃飯、吃飯也佔「只來得及一件」、拿掉「胃」見聞、顧好 0–1 件＝沒能平安上岸）：
 - 船上的東西全部從船上開始；玩家決定留哪些（其餘丟進海裡）。留下的總重 ≤ 安全載重才能「決定好了」／「衝向海灘」。
 - 見聞（每局不同，各在一支手機上）：
     食＝今晚力氣靠糧食還是麥子；繩＝船身靠纜索、器具還是小船的繩子；
-    水＝淺（可以拋錨）或深（錨要帶到上岸）；胃＝吃得下或吃不下（吃不下就不能吃飯，食物要帶上岸）。
-- 星等＝上岸三件事顧好幾件：力氣（今晚的食物）、船身（今晚的繩子）、天亮（錨）。留著那樣東西、卡片已顧好、或已經「用掉」都算。
+    水＝淺（可以拋錨）或深（錨先留著，快靠岸時再拋）。
+- 星等＝上岸三件事顧好幾件：力氣（今晚的食物，**一定要吃了才算**，27:33–36）、船身（今晚的繩子）、天亮（錨）。
+  船身、天亮：留著那樣東西（天亮前來得及用）、卡片已顧好、或已經「用掉」都算。力氣：只有吃飯（或卡片）才算。
+- 顧好 0–1 件＝這局沒能平安上岸（遊戲結果；經文裡 276 人都上了岸，結尾照樣寫明）。
 - 風暴捲走：危機前丟下海的東西，危機一來就撈不回來（首局不啟用；只影響「風暴前帶什麼」，不影響單一方案的分星）。
 - 補好船後三種「用掉」：吃飯（力氣）／捆船底（船身）／拋錨（天亮）——那樣東西離船、那件事顧好；
-  天亮前全隊只來得及做 USES 件（=1）。
+  天亮前全隊只來得及做 USES 件（=1），吃飯也算在內。要三星就一定要吃飯；拋錨、捆船底是來不及吃時保住二星的退路。
 - 一種「起風卡×見聞」要有一種風暴前的帶法，不管翻到哪一張允許的風暴卡都能三星，且允許的風暴卡至少 3 張，才會被抽到。
-暴風雨救援 seed 001／002 已於 2026-11-15 退役；ship 001 舊數值（6→4、只能吃飯）於 2026-11-16 換成本版，見 git 歷史。
+暴風雨救援 seed 001／002 已於 2026-11-15 退役；ship 001 舊數值（6→4、只能吃飯）於 2026-11-16 換成本版；「胃」見聞與「留著食物就算力氣」於 2026-11-20 拿掉，見 git 歷史與 docs/14。
 """
 import json
 import sys
@@ -30,19 +33,19 @@ NEEDS = ["力氣", "船身", "天亮"]
 
 SEEDS = {
     "ship 001": dict(
-        cap_pre=8, cap_post=5, uses=1,
+        cap_pre=8, cap_post=5, uses=1, eat_only=["力氣"],
         weights={"糧食": 3, "纜索": 2, "錨": 3, "麥子": 3, "器具": 2, "小船": 2},
     ),
 }
 
 # 見聞：每局各發一個值。順序固定（腳本、引擎、對照檔都用這個順序）。
-TONIGHT = {"食": ["糧食", "麥子"], "繩": ["纜索", "器具", "小船"], "水": ["淺", "深"], "胃": ["吃得下", "吃不下"]}
+TONIGHT = {"食": ["糧食", "麥子"], "繩": ["纜索", "器具", "小船"], "水": ["淺", "深"]}
 # 首局固定的「經典配置」：就是 v0.7 的打法（丟麥子、器具、小船，吃飯），讓新人先學會骨架。
-CLASSIC = {"食": "糧食", "繩": "纜索", "水": "深", "胃": "吃得下"}
+CLASSIC = {"食": "糧食", "繩": "纜索", "水": "深"}
 
 # 補好船後的三種「用掉」。blocked：這個見聞值時不能做。關掉某一種只要從 USE_ENABLED 拿掉（例：試玩後拿掉捆船底）。
 USES = {
-    "吃飯": dict(need="力氣", blocked=("胃", "吃不下")),
+    "吃飯": dict(need="力氣", blocked=None),
     "捆船底": dict(need="船身", blocked=None),
     "拋錨": dict(need="天亮", blocked=("水", "深")),
 }
@@ -60,9 +63,9 @@ CARDS = {
     "A5": dict(deck="A", note="補船多 10 秒"),
     "B1": dict(deck="B", remove=["器具"], weight={"麥子": -2}),
     "B2": dict(deck="B", remove=["小船"]),
-    "B3": dict(deck="B", weight={"糧食": 2}),
+    "B3": dict(deck="B", remove=["麥子"], exclude={"食": "麥子"}, note="276 人吃飽了，把麥子拋在海裡（27:37–38）"),
     "B4": dict(deck="B", note="醫生的吃飯線索全隊可見"),
-    "B5": dict(deck="B", remove=["錨"], done=["天亮"], eat_only=["力氣"], exclude={"胃": "吃不下"}),
+    "B5": dict(deck="B", remove=["錨"], done=["天亮"]),
 }
 DECK_A = [k for k, c in CARDS.items() if c["deck"] == "A"]
 DECK_B = [k for k, c in CARDS.items() if c["deck"] == "B"]
@@ -113,7 +116,8 @@ def world(seed, a, b, tn, crisis, used=None):
     crisis=False：危機前（只有起風卡）；crisis=True：補好船後（起風＋風暴卡）。used：已用掉的那一種（或 None）。"""
     cards = [a] + ([b] if crisis else [])
     w = weights(seed, cards)
-    removed, done, pinned, eat_only = set(), set(), set(), set()
+    # 力氣只能靠吃飯：危機後才算（危機前還不能吃，留著今晚的食物＝準備好了，2:15 提示與「原本顧好幾件」照這個算）
+    removed, done, pinned, eat_only = set(), set(), set(), set(seed.get("eat_only", []) if crisis else [])
     for c in cards:
         cd = CARDS[c]
         removed |= set(cd.get("remove", []))
@@ -311,7 +315,7 @@ def export_difficulty_ts(path):
     d = difficulty(SEEDS["ship 001"])
     lines = [
         "// 由 tools/verify_seeds.py --difficulty-ts 產生，請勿手改（npm run golden 會一起更新）。",
-        "// 每種局面（起風卡|食/繩/水/胃|風暴卡）補好船後有幾種三星解，與難度分（解越少越高）。docs/13-SCORING.md。",
+        "// 每種局面（起風卡|食/繩/水|風暴卡）補好船後有幾種三星解，與難度分（解越少越高）。docs/13-SCORING.md。",
         f"export const DIFF_MAX = {d['max']};",
         f"export const SWEEP_BONUS = {d['sweep_bonus']};",
         f"export const DIFF_MOST = {d['most']};",
@@ -334,7 +338,7 @@ def check(name, seed, table=False):
     classic_a = [a for a, tn, _b, _r in valid if tn == CLASSIC]
     rules = [
         (f"三星有解 {m['three']}/{m['games']}", m["three"] == m["games"]),
-        ("每種起風卡×見聞都有二星保底的帶法", m["two_floor"]),
+        ("每種起風卡×見聞都有二星保底（不會沒能平安上岸）的帶法", m["two_floor"]),
         (f"照抄成功率 {m['copy_best']:.1%} < 20%", m["copy_best"] < 0.20),
         (f"首局經典配置可用的起風卡：{'、'.join(classic_a)}（至少 3 張）", len(classic_a) >= 3),
     ]
@@ -345,7 +349,7 @@ def check(name, seed, table=False):
     print(f"  照抄成功率 {m['copy_best']:.1%}；隨機取一個三星打法 {m['copy_avg']:.1%}；最強固定打法 {m['fixed']:.1%}；"
           f"不問隊友 {m['blind']:.1%}；風暴前最省的必帶組合 {m['signatures']} 種")
     if table:
-        print("  -- 通過的組合（食/繩/水/胃｜可搭配的風暴卡｜風暴前最省的必帶組合）")
+        print("  -- 通過的組合（食/繩/水｜可搭配的風暴卡｜風暴前最省的必帶組合）")
         for e in valid:
             a, tn, bs, _res = e
             print(f"  {a} {tkey(tn)}｜{''.join(bs)}｜{'、'.join('+'.join(i for i in ITEMS if i in K) for K in robust(e))}")

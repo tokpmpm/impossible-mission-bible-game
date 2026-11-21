@@ -2,6 +2,7 @@
 // 數值必須與 tools/verify_seeds.py 的 SEEDS／TONIGHT／USES／CARDS 一致（由 test/golden.test.ts 逐筆比對）。
 // 卡片與見聞的文字（經文、後果說明）是內容，放在 src/server/content.ts；這裡只放會影響規則的效果。
 // 2026-11-16：改為「今晚靠哪一樣」（docs/12-REPLAYABILITY.md 第 3 節；DECISIONS 15、16）。
+// 2026-11-20（DECISIONS 18、docs/14）：力氣只能靠吃飯、吃飯也佔「只來得及一件」、拿掉「胃」見聞、B3 改成吃飽後拋麥子。
 
 export type SeedId = 'ship 001';
 export type ItemId = '糧食' | '纜索' | '錨' | '麥子' | '器具' | '小船';
@@ -14,23 +15,21 @@ export interface Tonight {
   食: '糧食' | '麥子'; // 今晚力氣靠哪一樣
   繩: '纜索' | '器具' | '小船'; // 今晚船身靠哪一條繩子
   水: '淺' | '深'; // 淺＝可以拋錨
-  胃: '吃得下' | '吃不下'; // 吃不下＝不能吃飯
 }
 export type DialId = keyof Tonight;
-export const DIALS: DialId[] = ['食', '繩', '水', '胃'];
+export const DIALS: DialId[] = ['食', '繩', '水'];
 export const TONIGHT_VALUES: { [K in DialId]: Tonight[K][] } = {
   食: ['糧食', '麥子'],
   繩: ['纜索', '器具', '小船'],
   水: ['淺', '深'],
-  胃: ['吃得下', '吃不下'],
 };
 /** 首局固定的經典配置（v0.7 的打法：丟麥子、器具、小船，吃飯）。 */
-export const CLASSIC: Tonight = { 食: '糧食', 繩: '纜索', 水: '深', 胃: '吃得下' };
+export const CLASSIC: Tonight = { 食: '糧食', 繩: '纜索', 水: '深' };
 
-/** 補好船後的三種「用掉」：那樣東西離船、那件事顧好。全隊只來得及做 seed.uses 件。 */
+/** 補好船後的三種「用掉」：那樣東西離船、那件事顧好。全隊只來得及做 seed.uses 件（吃飯也算在內）。 */
 export type UseId = '吃飯' | '捆船底' | '拋錨';
 export const USES: Record<UseId, { need: NeedId; blocked?: { dial: DialId; value: string } }> = {
-  吃飯: { need: '力氣', blocked: { dial: '胃', value: '吃不下' } },
+  吃飯: { need: '力氣' },
   捆船底: { need: '船身' },
   拋錨: { need: '天亮', blocked: { dial: '水', value: '深' } },
 };
@@ -43,6 +42,7 @@ export interface SeedDef {
   capPre: number; // 起風時的安全載重
   capPost: number; // 危機（27:20）後
   uses: number; // 天亮前只來得及用掉幾件
+  eatOnly: NeedId[]; // 只能靠「用掉」顧好的事（力氣：要吃了才算，27:33–36）
   /** 船上的東西與重量；順序就是畫面上的順序。 */
   weights: Record<ItemId, number>;
 }
@@ -73,6 +73,7 @@ export const SEEDS: Record<SeedId, SeedDef> = {
     capPre: 8,
     capPost: 5,
     uses: 1,
+    eatOnly: ['力氣'],
     weights: { 糧食: 3, 纜索: 2, 錨: 3, 麥子: 3, 器具: 2, 小船: 2 },
   },
 };
@@ -90,9 +91,9 @@ export const CARDS: Record<CardId, CardDef> = {
   A5: { id: 'A5', deck: 'A', repairBonusMs: 10_000 },
   B1: { id: 'B1', deck: 'B', remove: ['器具'], weight: { 麥子: -2 } },
   B2: { id: 'B2', deck: 'B', remove: ['小船'] },
-  B3: { id: 'B3', deck: 'B', weight: { 糧食: 2 } },
+  B3: { id: 'B3', deck: 'B', remove: ['麥子'], exclude: { 食: '麥子' } },
   B4: { id: 'B4', deck: 'B', publicClue: true },
-  B5: { id: 'B5', deck: 'B', remove: ['錨'], done: ['天亮'], eatOnly: ['力氣'], exclude: { 胃: '吃不下' } },
+  B5: { id: 'B5', deck: 'B', remove: ['錨'], done: ['天亮'] },
 };
 
 export const DECK_A: CardId[] = ['A1', 'A2', 'A3', 'A4', 'A5'];

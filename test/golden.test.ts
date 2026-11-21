@@ -46,12 +46,12 @@ test('種子數值與腳本相同（東西順序、重量、載重、只來得�
   assert.deepEqual(CLASSIC, golden.classic);
 });
 
-test('通過的起風卡×見聞與允許的風暴卡：引擎算出的表和腳本完全一樣（64 種、262 局面）', () => {
+test('通過的起風卡×見聞與允許的風暴卡：引擎算出的表和腳本完全一樣（46 種、176 局面）', () => {
   const mine = validSetups().map((s) => ({ a: s.a, tonight: s.tonight, b: s.b }));
   const theirs = golden.setups.map((s) => ({ a: s.a, tonight: s.tonight, b: s.b }));
   assert.deepEqual(mine, theirs);
-  assert.equal(mine.length, 64);
-  assert.equal(mine.reduce((n, s) => n + s.b.length, 0), 262);
+  assert.equal(mine.length, 46);
+  assert.equal(mine.reduce((n, s) => n + s.b.length, 0), 176);
 });
 
 test('每一種局面 × 危機前／補好船後（不用掉、三種用掉）× 64 種留法：星等與超重都和腳本一致', () => {
@@ -70,7 +70,7 @@ test('每一種局面 × 危機前／補好船後（不用掉、三種用掉）�
       }
     }
   }
-  assert.equal(rows, 57_408, `只比對到 ${rows} 筆`);
+  assert.equal(rows, 39_744, `只比對到 ${rows} 筆`);
 });
 
 /** 用狀態機把腳本給的三星打法整局走一遍（第二局起：風暴捲走）。 */
@@ -92,16 +92,18 @@ function play(s: SetupRow, g: Game, line: Game['line']): GameState {
   return st;
 }
 
-test('262 種局面：腳本給的三星打法在狀態機裡整局走完都是三星', () => {
+test('176 種局面：腳本給的三星打法在狀態機裡整局走完都是三星（而且平安上岸）', () => {
   let n = 0;
   for (const s of golden.setups) {
     for (const g of s.games) {
       const st = play(s, g, g.line);
       assert.equal(st.result?.stars, 3, `${s.a}+${g.b} ${JSON.stringify(s.tonight)} ${JSON.stringify(g.line)}`);
+      assert.equal(st.result?.safe, true);
+      assert.equal(g.line.use, '吃飯', '力氣只能靠吃飯，所以三星打法一定是吃飯');
       n++;
     }
   }
-  assert.equal(n, 262);
+  assert.equal(n, 176);
 });
 
 test('docs/12 第 3 節的重玩性指標與腳本現在算出來的一致', () => {
@@ -127,9 +129,10 @@ test('docs/12 第 3 節的重玩性指標與腳本現在算出來的一致', () 
   assert.ok(live.copy_best < 0.2);
 });
 
-test('docs/appendix 設計試算與正式腳本列出的通過組合相同', () => {
-  const out = execFileSync('python3', ['docs/appendix/replayability_sim.py', '--table'], { encoding: 'utf8' });
-  const rows = out.split('\n').filter((l) => /^ {2}A[1-5] /.test(l)).map((l) => l.trim().split('｜').slice(0, 2).join('｜'));
+test('docs/appendix 設計試算（docs/14 的 D18 方案）與正式腳本列出的通過組合相同', () => {
+  // docs/appendix/replayability_sim.py 是 v0.8（有「胃」、留著食物算力氣）的歷史試算，2026-11-20 起改比對 logic_review_sim.py 的 D18
+  const out = execFileSync('python3', ['docs/appendix/logic_review_sim.py', '--setups'], { encoding: 'utf8' });
+  const rows = out.split('\n').filter((l) => /^A[1-5] /.test(l));
   const mine = golden.setups.map((s) => `${s.a} ${Object.values(s.tonight).join('/')}｜${s.b.join('')}`);
   assert.deepEqual(rows, mine);
 });
