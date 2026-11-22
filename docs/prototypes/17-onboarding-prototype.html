@@ -1,4 +1,4 @@
-<title>上船點名原型</title>
+<title>保羅海難新手引導原型</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap">
@@ -154,6 +154,16 @@ header.top p { margin: 0; color: var(--muted); font-size: 14px; }
 details.script { font-size: 14px; color: var(--muted); }
 details.script summary { cursor: pointer; color: var(--gold); }
 @media (prefers-reduced-motion: reduce) { .pbar i, .skybar i, .toast { animation: none; } .pbar i { width: 100%; } }
+.looking { border: 1px dashed var(--gold); border-radius: 12px; padding: 8px 12px; font-size: 15px; }
+.looking b { color: var(--gold2); }
+.now { text-align: left; font-size: 17px; background: rgba(242,193,78,.14); border-radius: 12px; padding: 8px 10px; }
+.now b { color: var(--gold); }
+.fakebtn { transform: scale(.92); opacity: .8; }
+.task .tip { font-size: 13px; color: var(--muted); margin-top: 4px; }
+.hl-list > div { display: flex; gap: 8px; align-items: center; font-size: 14px; background: var(--navy); border-radius: 10px; padding: 6px 8px; }
+.hl-list b { color: var(--gold2); }
+.optlbl { align-self: center; font-size: 13px; font-weight: 700; color: var(--ink); background: var(--gold); border-radius: 999px; padding: 2px 12px; }
+.who .optbtn { font-weight: 700; font-size: 15px; padding: 6px 16px; }
 /* 第一關「保羅海難」插畫動畫（搭配 public/art.js）。
    原則：元素靜止時就是「最終狀態」，keyframes 只描述從哪裡來；
    所以 prefers-reduced-motion 關掉動畫後，畫面自然停在最終狀態。
@@ -364,8 +374,8 @@ details.script summary { cursor: pointer; color: var(--gold); }
 
 <div class="wrap">
   <header class="top">
-    <h1>上船點名原型</h1>
-    <p>docs/17 新手引導與破冰提案的可點原型。畫面是示意，不連伺服器；插圖沿用遊戲本身的 art.js。</p>
+    <h1>保羅海難新手引導原型 v2</h1>
+    <p>認識隊友改成從遊戲裡自然發生（找人、帶來的東西、火堆旁回顧），不再輪流自我介紹。最下面三個「待決定」可切換方案 A／B 比較。畫面是示意，不連伺服器。</p>
   </header>
   <nav class="steps" id="steps" aria-label="畫面"></nav>
   <div>
@@ -1625,7 +1635,7 @@ function undergird() {
   );
 }
 
-return { item, need, role, scene, darkness, meal, landing };
+return { item, need, role, pref, scene, darkness, meal, landing };
 })();
 
 // ───── 示意資料（6 人局）─────
@@ -1684,11 +1694,11 @@ function clue(pic, title, text, tag) {
   return `<div class="clue"><div class="pic">${pic}</div><div><div class="t">${title}${tag ? `<small>${tag}</small>` : ''}</div><p>${text}</p></div></div>`;
 }
 const CLUES = {
-  comms: [clue(A.item('糧食', 34), '今晚的飯', '倉底的乾糧還好好的：今晚煮<b>糧食</b>。', '只有你看到'), clue(A.need('力氣', true, 34), '伙房', '大家好些日子沒吃什麼了（27:21）。倉底有乾糧，貨艙有麥子。')],
-  supply: [clue(A.need('船身', true, 34), '上岸三件事', '力氣、船身、錨住船。今晚各靠哪一樣東西，每次都不一樣，要問隊友。'), clue(A.item('纜索', 34), '捆船的繩子', '纜索完好：捆船底就用纜索。', '只有你看到')],
+  comms: [clue(A.item('糧食', 34), '今晚的飯', '倉底的乾糧還好好的：今晚煮<b>糧食</b>。', '只有你看到・要說出去'), clue(A.need('力氣', true, 34), '伙房', '大家好些日子沒吃什麼了（27:21）。倉底有乾糧，貨艙有麥子。')],
+  supply: [clue(A.need('船身', true, 34), '上岸三件事', '力氣、船身、錨住船。今晚各靠哪一樣東西，每次都不一樣，要問隊友。'), clue(A.item('纜索', 34), '捆船的繩子', '纜索完好：捆船底就用纜索。', '只有你看到・要說出去')],
   nav: [clue('<span style="font-size:28px">⚖️</span>', '安全載重', '船最多只能留 <b>8 重</b>的東西，超過了吃水太深，不能開船。')],
   medic: [clue(A.need('力氣', true, 34), '力氣', '人要真的<b>吃下去</b>才有力氣；食物留在船上不吃，不會變成力氣。今晚吃哪一樣，問伙房。')],
-  observer: [clue(A.item('錨', 34), '水深', '還探不到底：錨先留著，等水變淺、快靠岸時再拋。', '只有你看到'), clue('<span style="font-size:28px">🌊</span>', '風浪', '風浪會越來越大，之後船能留的東西會更少（8 → 5）。')],
+  observer: [clue(A.item('錨', 34), '水深', '還探不到底：錨先留著，等水變淺、快靠岸時再拋。', '只有你看到・要說出去'), clue('<span style="font-size:28px">🌊</span>', '風浪', '風浪會越來越大，之後船能留的東西會更少（8 → 5）。')],
 };
 function intel() {
   const groups = view.roles.map((r) => {
@@ -1706,92 +1716,121 @@ function shipStatus(open, night) {
   return `<details class="sec" ${open ? 'open' : ''}><summary>全船狀態 <span class="r">${w[0] > w[1] ? `船上 ${w[0]} 重，最多載 ${w[1]}：還要丟 ${w[0] - w[1]}（${main() === 'supply' ? '由你按' : '管倉小芳按'}）` : `${w[0]}／${w[1]} 不超重`} ▾</span></summary><div class="in"><div class="mini-scene">${sc}</div>${gauge(...w)}${needs(night, night ? { 船身: true, 天亮: true } : {})}${tray}</div></details>`;
 }
 
-// ───── 每個畫面 ─────
+// ───── 每個畫面（v2：認識隊友從遊戲裡自然發生，不另外安排自我介紹）─────
+const NOW = { comms: '把今晚吃什麼告訴管倉。', supply: '問清楚大家，再決定丟什麼。', nav: '問管倉船有多重，大家講好了再按「決定好了」。', medic: '告訴伙房：食物要吃下去才算力氣。' };
+const BAG = { 小芳: 'lamp', 大衛: 'coat', 美玲: 'nuts', 佳慧: 'song' };
+const BAGN = { lamp: '油燈', coat: '外衣', nuts: '乾果', song: '一首歌' };
+const bagIcon = (n, size = 18) => (BAG[n] ? A.pref(BAG[n], size) : '');
+let opt = 'A';
+let dawnNew = true;
+const nm = (k) => (k === '天亮' ? (dawnNew ? '錨住船' : '等天亮') : k);
+function roster2(hl) {
+  const crew = view.id === 'combo' ? [{ n: '阿明', r: 'comms', r2: 'eng' }, { n: '小芳', r: 'supply', r2: 'medic' }, { n: '大衛', r: 'nav', r2: 'observer' }] : CREW;
+  return `<div class="roster" aria-label="全隊名冊">${crew.map((c) => `<span class="${c.n === hl ? 'hl' : ''} ${c.n === view.n ? 'self' : ''}">${A.role(c.r, 20)}${c.r2 ? A.role(c.r2, 20) : ''}${c.n}${bagIcon(c.n, 16)}</span>`).join('')}</div>`;
+}
+function roleCard(withBib, foot) {
+  return `<div class="rolecard"><div style="display:flex;justify-content:center;gap:8px">${view.roles.map((r) => A.role(r, view.roles.length > 1 ? 72 : 96)).join('')}</div>
+    <div class="you">${view.n}，這局你是</div><h2>${roleNames()}</h2>
+    <div class="line">「${view.roles.map((r) => R[r].line).join('也')}」</div>
+    ${withBib ? `<div class="bib">${view.roles.map((r) => R[r].bib).join('；')}</div>` : ''}<hr>
+    <div class="now"><b>現在：</b>${NOW[main()]}</div>
+    <div class="k">之後會出現的按鈕</div>
+    ${view.roles.map((r) => R[r].btn ? `<div class="fakebtn">${R[r].btn}<small>${R[r].when}</small></div>` : `<div class="fakebtn">你沒有按鈕<small>你的情報就是別人缺的那一塊</small></div>`).join('')}
+    <div class="k">只有你知道</div>${view.roles.map((r) => `<div class="secret">${R[r].secret}</div>`).join('')}
+    </div>${foot}`;
+}
+const TASK_ROLE = { comms: 'supply', supply: 'comms', nav: 'supply', medic: 'comms' };
+const LOOKING = { // 開局：誰會來找你（讓被找的人也抬頭）
+  comms: ['美玲（🩺醫生）'], supply: ['阿明（🍲伙房）', '大衛（☸️船長）'], nav: [], medic: [], combo: ['小芳（📦管倉）'],
+};
+const TASK = {
+  comms: ['去找 <em>小芳（📦管倉）</em>，告訴她：今晚吃的是<em>糧食</em>。', '小芳'],
+  supply: ['先問 <em>阿明（🍲伙房）</em>今晚吃哪一樣，再決定丟什麼。', '阿明'],
+  nav: ['去問 <em>小芳（📦管倉）</em>：船上現在多重？大家講好了再按「決定好了」。', '小芳'],
+  medic: ['去找 <em>阿明（🍲伙房）</em>，告訴他：食物要吃下去才算力氣。', '阿明'],
+};
+function campfire() {
+  const pos = [[60, 70], [110, 40], [180, 30], [250, 40], [300, 70], [180, 112]];
+  const crew = CREW;
+  return `<svg viewBox="0 0 360 150" width="100%" role="img" aria-label="大家在岸上圍著火"><rect width="360" height="150" rx="14" fill="#1a1530"/><path d="M0 120 Q180 100 360 120 V150 H0Z" fill="#3a2a1c"/>
+    <g transform="translate(180 84)"><ellipse rx="50" ry="14" fill="#f2c14e" opacity=".18"/><path d="M-14 6 L0 -26 L14 6Z" fill="#ff8a3d"/><path d="M-7 6 L0 -12 L7 6Z" fill="#ffd97a"/><path d="M-18 8 H18" stroke="#6b3f1f" stroke-width="5" stroke-linecap="round"/></g>
+    ${crew.map((c, i) => `<g transform="translate(${pos[i][0]} ${pos[i][1]})"><circle r="9" fill="#13294d" stroke="#f2c14e"/><text y="24" text-anchor="middle" font-size="12" fill="#f4f1e8" font-family="sans-serif">${c.n}</text></g>`).join('')}</svg>`;
+}
+
 const STEPS = [
-  { grp: '開始前（不計時）', t: '大廳', fix: [1], note: ['拿掉最底下沒人看的「怎麼玩」三句，改由下一步的動畫說。', '房主多一個「開場怎麼說」，可以照念，不念也能玩。', '開始鈕改成「開始：先上船點名」，讓人知道接下來不是馬上計時。'], was: '「怎麼玩」在大廳最底下，要捲到底才看得到；按開始的那一秒 8 分鐘就開始倒數。',
+  { grp: '新流程', t: '大廳：上船前多帶一樣', fix: [5], note: ['背包題照舊（可跳過），但帶的東西<b>整局都跟著你的名字</b>出現在名冊上，而且會在故事裡真的派上用場（油燈照亮、乾果分給大家、外衣披在發抖的人身上、在火堆旁唱一首歌）。', '它變成自然的話題：「你為什麼帶一首歌？」——不用遊戲叫大家自我介紹。', '拿掉沒人看的「怎麼玩」三句，改由角色登場後的 30 秒動畫說。'], was: '背包題點一下，名字旁多一個小圖，之後就沒下文；Haiku 每一輪都問「這有什麼用」。',
     r: () => `<div class="tb"><div class="me"><b>房號 EWZJ</b><span>${view.n}</span></div></div><div class="body">
-      <section class="sec"><div class="sh">船員（6／10）</div><div class="in lobby-list">${CREW.map((c) => `<div>${c.n}${c.n === '阿明' ? '<small>房主</small>' : ''}</div>`).join('')}</div></section>
-      <section class="sec"><div class="sh">上船前，你會多帶一樣什麼？<span class="r">可以跳過</span></div><div class="in chips"><button>🪔 油燈</button><button aria-pressed="true">🧥 外衣</button><button>🌰 乾果</button><button>🎵 一首歌</button><button>跳過</button></div></section>
-      <details class="script"><summary>ⓘ 房主：開場可以這樣說（約 30 秒）</summary><p>「我們是一艘運麥子的船上的船員，故事在使徒行傳 27 章。風暴要來了，船太重。每個人手機上只有一部分情報，所以要開口問，也可以直接看別人的手機。等一下每個人會拿到一個角色，輪流大聲念出來，順便回答一個小問題，不想答可以跳過。」</p></details>
-      </div><div class="bar" style="position:static"><button class="big" data-go="next">開始：先上船點名</button><div class="st">點名不計時，大約 1–2 分鐘</div></div>` },
-  { grp: '開始前（不計時）', t: '你的角色卡', fix: [3], note: ['角色第一次被「交給」玩家：大圖、一句第一人稱台詞（原本 ROLES.job 寫好了但從沒顯示）。', '「你負責的按鈕長這樣」是灰色虛線示意，不能按，寫明什麼時候才會出現；沒有按鈕的角色寫「你的情報就是別人缺的那一塊」。', '「只有你知道」先預告他手上情報的價值。', '底下一行徒 27 章人物（待使用者決定）；不扮演保羅。', '切換上方的角色看不同手機；「3 人局」看一人兩個角色。'], was: '角色只是頂端 22px 的小膠囊，旁邊沒有任何說明。',
-    r: () => `<div class="rolecard"><div style="display:flex;justify-content:center;gap:8px">${view.roles.map((r) => A.role(r, view.roles.length > 1 ? 72 : 96)).join('')}</div>
-      <div class="you">${view.n}，你是</div><h2>${roleNames()}</h2>
-      <div class="line">「${view.roles.map((r) => R[r].line).join('也')}」</div>
-      <div class="bib">${view.roles.map((r) => R[r].bib).join('；')}</div><hr>
-      <div class="k">你負責的按鈕長這樣</div>
-      ${view.roles.map((r) => R[r].btn ? `<div class="fakebtn">${R[r].btn}<small>${R[r].when}</small></div>` : `<div class="fakebtn">你沒有按鈕<small>你的情報就是別人缺的那一塊</small></div>`).join('')}
-      <div class="k">只有你知道</div>${view.roles.map((r) => `<div class="secret">${R[r].secret}</div>`).join('')}
-      </div><div class="bar"><button class="big" data-go="next">我看好了</button><div class="st">接著全隊一起看 30 秒動畫，再輪流念角色</div></div>` },
-  { grp: '開始前（不計時）', t: '30 秒故事動畫', fix: [1, 4], note: ['三格就是整局的三幕：起風 → 天黑 → 天亮。所有手機同時播，每格 10 秒，可點一下跳下一格（原型 5 秒）。', '第三格第一次說清楚：<b>天亮＝衝向海灘的時刻</b>，以及「上岸要顧好三件事」。', '「等天亮」改名「錨住船」（撐到天亮，不撞上石頭）。'], was: '新人第一眼看到的是起風卡上的三行經文，還不知道「風暴」「這局」是什麼。',
+      <section class="sec"><div class="sh">船員（6／10）</div><div class="in lobby-list">${CREW.map((c) => `<div><span>${c.n}${c.n === '阿明' ? ' <small>房主</small>' : ''}</span><span style="display:flex;gap:4px;align-items:center">${bagIcon(c.n, 20)}<small>${BAG[c.n] ? BAGN[BAG[c.n]] : ''}</small></span></div>`).join('')}</div></section>
+      <section class="sec"><div class="sh">上船前，你會多帶一樣什麼？<span class="r">大家看得到・可跳過</span></div><div class="in"><div class="chips"><button>${A.pref('lamp', 18)} 油燈</button><button>${A.pref('coat', 18)} 外衣</button><button>${A.pref('nuts', 18)} 乾果</button><button>${A.pref('song', 18)} 一首歌</button><button>跳過</button></div><div style="font-size:13px;color:var(--muted)">帶什麼都好，也可以不帶；帶的東西會在故事裡出場。</div></div></section>
+      </div><div class="bar" style="position:static"><button class="big" data-go="next">開船</button></div>` },
+  { grp: '新流程', t: '角色登場（8 秒）', fix: [3], note: ['每支手機同時跳出自己的角色卡，8 秒自動收（點一下可提早）。<b>不用念、不用輪流</b>，大家自然會互看「你是什麼？」。', '台詞是第一人稱，喊出來剛好就是自我介紹，但不規定要喊。', '你負責的按鈕畫成灰色虛線示意，寫明什麼時候出現。'], was: '角色只是頂端 22px 的小膠囊；上一版原型要每人輪流念角色＋回答小問題，太刻意。',
+    r: () => roleCard(true, `<div class="bar"><div class="pbar"><i style="animation-duration:8s"></i></div><button class="big" data-go="next">好，開船</button></div>`) },
+  { grp: '新流程', t: '30 秒故事動畫', fix: [1, 4], note: ['三格＝整局的三幕：起風 → 天黑 → 天亮。每格一行「你這段要做什麼」。', '第一次說清楚目標：船最多載 8、顧好三件事中 2 件以上＝平安上岸、倒數走完＝天亮。'], was: '按下開始的第一個畫面就是起風卡經文，8 分鐘已經在跑。',
     r: () => {
       const P = [
-        { art: A.scene({ sky: 'storm', onDeck: ALL, load: { weight: 15, cap: 8 }, rock: 'storm' }), h: '風暴要來了，船太重', p: '船上的東西重 15，船最多只能載 8——<b>超重</b>就會進水。大家一起決定<b>丟什麼、留什麼</b>；每個人只知道一部分，要開口問。', c: '徒 27:14–15', you: YOU[main()][0] },
-        { art: `<div style="height:190px;border-radius:14px;overflow:hidden;position:relative">${A.darkness()}<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">${A.role('eng', 72)}</div></div>`, h: '天會黑一陣子', p: '看不見了。只有<b>木匠</b>（🔨）手機上有補船面板，其他人手上各有一個記號，<b>用說的</b>告訴木匠。', c: '徒 27:20', you: YOU[main()][1] },
-        { art: A.landing({ lit: { 力氣: true, 船身: true, 天亮: true } }), h: '天亮時，衝向海灘', p: '頂端的「離天亮」倒數走完＝天亮＝衝向海灘。三件事顧好 2 件以上，全船就平安上岸；3 件都顧好最棒。', c: '徒 27:39–44', you: YOU[main()][2], extra: `<div class="three"><div>${A.need('力氣', true, 40)}力氣<small style="font-weight:400;color:var(--muted)">要吃飯</small></div><div>${A.need('船身', true, 40)}船身<small style="font-weight:400;color:var(--muted)">留著繩子</small></div><div>${A.need('天亮', true, 40)}錨住船<small style="font-weight:400;color:var(--muted)">留著錨</small></div></div>` },
+        { art: A.scene({ sky: 'storm', onDeck: ALL, load: { weight: 15, cap: 8 }, rock: 'storm' }), h: '風暴要來了，船太重', p: '船上的東西重 15，船最多只能載 8。大家一起決定<b>丟什麼、留什麼</b>；每個人只知道一部分，要開口問。', c: '徒 27:14–15', you: YOU[main()][0] },
+        { art: `<div style="height:190px;border-radius:14px;overflow:hidden;position:relative">${A.darkness()}<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">${A.role('eng', 72)}</div></div>`, h: '天會黑一陣子', p: '只有<b>木匠</b>手機上有補船面板，其他人手上各有一個記號，<b>用說的</b>告訴木匠。', c: '徒 27:20', you: YOU[main()][1] },
+        { art: A.landing({ lit: { 力氣: true, 船身: true, 天亮: true } }), h: '天亮時，衝向海灘', p: '頂端「離天亮」倒數走完＝天亮＝衝向海灘。三件事顧好 2 件以上，全船平安上岸。', c: '徒 27:39–44', you: YOU[main()][2], extra: `<div class="three"><div>${A.need('力氣', true, 40)}力氣<small style="font-weight:400;color:var(--muted)">要吃飯</small></div><div>${A.need('船身', true, 40)}船身<small style="font-weight:400;color:var(--muted)">留著繩子</small></div><div>${A.need('天亮', true, 40)}錨住船<small style="font-weight:400;color:var(--muted)">留著錨</small></div></div>` },
       ];
       const k = sub % 3; const s = P[k];
       timers.push(setTimeout(() => { sub = (sub + 1) % 3; render(); }, 5000));
-      return `<div class="full" data-sub="1">${s.art}<h2>${s.h}</h2><p>${s.p}</p>${s.extra || ''}${s.you ? `<div class="secret"><b>你（${roleNames()}）這段：</b>${s.you}</div>` : ''}<cite>${s.c}</cite><div class="pbar"><i style="animation-duration:5s"></i></div><div class="dots">${[0, 1, 2].map((i) => `<i class="${i === k ? 'on' : ''}"></i>`).join('')}</div><button class="ghost" data-go="next">跳過動畫</button></div>`;
+      return `<div class="full">${s.art}<h2>${s.h}</h2><p>${s.p}</p>${s.extra || ''}<div class="secret"><b>你（${roleNames()}）這段：</b>${s.you}</div><cite>${s.c}</cite><div class="pbar"><i style="animation-duration:5s"></i></div><div class="dots">${[0, 1, 2].map((i) => `<i class="${i === k ? 'on' : ''}"></i>`).join('')}</div><button class="ghost" data-go="next">跳過動畫</button></div>`;
     } },
-  { grp: '開始前（不計時）', t: '輪流念（別人在說）', fix: [3, 5], note: ['輪到的人手機全螢幕顯示自己的角色卡；<b>其他人的手機都顯示「現在輪到誰」＋他的台詞和小問題</b>，所以大家會抬頭看他。', '小問題只用說的，不打字、不記錄、不計分。', '輪到的人按「我說完了」換下一位（或 10 秒自動換）；這是接力棒，不是全員同意。房主有「跳過點名」。'], was: '沒有任何時刻讓人說到自己；也沒有人知道隊友是什麼角色。',
+  { grp: '新流程', t: '開局：去找人', fix: [2, 3, 5], note: ['認識隊友靠<b>找人</b>：任務條給名字和角色，不認識就喊一聲「誰是小芳？」——這是最自然的自我介紹。', '<b>被找的人也知道</b>：小芳的手機寫「等一下 阿明、大衛 會來找你」，她會抬頭、舉手，不會只低頭看自己的手機。（切到「管倉 小芳」看）', '名冊每個人旁邊有他帶的東西，順手就有話題。', '一個畫面只有一條「現在要做」。'], was: '「去問 隊員2」只有一邊知道；被找的人不知道誰會來，常常兩邊都低頭。',
     r: () => {
-      const order = CREW.filter((c) => c.n !== view.n);
-      const k = sub % order.length; const c = order[k];
-      timers.push(setTimeout(() => { sub++; render(); }, 4500));
-      return `<div class="full"><div style="font-size:15px;color:var(--muted)">現在輪到</div><div>${A.role(c.r, 88)}</div><h2>${c.n}（${R[c.r].name}）</h2><p style="font-size:20px;font-weight:700">「${R[c.r].line}」</p>
-        <div class="q"><small>他會順便說說</small>${R[c.r].q[0]}</div>
-        <div class="turns">${CREW.map((x, i) => `<span class="${x.n === c.n ? 'now' : CREW.indexOf(c) > i ? 'done' : ''}">${x.n}</span>`).join('')}</div>
-        <div class="pbar"><i style="animation-duration:4.5s"></i></div><div style="font-size:14px;color:var(--muted)">你現在：抬頭聽他說。他說完會換下一位，輪到你時你的手機會變。</div></div>`;
-    } },
-  { grp: '開始前（不計時）', t: '輪流念（輪到你）', fix: [3, 5], note: ['大字照念就好：「我是＿＿，今天當＿＿。」接著一個跟角色有關的輕鬆題。', '「換一題」和「跳過」一樣大，不想說就跳過。題目不問信仰、家庭、感情、收入、外表。', '「我說完了」只有正在說的人看得到、只有他能按。'], was: '背包題在大廳點一下就沒下文，沒有人會被問「你為什麼帶外衣？」。',
-    r: () => `<div class="full"><div style="font-size:15px;color:var(--gold);font-weight:700">輪到你了，大聲念</div>
-      <div style="display:flex;justify-content:center;gap:8px">${view.roles.map((r) => A.role(r, 72)).join('')}</div>
-      <p style="font-size:22px;font-weight:900">「我是${view.n}，今天當${roleNames()}。<br>${view.roles.map((r) => R[r].line).join('')}」</p>
-      <div class="q"><small>順便說說（不想答就跳過；想答別題就換一題）</small>${R[main()].q[sub % 2]}</div>
-      <div class="row2"><button class="ghost" data-act="swapq">換一題</button><button class="ghost" data-go="next">跳過</button></div>
-      <button class="big" data-go="next">我說完了</button></div>` },
-  { grp: '8 分鐘開始', t: '開局主畫面', fix: [2, 3], note: ['<b>一個畫面只有一條「現在要做」</b>（金框），合併了原本的「我的任務」「下一步」「狀態列」三處指令；寫名字也寫角色。', '頂端角色放大；下面一排全隊名冊，★ 是任務條提到的人。', '「我的情報」只展開一張，其他收成「還有 N 張」。', '「全船狀態」：管倉、船長預設展開，其他人預設收起（仍可點開，也可看管倉的手機）。大船圖縮小。', '三件事有標題「上岸要顧好的三件事」，危機前寫「？問隊友」。'], was: '開局一次攤開 7–10 個區塊、210–244 字，要捲將近 2 個螢幕；三處指令同時出現。',
-    r: () => {
-      const T = { comms: ['去找 <em>小芳（📦管倉）</em>，走過去當面叫她的名字，告訴她：今晚吃的是<em>糧食</em>。', '小芳'],
-        supply: ['先問 <em>阿明（🍲伙房）</em>今晚吃哪一樣，再決定丟什麼。', '阿明'],
-        nav: ['去問 <em>小芳（📦管倉）</em>：船上現在多重？大家講好了再按「決定好了」。', '小芳'],
-        medic: ['去找 <em>阿明（🍲伙房）</em>，告訴他：食物要吃下去才算力氣。', '阿明'] };
-      const t = T[main()];
+      const t = TASK[main()];
+      const looking = LOOKING[view.id] || [];
+      const lk = looking.length ? `<div class="looking">👋 等一下 <b>${looking.join('、')}</b> 會來找你。</div>` : '';
       const open = main() === 'supply' || main() === 'nav';
-      const bar = main() === 'nav' ? `<div class="bar"><div class="st">認識隊友：<strong>00:32</strong> 後才能決定</div><button class="big dim" aria-disabled="true">決定好了</button></div>` : '';
-      return `${topbar('<small>🌅 離天亮還有</small>7:15', '🌬 風暴 2:13 後來')}${roster(t[1])}<div class="body"><div class="task"><div class="lbl">▶ 現在要做</div><p>${t[0]}</p></div>${main() === 'supply' ? shipStatus(true) + intel() : intel() + shipStatus(open)}</div>${bar}`;
+      const bar = main() === 'nav' ? `<div class="bar"><div class="st">還在認識隊友：<strong>00:32</strong> 後才能決定</div><button class="big dim" aria-disabled="true">決定好了</button></div>` : '';
+      return `${topbar('<small>🌅 離天亮還有</small>7:15', '🌬 風暴 2:13 後來')}${roster2(t[1])}<div class="body"><div class="task"><div class="lbl">▶ 現在要做</div><p>${t[0]}</p><div class="tip">找螢幕上方是 ${A.role(TASK_ROLE[main()], 16)} 的那支手機。</div></div>${lk}${main() === 'supply' ? shipStatus(true) + intel() : intel() + shipStatus(open)}</div>${bar}`;
     } },
-  { grp: '8 分鐘開始', t: '起風卡（0:45 才翻）', fix: [1], note: ['第一局的起風卡不在開局第一秒蓋上來，改在認識隊友結束時翻，那時大家已經懂「超重」「風暴」。', '卡片規則不變（從開局就生效），只是翻開的時機。第二局起照舊開局就翻。', '「卡片效果是遊戲設定」只在第一張卡出現一次，之後收成卡角 ⓘ。'], was: '按下開始的第一個畫面就是這張卡，經文三行加效果說明。',
-    r: () => `${topbar('<small>🌅 離天亮還有</small>6:30', '🌬 風暴 1:30 後來')}<div class="body" style="padding-top:12px"><div class="sec" style="border:2px solid var(--gold);padding:14px;display:flex;flex-direction:column;gap:8px"><div style="font-size:12px;color:var(--gold)">起風時發生的事</div><h3 style="margin:0;font-size:22px">朋友的照應</h3><div style="border-left:3px solid var(--gold);padding-left:10px;font-size:15px">第二天，到了西頓；猶流寬待保羅，准他往朋友那裏去，受他們的照應。<br><cite style="color:var(--gold);font-style:normal;font-size:13px">徒 27:3</cite></div><div class="secret"><b>所以這局：</b>朋友幫忙把乾糧烤乾、分成小包：<b>糧食變輕</b>，重 3 → 重 2。</div><div style="font-size:12px;color:var(--muted)">ⓘ 卡片效果是遊戲設定；經文記的是事件本身。</div><button class="big" data-go="next">知道了</button></div></div>` },
-  { grp: '8 分鐘開始', t: '天黑：形容記號', fix: [5], note: ['提示改成先說「它像生活中的什麼東西」，這是全遊戲最自然的笑點，讓它更好笑。', '「原本顧好 3／3 件・船只能留 5」移到電來了以後再說，天黑時只留一件事。', '補船規則不變；可以和 docs/15「記號隨機轉向」一起試。'], was: '「按住看，用說的讓木匠找出來：形狀？幾個缺口？開口朝哪？」，上面還有新人看不懂的「原本顧好 3／3 件」。',
-    r: () => `<div class="scr dark" style="flex:1"><div class="full" style="justify-content:flex-start;gap:14px"><h2 style="text-align:left">天黑了</h2><div style="display:flex;justify-content:space-between;font-size:16px"><span>補船限時 <b style="color:var(--gold);font-size:22px">00:48</b></span><span>補好 <b style="color:var(--gold);font-size:22px">0／2</b> 格</span></div>
-      <div style="text-align:left;font-weight:700;font-size:17px">木匠的面板要補 2 格，<span style="color:var(--gold2)">第 2 格的答案在你手上</span></div>
-      <div class="hold" id="hold">按住這裡才會顯示記號</div>
-      <div class="hint"><b>按住不放</b>就看得到記號，放開就藏起來。<br>先說它<b>像生活中的什麼東西</b>（例：「像缺一角的甜甜圈」），<br>再說<b>幾個缺口、開口朝哪</b>。<br>說給木匠 <b>志豪（🔨）</b>聽，他從面板上選出來。</div></div></div>` },
-  { grp: '8 分鐘開始', t: '第十四天夜裡（章節卡）', fix: [4], note: ['電來了，先浮一張 3 秒的章節卡（不擋操作），用一句故事說清楚：<b>天一亮就衝向海灘，在那之前只來得及再做一件事</b>。', '之後的「天亮」只剩一個意思。'], was: '補好船直接回到儀表板，畫面寫「天亮前全隊只來得及做一件」，但沒有說天亮是什麼時候。',
-    r: () => { timers.push(setTimeout(() => { if (step === 8) { step = 9; sub = 0; render(); } }, 3500)); return `<div class="full">${A.scene({ sky: 'night', onDeck: ['糧食', '纜索', '錨'], load: { weight: 8, cap: 5 }, rock: 'storm' })}<cite>徒 27:27</cite><h2>第十四天夜裡</h2><p>水手覺得快到陸地了。<br><b>天一亮，就衝向海灘。</b></p><p style="font-size:16px;color:var(--muted)">在那之前，全隊只來得及再做一件事：<br>吃飯、拋錨、捆船底，選一件。<br><small>按鈕在負責的人手機上：吃飯＝伙房、捆船底＝木匠、拋錨＝瞭望。大家先商量。</small></p><div class="pbar"><i style="animation-duration:3.5s"></i></div></div>`; } },
-  { grp: '8 分鐘開始', t: '夜裡：離天亮', fix: [4, 2], note: ['頂端倒數改成「🌅 離天亮 3:20」，下面一條天色條，太陽從夜走到日出；走到底＝8:00＝天亮。（同一個 8 分鐘，規則不變）', '「天亮前只來得及一件」改成「<b>出發前</b>只來得及做一件」。', '「等天亮」改名「錨住船」，小字「撐到天亮」。', '吃飯按鈕旁一行經文：「天漸亮的時候，保羅勸眾人吃飯」（27:33），說明為什麼夜裡要吃飯。', '上一階段的表決結果橫幅換階段就清掉。'], was: '「天」只有月亮，沒有天快亮的過程；「天亮」同時是要顧的事、期限、出發時刻三個意思。',
+  { grp: '新流程', t: '起風卡（0:45 才翻）', fix: [1], note: ['第一局的起風卡改在認識隊友結束時翻，那時大家已經懂「超重」「風暴」。', '「卡片效果是遊戲設定」收成卡角 ⓘ。'], was: '按下開始的第一個畫面就是這張卡。',
+    r: () => `${topbar('<small>🌅 離天亮還有</small>7:15', '🌬 風暴 1:30 後來')}<div class="body" style="padding-top:12px"><div class="sec" style="border:2px solid var(--gold);padding:14px;display:flex;flex-direction:column;gap:8px"><div style="display:flex;justify-content:space-between;font-size:12px;color:var(--gold)"><span>起風時發生的事</span><span title="卡片效果是遊戲設定；經文記的是事件本身">ⓘ</span></div><h3 style="margin:0;font-size:22px">朋友的照應</h3><div style="border-left:3px solid var(--gold);padding-left:10px;font-size:15px">第二天，到了西頓；猶流寬待保羅，准他往朋友那裏去，受他們的照應。<br><cite style="color:var(--gold);font-style:normal;font-size:13px">徒 27:3</cite></div><div class="secret"><b>所以這局：</b>朋友幫忙把乾糧烤乾、分成小包：<b>糧食變輕</b>，重 3 → 重 2。</div><button class="big" data-go="next">知道了</button></div></div>` },
+  { grp: '新流程', t: '天黑：用你自己的說法', fix: [5], note: ['描述記號是全遊戲最自然的笑點，每個人形容的方式本身就透露他是怎樣的人（「像我家貓的耳朵」）。不出題，只給一個例子。', '帶油燈的人在這裡真的用上：「小芳 帶了油燈」公開寫出來，大家自然會說「小芳快照！」。', '「原本顧好 3／3 件」等資訊移到電來了以後。'], was: '只寫「形狀？幾個缺口？開口朝哪？」，像考題。',
+    r: () => `<div class="full" style="justify-content:flex-start;gap:12px"><h2 style="text-align:left">天黑了</h2><div style="display:flex;justify-content:space-between;font-size:16px"><span>補船限時 <b style="color:var(--gold);font-size:22px">00:48</b></span><span>補好 <b style="color:var(--gold);font-size:22px">0／2</b> 格</span></div>
+      <div style="text-align:left;font-weight:700;font-size:17px">木匠 <span style="color:var(--gold2)">志豪</span> 的面板要補 2 格，第 2 格的答案在你手上</div>
+      <div class="hold" id="hold">按住不放，看你的記號</div>
+      <div class="hint">告訴志豪你看到什麼。<b>怎麼說都可以</b>：形狀、缺口、像什麼，用手比也行。</div>
+      <div class="hint" style="display:flex;gap:10px;align-items:center">${A.pref('lamp', 30)}<span><b>小芳</b> 上船帶了油燈：她可以照亮一次，灰掉兩個錯的。</span></div></div>` },
+  { grp: '新流程', t: '第十四天夜裡', fix: [4], note: ['3 秒章節卡（不擋操作）：天一亮就衝向海灘，在那之前只來得及再做一件事，以及按鈕在誰手上。'], was: '補好船直接回到儀表板，「天亮前只來得及一件」沒有說天亮是什麼時候。',
+    r: () => { timers.push(setTimeout(() => { if (STEPS[step].t === '第十四天夜裡') { go(step + 1); } }, 3500)); return `<div class="full">${A.scene({ sky: 'night', onDeck: ['糧食', '纜索', '錨'], load: { weight: 8, cap: 5 }, rock: 'storm' })}<cite>徒 27:27</cite><h2>第十四天夜裡</h2><p>水手覺得快到陸地了。<br><b>天一亮，就衝向海灘。</b></p><p style="font-size:16px;color:var(--muted)">在那之前，全隊只來得及再做一件事：<br>吃飯、拋錨、捆船底，選一件。<br><small>按鈕在負責的人手機上：吃飯＝伙房、捆船底＝木匠、拋錨＝瞭望。</small></p><div class="pbar"><i style="animation-duration:3.5s"></i></div></div>`; } },
+  { grp: '新流程', t: '夜裡：離天亮', fix: [4, 2], note: ['頂端一直是「🌅 離天亮還有」同一個倒數；夜裡多一條天色條，太陽慢慢走到日出。', '「等天亮」改名「錨住船」；「天亮前只來得及一件」改「出發前」。（見待決定 2）', '醫生的任務讓他在全員同意時有份量。'], was: '只有月亮，沒有天快亮的過程。',
     r: () => {
-      const T = { comms: '要不要由你召集大家吃飯？先和大家商量。', supply: '浪更大了，船只能留 5：再決定一次留什麼。', nav: '大家都準備好了，就由你按「衝向海灘」。', medic: '你有新線索：十四天沒吃東西了（27:33）。去跟 <em>阿明（🍲伙房）</em> 說：現在就該召集大家吃飯。伙房一按，每個人手機都會跳出「同意／等一下」，<em>大家會先看你怎麼說</em>。' };
+      const T = { comms: '先問大家：「現在吃飯好嗎？」大家點頭，就按下面的按鈕。', supply: '浪更大了，船只能留 5：再決定一次留什麼。', nav: '大家都準備好了，就由你按「衝向海灘」。', medic: '你有新線索：十四天沒吃東西了（27:33）。去跟 <em>阿明（🍲伙房）</em> 說：現在就該召集大家吃飯。伙房一按，每個人手機都會跳出「同意／等一下」，<em>大家會先看你怎麼說</em>。' };
       const use = main() === 'comms' ? `<div class="use"><div class="rule">出發前，全隊只來得及做<b>一件</b>（吃飯也算）</div><button class="big" data-go="next">🍞 召集大家吃飯</button><div class="verse">天漸亮的時候，保羅勸眾人都吃飯（徒 27:33）</div></div>` : '';
       const bar = main() === 'nav' ? `<div class="bar"><div class="st">浪變大了，船最多只能載 5：還要再丟 3 重才能出發</div><button class="big dim" aria-disabled="true">衝向海灘</button></div>` : '';
-      return `${topbar('<small>🌅 離天亮還有</small>3:20', '🌙 補好船了')}<div class="skybar" aria-label="天色：夜裡，離天亮 3 分 20 秒"><i></i></div><div class="skycap"><span>🌙 第十四天夜裡</span><span>🌅 天亮＝衝向海灘</span></div>${roster(main() === 'medic' ? '阿明' : '')}<div class="body"><div class="task"><div class="lbl">▶ 現在要做</div><p>${T[main()] || T.nav}</p></div>${use}${shipStatus(main() !== 'comms', true)}${intel()}</div>${bar}`;
+      return `${topbar('<small>🌅 離天亮還有</small>3:20', '🌙 補好船了')}<div class="skybar" aria-label="天色：夜裡，離天亮 3 分 20 秒"><i></i></div><div class="skycap"><span>🌙 第十四天夜裡</span><span>🌅 天亮＝衝向海灘</span></div>${roster2(main() === 'medic' ? '阿明' : '')}<div class="body"><div class="task"><div class="lbl">▶ 現在要做</div><p>${T[main()] || T.nav}</p></div>${use}${shipStatus(main() !== 'comms', true)}${intel()}</div>${bar}`;
     } },
-  { grp: '8 分鐘開始', t: '開飯時刻', fix: [5], note: ['吃飯通過、擘餅動畫播放時，所有手機下方浮一行 5 秒：「跟旁邊的人說：你現在最想吃什麼？」', '不擋操作、不用回答、不計時。經文裡這正是大家「放下心」的一刻（27:36）。'], was: '只有動畫和一句經文，沒有給人說話的理由。',
-    r: () => `<div class="full" style="position:relative">${A.meal()}<h2>大家吃飯了</h2><p>保羅說了這話，就拿着餅，在眾人面前祝謝了神，擘開吃。於是他們都放下心，也就吃了。</p><cite>徒 27:35–36</cite><div class="toast">🍞 跟旁邊的人說：你現在最想吃什麼？</div></div>` },
-  { grp: '8 分鐘開始', t: '天亮，衝向海灘', fix: [4], note: ['和故事動畫第三格同一張圖，玩家一看就知道「終點到了」。', '結算標題等動畫播完才顯示（現在動畫後面會先透出結果）。'], was: '新人到這裡才第一次看懂「原來天亮是終點」。',
-    r: () => `<div class="full">${A.landing({ lit: { 力氣: true, 船身: true, 天亮: true } })}<h2>天亮了，衝向海灘！</h2><cite>徒 27:39–41</cite><button class="big" data-go="next">看結果</button></div>` },
-  { grp: '結算（不計時）', t: '船員回憶＋謝謝誰', fix: [5], note: ['「船員回憶」排在經文前：依序顯示每位隊員和他剛才的小問題，大家一起回想、說出來。畫面不顯示答案（本來就沒記錄），沒有對錯、沒有分數，可以整張略過。', '「謝謝誰」多一排原因，結果顯示「小芳 → 阿明：說得很清楚」；仍可跳過、不計票。'], was: '破冰問題是全頁最小、最淡的一行灰字，在排行榜和經文後面。',
+  { grp: '新流程', t: '開飯：帶來的東西出場', fix: [5], note: ['不出「你最想吃什麼」的題目。改由故事點名隊友：「美玲 把帶來的乾果分給大家」——被點到的人會笑、會被追問，話題自然來。', '經文裡這正是大家「放下心」的一刻（27:36）。'], was: '上一版原型跳出「跟旁邊的人說：你現在最想吃什麼？」，太像出題。',
+    r: () => `<div class="full" style="position:relative">${A.meal()}<h2>大家吃飯了</h2><p>保羅說了這話，就拿着餅，在眾人面前祝謝了神，擘開吃。於是他們都放下心，也就吃了。</p><cite>徒 27:35–36</cite><div class="toast" style="display:flex;gap:10px;align-items:center">${A.pref('nuts', 28)}<span>美玲 把帶來的乾果也分給大家。</span></div></div>` },
+  { grp: '新流程', t: '天亮，衝向海灘', fix: [4], note: ['和故事動畫第三格同一張圖，一看就知道「終點到了」。結算標題等動畫播完才出現。'], was: '動畫後面先透出結算標題。',
+    r: () => `<div class="full">${A.landing({ lit: { 力氣: true, 船身: true, 天亮: true } })}<h2>天亮了，衝向海灘！</h2><cite>徒 27:39–41</cite><button class="big" data-go="next">上岸</button></div>` },
+  { grp: '新流程', t: '火堆旁（結算）', fix: [5], note: ['經文 28:1–2：上岸那天下雨又冷，島上的人生火接待他們——結算就畫成大家圍著火。', '「剛才發生的事」用<b>真實紀錄點名每個人</b>：誰丟了什麼、誰喊了等一下、第 2 格誰形容誰選對、誰召集吃飯。人最愛聊剛剛一起經歷的事：「你剛才到底怎麼形容的？」——不用出題就聊起來。', '帶來的東西最後出場（外衣、一首歌）。', '謝謝誰＋原因（可跳過、不計分）。', '拿掉「船員回憶」和小問題題庫。'], was: '結尾只有一行灰字「隨口聊聊：剛才哪一刻你最緊張？」；上一版原型是「船員回憶」要大家回想別人的答案，太像考試。',
+    r: () => `<div class="tb"><div class="me"><b>全船平安上岸</b></div><div style="display:flex;gap:6px">${['力氣', '船身', '天亮'].map((k) => A.need(k, true, 26)).join('')}</div></div><div class="body">
+      ${campfire()}
+      <div style="text-align:center;font-size:13px;color:var(--muted)">那天下雨又冷，島上的人生了火接待大家（徒 28:1–2）。經文裡，船上 276 人全都上了岸。</div>
+      <section class="sec"><div class="sh">剛才發生的事</div><div class="in hl-list">
+        <div>${A.role('supply', 24)}<span><b>小芳</b> 第一個丟下麥子和器具</span></div>
+        <div>${A.role('eng', 24)}<span>第 2 格：<b>佳慧</b> 形容、<b>志豪</b> 9 秒就選對</span></div>
+        <div>${A.pref('coat', 24)}<span><b>大衛</b> 把外衣披在一個發抖的人身上</span></div>
+        <div>${A.pref('song', 24)}<span><b>佳慧</b> 在火堆旁哼起歌</span></div></div></section>
+      <details class="sec"><summary>想謝謝誰嗎？ <span class="r">點一下名字就好 ▾</span></summary><div class="in"><div class="chips">${CREW.filter((x) => x.n !== view.n).map((x) => `<button>♡ ${x.n}</button>`).join('')}</div></div></details>
+      <button class="big" data-go="next">再來一局（換角色）</button></div>` },
+  { grp: '新流程', t: '第二局：換角色交接', fix: [3, 5], note: ['第二局角色會輪替（程式本來就這樣）。角色卡多一行「上一局的伙房是 阿明——卡住可以問他」。', '上一局的人變成「前輩」，大家<b>自然和不同的人說話</b>；任務條也會派到新搭檔。這是第二局最自然的破冰。', '第二局不再播動畫，角色卡 8 秒。'], was: '第二局角色換了，但沒有任何提示；常常還是跟同一兩個人說話。',
     r: () => {
-      const c = CREW[sub % CREW.length];
-      return `<div class="tb"><div class="me"><b>全船平安上岸</b></div></div><div class="body">
-        <div style="display:flex;justify-content:center;gap:18px;padding:6px 0">${['力氣', '船身', '天亮'].map((k) => `<div style="text-align:center;font-size:13px">${A.need(k, true, 36)}<br>${k === '天亮' ? '錨住船' : k}</div>`).join('')}</div>
-        <div style="text-align:center;font-size:14px;color:var(--muted)">經文裡，船上 276 人全都上了岸（徒 27:37、44）</div>
-        <section class="sec"><div class="sh">船員回憶 <span class="r">說出來就好・不計分</span></div><div class="in memory">${A.role(c.r, 56)}<div class="who2">${c.n}（${R[c.r].name}）</div><div class="qq">「${R[c.r].q[0]}」<br>他剛才怎麼說的？</div><div class="row2"><button class="ghost" data-act="mem">下一位 ▸</button><button class="ghost">略過</button></div><div class="turns">${CREW.map((x) => `<span class="${x.n === c.n ? 'now' : ''}">${x.n}</span>`).join('')}</div></div></section>
-        <section class="sec"><div class="sh">謝謝誰？<span class="r">可以跳過・不計分</span></div><div class="in"><div class="chips">${CREW.filter((x) => x.n !== view.n).map((x, i) => `<button aria-pressed="${i === 0}">${x.n}</button>`).join('')}</div><div class="chips"><button aria-pressed="true">說得很清楚</button><button>提醒了我</button><button>帶大家吃飯</button><button>補船好快</button><button>其他</button></div><div style="font-size:14px;color:var(--muted)">大家的手機會看到：${view.n} → ${CREW.find((x) => x.n !== view.n).n}：說得很清楚</div></div></section>
-        </div>`;
+      const prev = { comms: '大衛', supply: '阿明', nav: '小芳', medic: '佳慧', combo: '阿明' }[view.id];
+      return roleCard(false, `<div class="body"><div class="looking">🔁 上一局的${R[main()].name}是 <b>${prev}</b>——卡住可以問他。</div></div><div class="bar"><div class="pbar"><i style="animation-duration:8s"></i></div><button class="big">好，開船</button></div>`);
     } },
+  // ───── 待決定（A／B 並排）─────
+  { grp: '待決定（看畫面選）', t: '決定 1：角色登場放哪裡', compare: true, fix: [1, 3], note: ['<b>方案 A</b>：按開始後先不計時：角色卡 8 秒＋30 秒動畫，看完才開始 8 分鐘。新人有時間搞懂；第一局多約 40 秒。', '<b>方案 B</b>：按開始就計時；角色卡疊在開局畫面上 8 秒，動畫縮成一張「三件事」說明卡放在大廳。不增加時間，但新人邊跑邊學。', '兩案都<b>沒有</b>輪流自我介紹。用上方「方案 A／B」切換。'], was: '現在：按開始就計時，第一個畫面是起風卡經文。',
+    r: () => opt === 'A'
+      ? `<div class="full"><div class="optlbl">方案 A・不計時</div>${A.role(main(), 72)}<h2>${roleNames()}</h2><p>角色卡 8 秒 → 30 秒動畫（起風／天黑／天亮）</p><div class="three"><div>${A.scene({ sky: 'storm', onDeck: ALL, load: { weight: 15, cap: 8 } }).replace('width="100%"', 'width="96"')}起風</div><div style="width:96px;height:51px;overflow:hidden;border-radius:6px">${A.darkness()}天黑</div><div>${A.landing({ lit: { 力氣: true, 船身: true, 天亮: true } }).replace('width="100%"', 'width="96"')}天亮</div></div><p style="font-size:15px;color:var(--muted)">看完才開始 8 分鐘倒數</p><button class="big">開船（開始 8:00）</button></div>`
+      : `${topbar('<small>🌅 離天亮還有</small>7:58', '🌬 風暴 2:43 後來')}<div class="body" style="position:relative"><div class="optlbl">方案 B・直接開始</div><div style="opacity:.35">${intel()}${shipStatus(false)}</div><div style="position:absolute;inset:30px 0 auto 0">${roleCard(false, '')}</div></div>` },
+  { grp: '待決定（看畫面選）', t: '決定 2：「天亮」怎麼說', compare: true, fix: [4], note: ['<b>方案 A</b>：倒數一直叫「離天亮」、夜裡有天色條；三件事的「等天亮」改名「錨住船」；「天亮前只來得及一件」改「出發前」。「天亮」只剩一個意思＝衝向海灘的時刻。', '<b>方案 B</b>：名稱不動（等天亮、天亮前只來得及一件），只加「離天亮」倒數和天色條。改動最少，但「等天亮」和「天亮」還是兩個意思。'], was: '現在：倒數是抽象的 8:00；「天亮」同時是要顧的事、期限、出發時刻。',
+    r: () => { dawnNew = opt === 'A'; const h = `${topbar('<small>🌅 離天亮還有</small>3:20', '🌙 補好船了')}<div class="skybar"><i></i></div><div class="skycap"><span>🌙 第十四天夜裡</span><span>🌅 天亮＝衝向海灘</span></div><div class="body"><div class="optlbl">方案 ${opt}</div><div class="use"><div class="rule">${opt === 'A' ? '出發前' : '天亮前'}，全隊只來得及做<b>一件</b>（吃飯也算）</div><button class="big">🍞 召集大家吃飯</button></div><div class="sec"><div class="in" style="padding-top:12px">${gauge(8, 5)}<div class="needs"><div class="h">上岸要顧好的三件事</div><div class="row">${['力氣', '船身', '天亮'].map((k) => `<div>${A.need(k, k !== '力氣', 34)}<span>${nm(k)}</span><small>${k === '天亮' ? (opt === 'A' ? '撐到天亮' : '留著錨') : k === '力氣' ? '要吃了才算' : '靠纜索'}</small></div>`).join('')}</div></div></div></div></div>`; dawnNew = true; return h; } },
+  { grp: '待決定（看畫面選）', t: '決定 3：角色卡加聖經人物', compare: true, fix: [3], note: ['<b>方案 A</b>：角色卡多一行「故事裡：掌船的（徒 27:11）」「路加醫生（西 4:14）」「水手（徒 27:27–30）」；其他角色寫「船上的人」。好記、順便學聖經；不扮演保羅。', '<b>方案 B</b>：只寫職能，不提人物。字少一行，比較不像在教聖經。', '用上方角色切換看不同角色（醫生最明顯）。'], was: '現在：角色只有職能名，沒有任何說明。',
+    r: () => roleCard(opt === 'A', `<div class="body"><div class="optlbl">方案 ${opt}</div></div>`) },
 ];
 
 const whoEl = document.getElementById('who');
@@ -1802,11 +1841,11 @@ const PROBLEM = { 1: '問題 1 看不懂', 2: '問題 2 資訊太多', 3: '問�
 
 function render() {
   timers.forEach(clearTimeout); timers = [];
-  whoEl.innerHTML = VIEWS.map((v) => `<button data-view="${v.id}" aria-pressed="${v === view}">${v.label}</button>`).join('');
+  whoEl.innerHTML = VIEWS.map((v) => `<button data-view="${v.id}" aria-pressed="${v === view}">${v.label}</button>`).join('') + (STEPS[step].compare ? `<span style="width:100%"></span>${['A', 'B'].map((o) => `<button data-opt="${o}" aria-pressed="${opt === o}" class="optbtn">方案 ${o}</button>`).join('')}` : '');
   let g = '';
   stepsEl.innerHTML = STEPS.map((s, i) => { const h = s.grp !== g ? `<div class="grp">${(g = s.grp)}</div>` : ''; return `${h}<button data-step="${i}" aria-current="${i === step}"><b>${i + 1}</b>${s.t}</button>`; }).join('');
   const s = STEPS[step];
-  scr.className = 'scr' + (step === 7 ? ' dark' : '');
+  scr.className = 'scr' + (STEPS[step].t.startsWith('天黑') ? ' dark' : '');
   scr.innerHTML = s.r();
   scr.scrollTop = 0;
   notes.innerHTML = `<h2>${step + 1}. ${s.t}</h2><div class="fix">${s.fix.map((f) => `<span>${PROBLEM[f]}</span>`).join('')}</div><ul>${s.note.map((n) => `<li>${n}</li>`).join('')}</ul><div class="was"><b>現在的遊戲：</b>${s.was}</div>`;
@@ -1820,12 +1859,12 @@ function render() {
 function go(i) { step = Math.max(0, Math.min(STEPS.length - 1, i)); sub = 0; render(); }
 document.addEventListener('click', (e) => {
   const b = e.target.closest('button'); if (!b) return;
-  if (b.dataset.view) { view = VIEWS.find((v) => v.id === b.dataset.view); sub = 0; render(); }
+  if (b.dataset.opt) { opt = b.dataset.opt; render(); }
+  else if (b.dataset.view) { view = VIEWS.find((v) => v.id === b.dataset.view); sub = 0; render(); }
   else if (b.dataset.step) go(+b.dataset.step);
   else if (b.dataset.go === 'next' || b.id === 'next') go(step + 1);
   else if (b.id === 'prev') go(step - 1);
-  else if (b.dataset.act === 'swapq' || b.dataset.act === 'mem') { sub++; render(); }
-  else if (b.closest('.full[data-sub]')) { sub++; render(); }
+    else if (b.closest('.full[data-sub]')) { sub++; render(); }
 });
 const q = new URLSearchParams(location.search);
 if (location.hash.startsWith('#s')) step = Math.min(STEPS.length - 1, Math.max(0, parseInt(location.hash.slice(2), 10) - 1 || 0));
