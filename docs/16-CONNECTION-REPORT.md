@@ -249,3 +249,12 @@ X7 遊戲中斷 8 秒：1373ms 連上；職能、按鈕、階段一致；倒數 
 **還沒做到的**：
 - 沒有部署：需要 Cloudflare API 金鑰（環境設定裡的 network secret，主機 api.cloudflare.com）。有金鑰後執行 `npm run deploy:conn`，網址會是 `https://impossible-mission-conn.next-calendar.workers.dev`。
 - 真機行為（iOS／Android 背景、真實網路換手）全部未測試；請照 docs/06 的「真手機」7 步驟。
+
+
+## 8. 模擬手機測試（2026-11-22，`npm run e2e:phones`；模擬，不是真機）
+
+使用者問「可以模擬真手機做測試嗎」。可以模擬到的部分：手機的螢幕、觸控、瀏覽器識別（Playwright 裝置設定）、4G 延遲抖動、鎖螢幕／切 App（停住整頁 JavaScript＋關掉連線）、Wi‑Fi 換 4G、進電梯。結果 14 項全部通過，數字見 docs/06「模擬手機」。
+
+過程中發現：Chrome 開發工具的「凍結頁面」在 headless 下計時器照跑，所以第 3 節 X3 的「凍結 60 秒連線沒斷」其實沒有真的模擬到背景，改用 Debugger.pause 重測；也修了「從背景回來一打開就閃出重新整理」。
+
+模擬不到、仍需真機的：iOS Safari 本身（這裡只有 Chromium）、iOS 回前景連線卡住的 bug、作業系統真正的背景限制與省電模式、真實的訊號切換。

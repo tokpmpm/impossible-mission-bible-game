@@ -274,15 +274,24 @@ export function createConnection(handlers) {
     }, PROBE_MS);
   }
 
+  /** 回到畫面上：斷線秒數從現在算（不然一打開就看到「斷了 30 秒＋重新整理」），再檢查連線。 */
+  function onReturn() {
+    if (!isOpen() && downSince !== null) {
+      downSince = Date.now();
+      timeouts = 0;
+    }
+    ensureFresh();
+  }
+
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') ensureFresh();
+    if (document.visibilityState === 'visible') onReturn();
   });
   window.addEventListener('online', ensureFresh);
   window.addEventListener('focus', ensureFresh);
   window.addEventListener('pageshow', (e) => {
-    if (e.persisted) ensureFresh();
+    if (e.persisted) onReturn();
   });
-  document.addEventListener('resume', ensureFresh); // Chrome：頁面從凍結恢復
+  document.addEventListener('resume', onReturn); // Chrome：頁面從凍結恢復
 
   // 心跳：每 10 秒送一次（伺服器 45 秒沒收到就當你斷線）；25 秒沒收到任何東西＝這條連線已死，馬上換一條
   setInterval(() => {
