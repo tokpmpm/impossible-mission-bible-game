@@ -1,0 +1,1834 @@
+<title>上船點名原型</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap">
+<style>
+/* 版面：左側步驟清單｜中間一支手機｜右側「改了什麼」；手機寬度時三段直排。沿用遊戲本身的深藍＋暖金。 */
+:root {
+  --bg: #071327; --navy: #0b1d3a; --card: #13294d; --card2: #1b3262; --line: #2c4a7a;
+  --gold: #f2c14e; --gold2: #ffd97a; --ink: #1b1400; --text: #f4f1e8; --muted: #a9b6cc; --red: #ff6b6b; --green: #6fd3a0;
+  --f: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--text); font-family: var(--f); font-size: 15px; line-height: 1.55; }
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible { outline: 3px solid var(--gold2); outline-offset: 2px; }
+.wrap { display: grid; grid-template-columns: 230px minmax(0, 380px) minmax(0, 1fr); gap: 28px; max-width: 1180px; margin: 0 auto; padding-block: 24px 48px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); align-items: start; }
+header.top { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: baseline; }
+header.top h1 { margin: 0; font-size: 22px; color: var(--gold); font-weight: 900; letter-spacing: .02em; }
+header.top p { margin: 0; color: var(--muted); font-size: 14px; }
+.steps { display: flex; flex-direction: column; gap: 4px; position: sticky; top: calc(env(safe-area-inset-top, 0px) + 12px); }
+.steps .grp { font-size: 12px; letter-spacing: .08em; color: var(--muted); margin: 10px 0 2px; }
+.steps button { text-align: left; background: none; border: 1px solid transparent; border-radius: 10px; padding: 6px 10px; color: var(--muted); font-size: 14px; display: flex; gap: 8px; }
+.steps button b { color: var(--gold); font-variant-numeric: tabular-nums; min-width: 1.6em; }
+.steps button[aria-current="true"] { background: var(--card); border-color: var(--line); color: var(--text); }
+.who { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+.who button { border: 1px solid var(--line); background: var(--navy); border-radius: 999px; padding: 4px 10px; font-size: 13px; color: var(--muted); }
+.who button[aria-pressed="true"] { border-color: var(--gold); color: var(--gold); }
+.phone { width: 100%; max-width: 380px; height: 760px; background: var(--navy); border: 2px solid var(--line); border-radius: 30px; overflow: hidden; display: flex; flex-direction: column; position: relative; box-shadow: 0 20px 60px rgba(0,0,0,.45); }
+.scr { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
+.scr > * { flex-shrink: 0; }
+.ctrl { display: flex; gap: 8px; justify-content: center; margin-top: 12px; }
+.ctrl button { border: 1px solid var(--line); background: var(--card); border-radius: 12px; min-height: 44px; padding: 0 18px; }
+.notes { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px 20px; }
+.notes h2 { margin: 0 0 4px; font-size: 18px; color: var(--gold); text-wrap: balance; }
+.notes .fix { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 10px; }
+.notes .fix span { font-size: 12px; border: 1px solid var(--gold); color: var(--gold); border-radius: 999px; padding: 1px 8px; }
+.notes ul { margin: 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: 6px; }
+.notes .was { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line); color: var(--muted); font-size: 14px; }
+.notes .was b { color: var(--text); }
+@media (max-width: 900px) {
+  .wrap { grid-template-columns: minmax(0, 1fr); }
+  .steps { position: static; flex-direction: row; flex-wrap: wrap; }
+  .steps .grp { width: 100%; }
+  .steps button { padding: 4px 8px; font-size: 13px; }
+  .phone { margin: 0 auto; height: 700px; }
+}
+
+/* ───── 遊戲內畫面 ───── */
+.tb { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 14px 8px; background: #0a1a34; border-bottom: 1px solid var(--line); }
+.tb .me { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tb .me b { font-size: 19px; color: var(--gold); white-space: nowrap; }
+.tb .me span { color: var(--muted); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tb .clock { font-weight: 900; font-size: 18px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tb .clock small { font-size: 12px; font-weight: 500; color: var(--muted); margin-right: 4px; }
+.skybar { height: 10px; margin: 0 14px 6px; border-radius: 6px; background: linear-gradient(90deg, #0d1d45 0%, #2a3f7a 45%, #c77a5a 85%, #f5b35c 100%); position: relative; }
+.skybar i { position: absolute; top: 50%; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; background: #ffe08a; box-shadow: 0 0 10px #ffd86b; left: 58%; animation: sun 30s linear infinite; }
+@keyframes sun { from { left: 58%; } to { left: 66%; } }
+.skycap { display: flex; justify-content: space-between; margin: 0 14px; font-size: 11px; color: var(--muted); }
+.roster { display: flex; gap: 6px; overflow-x: auto; padding: 8px 14px; scrollbar-width: none; }
+.roster span { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; font-size: 13px; padding: 2px 8px 2px 3px; border-radius: 999px; background: var(--card); border: 1px solid var(--line); color: var(--muted); }
+.roster span.hl { border-color: var(--gold); color: var(--text); }
+.roster span.self { color: var(--gold); }
+.body { padding: 4px 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.task { border: 2px solid var(--gold); border-radius: 16px; padding: 10px 14px 12px; background: linear-gradient(180deg, rgba(242,193,78,.14), rgba(242,193,78,.04)); }
+.task .lbl { font-size: 12px; letter-spacing: .1em; color: var(--gold); font-weight: 700; }
+.task p { margin: 2px 0 0; font-size: 19px; font-weight: 700; line-height: 1.45; }
+.task p em { font-style: normal; color: var(--gold2); }
+.sec { background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
+.sec > summary, .sec > .sh { list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; font-weight: 700; cursor: pointer; }
+.sec > summary::-webkit-details-marker { display: none; }
+.sec > summary .r, .sec > .sh .r { font-weight: 500; color: var(--muted); font-size: 13px; }
+.sec > summary, .sec > .sh { white-space: nowrap; }
+.sec > summary .r, .sec > .sh .r { white-space: normal; text-align: right; }
+.sec .in { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 8px; }
+.clue { display: flex; gap: 10px; align-items: center; background: var(--navy); border-radius: 12px; padding: 8px 10px; }
+.clue .pic { flex: 0 0 auto; display: flex; align-items: center; gap: 2px; }
+.clue .t { font-weight: 700; font-size: 14px; display: flex; gap: 6px; align-items: center; }
+.clue .t small { font-weight: 400; font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 0 4px; }
+.clue p { margin: 0; font-size: 14px; }
+.more { font-size: 13px; color: var(--gold); padding: 2px 4px; background: none; border: none; text-align: left; }
+.gauge { display: flex; align-items: center; gap: 8px; }
+.gauge .cells { display: flex; flex-wrap: wrap; gap: 3px; flex: 1; }
+.gauge .cells i { width: 13px; height: 13px; border-radius: 3px; background: var(--gold); }
+.gauge .cells i.o { background: var(--red); }
+.gauge b { font-size: 20px; font-variant-numeric: tabular-nums; }
+.gauge .ov { color: var(--red); font-weight: 700; font-size: 14px; }
+.needs { display: flex; flex-direction: column; gap: 4px; }
+.needs .h { font-size: 12px; color: var(--muted); text-align: center; }
+.needs .row { display: grid; grid-template-columns: repeat(3, 1fr); text-align: center; font-size: 13px; }
+.needs .row div { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.needs small { color: var(--muted); font-size: 11px; }
+.tray { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.tray button { background: var(--navy); border: 2px solid var(--gold); border-radius: 12px; padding: 6px 2px 4px; display: flex; flex-direction: column; align-items: center; font-weight: 700; font-size: 13px; }
+.tray button.off { border-color: var(--line); opacity: .5; }
+.mini-scene { border-radius: 12px; overflow: hidden; height: 112px; }
+.mini-scene .art-scene { height: 112px; width: 100%; object-fit: cover; }
+.bar { margin-top: auto; padding: 10px 14px 14px; background: linear-gradient(180deg, rgba(11,29,58,0), var(--navy) 30%); position: sticky; bottom: 0; display: flex; flex-direction: column; gap: 6px; }
+.bar .st { text-align: center; font-size: 13px; color: var(--muted); }
+.bar .st strong { color: var(--gold); font-variant-numeric: tabular-nums; }
+.big { min-height: 52px; border-radius: 16px; border: none; background: var(--gold); color: var(--ink); font-weight: 900; font-size: 18px; width: 100%; }
+.big.dim { opacity: .45; }
+.ghost { min-height: 44px; border-radius: 14px; border: 1px solid var(--line); background: transparent; color: var(--muted); }
+.use { border: 2px solid var(--gold); border-radius: 14px; padding: 10px 12px; background: var(--card); display: flex; flex-direction: column; gap: 8px; }
+.use .rule { font-weight: 700; color: var(--gold); }
+.use .verse { font-size: 13px; color: var(--muted); border-left: 3px solid var(--gold); padding-left: 8px; }
+/* 全螢幕段落 */
+.full { flex: 1; display: flex; flex-direction: column; gap: 12px; padding: 20px 18px; justify-content: center; text-align: center; }
+.full h2 { margin: 0; font-size: 26px; font-weight: 900; color: var(--gold); text-wrap: balance; }
+.full p { margin: 0; font-size: 18px; line-height: 1.6; }
+.full cite { font-style: normal; color: var(--gold); font-size: 14px; }
+.dots { display: flex; gap: 6px; justify-content: center; }
+.dots i { width: 8px; height: 8px; border-radius: 50%; background: var(--line); }
+.dots i.on { background: var(--gold); width: 22px; border-radius: 4px; }
+.pbar { height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; }
+.pbar i { display: block; height: 100%; background: var(--gold); width: 0; animation: fill linear forwards; }
+@keyframes fill { to { width: 100%; } }
+.three { display: flex; justify-content: center; gap: 18px; }
+.three div { display: flex; flex-direction: column; align-items: center; font-size: 14px; font-weight: 700; }
+.rolecard { margin: 14px; border: 2px solid var(--gold); border-radius: 22px; padding: 18px 16px 16px; background: radial-gradient(120% 70% at 50% 0%, #22407a, var(--card) 70%); display: flex; flex-direction: column; gap: 10px; text-align: center; }
+.rolecard .you { font-size: 15px; color: var(--muted); }
+.rolecard h2 { margin: 0; font-size: 32px; font-weight: 900; color: var(--gold); line-height: 1.2; }
+.rolecard .line { font-size: 21px; font-weight: 700; }
+.rolecard .bib { font-size: 13px; color: var(--muted); }
+.rolecard hr { border: none; border-top: 1px dashed var(--line); margin: 2px 0; width: 100%; }
+.rolecard .k { font-size: 12px; letter-spacing: .08em; color: var(--muted); text-align: left; }
+.fakebtn { border: 2px dashed var(--muted); border-radius: 14px; padding: 8px; color: var(--muted); font-weight: 700; display: flex; flex-direction: column; align-items: center; }
+.fakebtn small { font-weight: 400; font-size: 12px; }
+.secret { text-align: left; background: var(--navy); border-radius: 12px; padding: 8px 10px; font-size: 15px; }
+.secret b { color: var(--gold2); }
+.q { background: rgba(242,193,78,.12); border: 1px solid var(--gold); border-radius: 14px; padding: 10px; font-size: 17px; font-weight: 700; }
+.q small { display: block; font-size: 12px; color: var(--gold); font-weight: 500; }
+.row2 { display: flex; gap: 8px; }
+.row2 > * { flex: 1; }
+.turns { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+.turns span { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.turns span.now { border-color: var(--gold); color: var(--gold); }
+.turns span.done { opacity: .5; text-decoration: line-through; }
+.dark { background: #03060d; }
+.hold { border: 3px dashed var(--gold); border-radius: 18px; min-height: 180px; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 900; color: var(--gold2); user-select: none; -webkit-user-select: none; touch-action: none; }
+.hint { background: #10203c; border-radius: 14px; padding: 10px 12px; font-size: 16px; text-align: left; }
+.hint b { color: var(--gold2); }
+.toast { position: absolute; left: 12px; right: 12px; bottom: 16px; background: #fff3cf; color: var(--ink); border-radius: 14px; padding: 10px 12px; font-weight: 700; box-shadow: 0 8px 30px rgba(0,0,0,.5); animation: up .4s ease-out; }
+@keyframes up { from { transform: translateY(30px); opacity: 0; } }
+.memory { text-align: center; display: flex; flex-direction: column; gap: 8px; }
+.memory .who2 { font-size: 20px; font-weight: 900; }
+.memory .qq { font-size: 18px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips button { border: 1px solid var(--line); background: var(--navy); border-radius: 999px; padding: 4px 12px; min-height: 36px; }
+.chips button[aria-pressed="true"] { border-color: var(--gold); color: var(--gold); background: rgba(242,193,78,.12); }
+.lobby-list { display: flex; flex-direction: column; gap: 4px; }
+.lobby-list div { background: var(--navy); border-radius: 10px; padding: 6px 10px; display: flex; justify-content: space-between; font-size: 15px; }
+.lobby-list div small { color: var(--muted); }
+details.script { font-size: 14px; color: var(--muted); }
+details.script summary { cursor: pointer; color: var(--gold); }
+@media (prefers-reduced-motion: reduce) { .pbar i, .skybar i, .toast { animation: none; } .pbar i { width: 100%; } }
+/* 第一關「保羅海難」插畫動畫（搭配 public/art.js）。
+   原則：元素靜止時就是「最終狀態」，keyframes 只描述從哪裡來；
+   所以 prefers-reduced-motion 關掉動畫後，畫面自然停在最終狀態。
+   所有選擇器都限定在 .art（art.js 產生的 SVG）底下，不影響全域。 */
+
+.art { display: inline-block; vertical-align: middle; overflow: visible; }
+.art.art-scene,
+.art.art-card,
+.art.art-meal,
+.art.art-landing { display: block; width: 100%; height: auto; max-width: 100%; overflow: hidden; }
+.art.art-darkness { display: block; width: 100%; height: 100%; overflow: hidden; }
+.art.art-scene { border-radius: 14px; }
+
+/* ── 共用：浪往左流動（位移量＝波長，無縫循環） ── */
+@keyframes art-drift-48 { from { transform: translateX(0); } to { transform: translateX(-48px); } }
+@keyframes art-drift-60 { from { transform: translateX(0); } to { transform: translateX(-60px); } }
+@keyframes art-drift-30 { from { transform: translateX(0); } to { transform: translateX(-30px); } }
+.art .waves-back { animation: art-drift-48 7s linear infinite; }
+.art .waves-front { animation: art-drift-60 5s linear infinite; }
+.art.sky-storm .waves-back,
+.art.sky-dark .waves-back { animation-duration: 3.2s; }
+.art.sky-storm .waves-front,
+.art.sky-dark .waves-front { animation-duration: 2.2s; }
+.art .waves-landing { animation: art-drift-30 4s linear infinite; }
+
+/* ── 船隨浪搖擺：calm 小、storm 大 ── */
+.art .ship { transform-box: view-box; transform-origin: 180px 120px; }
+@keyframes art-rock-calm {
+  0%, 100% { transform: rotate(-1.2deg) translateY(0); }
+  50% { transform: rotate(1.2deg) translateY(1.5px); }
+}
+@keyframes art-rock-storm {
+  0%, 100% { transform: rotate(-4.5deg) translateY(-2px); }
+  25% { transform: rotate(0deg) translateY(3px); }
+  50% { transform: rotate(4.5deg) translateY(-1px); }
+  75% { transform: rotate(0deg) translateY(3px); }
+}
+.art .rock-calm { animation: art-rock-calm 6s ease-in-out infinite; }
+.art .rock-storm { animation: art-rock-storm 3.2s ease-in-out infinite; }
+
+/* ── 天空：雲飄、雨、閃電 ── */
+@keyframes art-clouds { from { transform: translateX(-8px); } to { transform: translateX(8px); } }
+.art .clouds { animation: art-clouds 9s ease-in-out infinite alternate; }
+
+@keyframes art-rain { from { transform: translate(0, 0); } to { transform: translate(-10px, 40px); } }
+.art .rain { animation: art-rain 0.45s linear infinite; }
+.art.sky-dark .rain { animation-duration: 0.6s; }
+
+/* 偶爾閃電：大部分時間看不到，週期末閃兩下 */
+@keyframes art-lightning {
+  0%, 88%, 91%, 93.5%, 100% { opacity: 0; }
+  89%, 92.5% { opacity: 1; }
+}
+.art .lightning { opacity: 0; animation: art-lightning 7s linear infinite 1.5s; }
+
+/* 停電遮罩：很暗的閃電，更少出現 */
+@keyframes art-dim-lightning {
+  0%, 93%, 95%, 100% { opacity: 0; }
+  94% { opacity: 1; }
+}
+.art .dim-lightning { animation: art-dim-lightning 11s linear infinite 3s; }
+
+/* ── 漂浮的東西：半沉、隨浪上下 ── */
+.art .bob { transform-box: fill-box; transform-origin: 50% 70%; animation: art-bob 2.6s ease-in-out infinite; }
+.art .float-item:nth-of-type(2n) .bob { animation-delay: -1.1s; animation-duration: 3s; }
+@keyframes art-bob {
+  0%, 100% { transform: translateY(0) rotate(-7deg); }
+  50% { transform: translateY(2.5px) rotate(7deg); }
+}
+
+/* ── 剛丟進海裡：沿拋物線從甲板飛到漂浮位置（約 0.8 秒）＋水花 ──
+   外層管水平（等速）、內層管垂直（先上後下），合起來就是拋物線。
+   --fx/--fy 是「甲板位置 − 漂浮位置」，終點是 0，所以靜止時就停在漂浮位置。 */
+@keyframes art-fly-x { from { transform: translateX(var(--fx, 0px)); } to { transform: translateX(0); } }
+@keyframes art-fly-y {
+  0% { transform: translateY(var(--fy, 0px)); animation-timing-function: cubic-bezier(0.2, 0.7, 0.4, 1); }
+  35% { transform: translateY(calc(var(--fy, 0px) - 30px)); animation-timing-function: cubic-bezier(0.6, 0, 0.9, 0.5); }
+  100% { transform: translateY(0); }
+}
+.art .just-thrown { animation: art-fly-x 0.8s linear both; }
+.art .just-thrown .jt-y { animation: art-fly-y 0.8s both; }
+.art .appear-late { animation: art-appear-late 0.8s linear both; }
+@keyframes art-appear-late { 0%, 80% { opacity: 0; } 100% { opacity: 1; } }
+
+.art .splash > g { transform-box: fill-box; transform-origin: 50% 100%; }
+.art .splash { animation: art-splash-fade 1.1s ease-out both; }
+.art .splash > g { animation: art-splash-grow 1.1s ease-out both; }
+@keyframes art-splash-fade {
+  0%, 65% { opacity: 0; }
+  75% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@keyframes art-splash-grow {
+  0%, 65% { transform: scale(0.3); }
+  85% { transform: scale(1); }
+  100% { transform: scale(1.15); }
+}
+/* 單獨使用的水花圖 */
+.art.art-splash .splash { animation-duration: 0.6s; animation-name: art-splash-solo; }
+.art.art-splash .splash > g { animation-duration: 0.6s; animation-name: art-splash-solo-grow; }
+@keyframes art-splash-solo { 0% { opacity: 0; } 25% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes art-splash-solo-grow { 0% { transform: scale(0.3); } 60% { transform: scale(1); } 100% { transform: scale(1.15); } }
+
+/* ── 剛撈回：從海面跳回甲板 ── */
+.art .just-rescued { animation: art-fly-x 0.7s ease-out both; }
+.art .just-rescued .jr-y { animation: art-hop-y 0.7s both; }
+@keyframes art-hop-y {
+  0% { transform: translateY(var(--fy, 0px)); animation-timing-function: cubic-bezier(0.2, 0.7, 0.4, 1); }
+  55% { transform: translateY(-22px); animation-timing-function: cubic-bezier(0.6, 0, 0.9, 0.5); }
+  100% { transform: translateY(0); }
+}
+
+/* ── 超重：甲板上的海水晃動、警告三角閃爍 ── */
+.art .deck-water { animation: art-slosh 1.4s ease-in-out infinite alternate; }
+@keyframes art-slosh { from { opacity: 0.6; transform: translateX(-2px); } to { opacity: 1; transform: translateX(2px); } }
+.art .overload-warn { animation: art-warn 1s ease-in-out infinite alternate; }
+@keyframes art-warn { from { opacity: 0.65; } to { opacity: 1; } }
+
+/* ── 上岸三件事：亮起時發一次光 ── */
+.art.need-lit { animation: art-need-lit 0.9s ease-out 1; transform-origin: 50% 50%; }
+@keyframes art-need-lit {
+  0% { transform: scale(0.7); filter: drop-shadow(0 0 0 rgba(242, 193, 78, 0)); }
+  45% { transform: scale(1.22); filter: drop-shadow(0 0 10px rgba(255, 217, 122, 0.95)); }
+  100% { transform: scale(1); filter: drop-shadow(0 0 0 rgba(242, 193, 78, 0)); }
+}
+
+/* 故事卡：風線輕輕流動 */
+.art .card-wind { stroke-dasharray: 60 14; animation: art-card-wind 1.6s linear infinite; }
+@keyframes art-card-wind { from { stroke-dashoffset: 74; } to { stroke-dashoffset: 0; } }
+
+/* ── 吃飯（擘餅）：約 2.5 秒 ── */
+.art-meal .meal-hands { animation: art-meal-hands 0.4s ease-out both; }
+@keyframes art-meal-hands { from { opacity: 0; transform: translateY(12px); } }
+.art-meal .meal-half { transform-box: view-box; transform-origin: 120px 100px; }
+.art-meal .meal-half-l { transform: translate(-9px, 1px) rotate(-9deg); animation: art-meal-break-l 0.6s ease-out 0.4s both; }
+.art-meal .meal-half-r { transform: translate(9px, 1px) rotate(9deg); animation: art-meal-break-r 0.6s ease-out 0.4s both; }
+@keyframes art-meal-break-l { from { transform: none; } }
+@keyframes art-meal-break-r { from { transform: none; } }
+.art-meal .meal-crumb { animation: art-meal-crumb 0.6s ease-out both; }
+@keyframes art-meal-crumb { from { opacity: 0; transform: translate(var(--cx, 0px), var(--cy, 0px)); } }
+.art-meal .meal-head { transform-box: fill-box; transform-origin: center; animation: art-meal-head 0.45s ease-out both; }
+@keyframes art-meal-head { from { opacity: 0.22; transform: scale(0.8); } 60% { opacity: 1; transform: scale(1.15); } }
+
+/* ── 上岸：約 4 秒 ── */
+/* 船駛向沙灘，45% 撞上沙洲，船頭卡住 */
+.art-landing .land-ship { transform-box: view-box; transform-origin: 226px 150px; animation: art-land-ship 4s both; }
+@keyframes art-land-ship {
+  0% { transform: translate(-170px, -10px); animation-timing-function: ease-out; }
+  44% { transform: translate(-4px, 0); }
+  48% { transform: translate(2px, 0) rotate(3deg); }
+  54% { transform: rotate(-2deg); }
+  60% { transform: rotate(1deg); }
+  100% { transform: none; }
+}
+/* 船尾在擱淺後被浪打壞：完整船尾消失，碎木板散開 */
+.art-landing .stern-intact { animation: art-land-stern 4s both; }
+@keyframes art-land-stern { 0%, 52% { opacity: 1; } 56%, 100% { opacity: 0; } }
+.art-landing .land-debris { animation: art-land-debris 4s ease-out both; }
+@keyframes art-land-debris {
+  0%, 52% { opacity: 0; transform: translate(var(--dx, 0px), var(--dy, 0px)); }
+  56% { opacity: 1; }
+  100% { transform: none; }
+}
+.art-landing .land-splash { animation: art-land-splash 4s ease-out both; }
+.art-landing .land-splash > g { transform-box: fill-box; transform-origin: 50% 100%; }
+@keyframes art-land-splash { 0%, 46% { opacity: 0; } 52% { opacity: 1; } 66%, 100% { opacity: 0; } }
+
+/* 人：從船邊的水裡（橫躺＝游水／抱著木板）一路漂到岸上站起來。沒有人往下沉。 */
+.art-landing .land-person { transform-box: fill-box; transform-origin: 50% 70%; animation: art-land-swim 4s both; }
+.art-landing .land-person.slow { animation-name: art-land-swim-slow; }
+@keyframes art-land-swim {
+  0%, 52% { opacity: 0; transform: translate(var(--sx), var(--sy)) rotate(-80deg); }
+  57% { opacity: 1; transform: translate(var(--sx), var(--sy)) rotate(-80deg); }
+  80% { transform: translate(calc(var(--sx) * 0.12), calc(var(--sy) * 0.12)) rotate(-80deg); }
+  90%, 100% { opacity: 1; transform: none; }
+}
+@keyframes art-land-swim-slow {
+  0%, 52% { opacity: 0; transform: translate(var(--sx), var(--sy)) rotate(-80deg); }
+  57% { opacity: 1; transform: translate(var(--sx), var(--sy)) rotate(-80deg); }
+  70% { transform: translate(calc(var(--sx) * 0.7), calc(var(--sy) * 0.7)) rotate(-80deg); }
+  90% { transform: translate(calc(var(--sx) * 0.1), calc(var(--sy) * 0.1)) rotate(-80deg); }
+  97%, 100% { opacity: 1; transform: none; }
+}
+/* 岸上生起一堆火（28:2） */
+.art-landing .land-fire { transform-box: fill-box; transform-origin: 50% 100%; animation: art-land-fire 4s ease-out both; }
+@keyframes art-land-fire { 0%, 86% { opacity: 0; transform: scale(0.2); } 100% { opacity: 1; transform: none; } }
+.art-landing .flame { transform-box: fill-box; transform-origin: 50% 100%; animation: art-flicker 0.7s ease-in-out 4s infinite alternate; }
+@keyframes art-flicker { from { transform: scale(1, 1); } to { transform: scale(0.92, 1.1); } }
+
+/* ── 減少動態：全部停住，停在最終狀態 ── */
+@media (prefers-reduced-motion: reduce) {
+  .art,
+  .art * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* ───── 拋錨、捆船底（2026-11-16 三種用掉） ───── */
+.art.art-use { display: block; max-width: 360px; margin: 0 auto; }
+.art-anchor .ad-anchor, .art-anchor .ad-rope { animation: art-anchor-drop 0.9s ease-in both; }
+@keyframes art-anchor-drop { from { transform: translateY(-46px); opacity: 0; } }
+.art-undergird .ug-loop { animation: art-ug-loop 0.7s ease-out both; }
+@keyframes art-ug-loop { from { opacity: 0; transform: scaleY(0.2); } }
+.art-undergird .ug-loop { transform-box: fill-box; transform-origin: 50% 0; }
+
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <h1>上船點名原型</h1>
+    <p>docs/17 新手引導與破冰提案的可點原型。畫面是示意，不連伺服器；插圖沿用遊戲本身的 art.js。</p>
+  </header>
+  <nav class="steps" id="steps" aria-label="畫面"></nav>
+  <div>
+    <div class="who" id="who" role="group" aria-label="用哪個角色的手機看"></div>
+    <div class="phone" id="phone"><div class="scr" id="scr"></div></div>
+    <div class="ctrl"><button id="prev">← 上一個畫面</button><button id="next">下一個畫面 →</button></div>
+  </div>
+  <aside class="notes" id="notes" aria-live="polite"></aside>
+</div>
+
+<script>
+const A = (function () {
+// 第一關「保羅海難」（使徒行傳 27 章）的插畫與動畫。
+// 全部是純函式，回傳 SVG 字串，可直接塞進 innerHTML；不碰 DOM、零依賴、不用外部圖庫。
+// 動畫全部寫在 art.css（keyframes＋class），這裡只負責畫圖與掛 class。
+//
+// 動畫設計原則：每個會動的元素，「靜止時」的樣子就是動畫的最終狀態，
+// keyframes 只描述「從哪裡來」。所以 prefers-reduced-motion 把 animation 關掉時，
+// 畫面自然停在最終狀態（東西已漂在海上、人都上了岸、火已生起）。
+//
+// 注意：會被 CSS 動畫改 transform 的 <g>，絕對不放 transform 屬性（CSS 會蓋掉它），
+// 位置一律交給外層或內層另一個 <g transform="...">。
+
+// ───────────────────────── 色彩 ─────────────────────────
+const C = {
+  navy: '#0b1d3a',
+  card: '#13294d',
+  card2: '#1b3262',
+  gold: '#f2c14e',
+  gold2: '#ffd97a',
+  goldDeep: '#c9932a',
+  ink: '#2a1d00',
+  text: '#f4f1e8',
+  muted: '#b5c0d9',
+  grey: '#8592ad',
+  wood: '#9a6337',
+  woodDark: '#6b3f1f',
+  woodLight: '#c48a52',
+  sail: '#efe6d0',
+  steel: '#b4c2d4',
+  steelDark: '#5d6e86',
+  rope: '#d9b37a',
+  sack: '#c8a06a',
+  bread: '#e3a24f',
+  sea: '#1f6696',
+  seaDark: '#123f66',
+  foam: '#dceefa',
+  red: '#ff6b6b',
+  sand: '#e9cf96',
+};
+
+// 統一的深色描邊，讓圖示在深色背景與木頭甲板上都清楚
+const INK = `stroke="${C.ink}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"`;
+
+// 同一頁可能有多個 SVG：漸層等 id 加流水號避免互相干擾
+let uidSeq = 0;
+const uid = (p) => `art-${p}-${++uidSeq}`;
+
+const esc = (s) =>
+  String(s).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
+
+/** 帶深色外框的粗線（先畫深色粗線，再畫彩色細線），適合錨、繩子等線狀物。 */
+function ol(d, color, w = 3, extra = '') {
+  return (
+    `<path d="${d}" fill="none" stroke="${C.ink}" stroke-width="${w + 2.4}" stroke-linecap="round" stroke-linejoin="round"/>` +
+    `<path d="${d}" fill="none" stroke="${color}" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round" ${extra}/>`
+  );
+}
+
+function svgOpen({ viewBox, size, label, cls = '', extra = '' }) {
+  const dims = size ? `width="${size}" height="${size}"` : 'width="100%"';
+  return `<svg xmlns="http://www.w3.org/2000/svg" class="art ${cls}" viewBox="${viewBox}" ${dims} role="img" aria-label="${esc(label)}" ${extra}>`;
+}
+
+// ───────────────────────── 1. 船上的東西 ─────────────────────────
+// 座標都在 40×40 的方格內。
+
+const ITEM_ORDER = ['糧食', '纜索', '錨', '麥子', '器具', '小船'];
+
+const ITEM_LABEL = {
+  糧食: '糧食：一袋糧食和一個餅',
+  纜索: '纜索：一捆繩子',
+  錨: '錨',
+  麥子: '麥子：麥穗和貨袋',
+  器具: '器具：帆、滑輪和索具',
+  小船: '小船：一艘小艇',
+};
+
+function anchorShape(color = C.steel, w = 3) {
+  return (
+    ol('M20 11 L20 34', color, w) +
+    ol('M12 15 L28 15', color, w) +
+    ol('M8 24 Q10 34 20 35 Q30 34 32 24', color, w) +
+    `<path d="M5 26 L9 20 L12 27 Z" fill="${color}" ${INK}/>` +
+    `<path d="M35 26 L31 20 L28 27 Z" fill="${color}" ${INK}/>` +
+    `<circle cx="20" cy="7.5" r="3.6" fill="none" stroke="${C.ink}" stroke-width="${w + 2.4}"/>` +
+    `<circle cx="20" cy="7.5" r="3.6" fill="none" stroke="${color}" stroke-width="${w}"/>`
+  );
+}
+
+function crateShape() {
+  return (
+    `<rect x="6" y="10" width="28" height="24" rx="2.5" fill="${C.woodLight}" ${INK}/>` +
+    `<path d="M6 18 H34 M6 26 H34" stroke="${C.woodDark}" stroke-width="1.2"/>` +
+    `<path d="M8 12 L32 32 M32 12 L8 32" stroke="${C.woodDark}" stroke-width="2.2" stroke-linecap="round"/>` +
+    `<rect x="6" y="10" width="28" height="24" rx="2.5" fill="none" ${INK}/>`
+  );
+}
+
+function itemArt(id) {
+  switch (id) {
+    case '糧食':
+      return (
+        // 麻袋
+        `<path d="M9 14 Q8 10 12 10 L23 10 Q27 10 26 14 L28 30 Q28 35 23 35 L11 35 Q6 35 7 30 Z" fill="${C.sack}" ${INK}/>` +
+        `<path d="M13 8 Q17.5 3 22 8 L21 11 L14 11 Z" fill="${C.sack}" ${INK}/>` +
+        `<path d="M11 12.5 Q17.5 15 24 12.5" fill="none" stroke="${C.woodDark}" stroke-width="1.8" stroke-linecap="round"/>` +
+        `<path d="M11 21 l3 0 M19 25 l3 0 M12 29 l3 0" stroke="${C.woodDark}" stroke-width="1" stroke-linecap="round"/>` +
+        // 餅
+        `<ellipse cx="26" cy="29" rx="11" ry="7" fill="${C.bread}" ${INK}/>` +
+        `<ellipse cx="26" cy="27.5" rx="8" ry="4" fill="#f0bd6c"/>` +
+        `<path d="M20.5 28 l2.5 -3 M25.5 28.5 l2.5 -3.5 M30.5 28.5 l2 -3" stroke="${C.ink}" stroke-width="1.3" stroke-linecap="round"/>`
+      );
+    case '纜索':
+      return (
+        `<ellipse cx="19" cy="24" rx="15" ry="10.5" fill="${C.rope}" ${INK}/>` +
+        `<ellipse cx="19" cy="23.2" rx="10.5" ry="7" fill="none" stroke="${C.ink}" stroke-width="1.2"/>` +
+        `<ellipse cx="19" cy="22.6" rx="6" ry="3.8" fill="#6b4a22" ${INK}/>` +
+        // 繩子的扭紋
+        `<path d="M7 20 l2 2 M10 15.5 l1.5 2.2 M16 13.6 l0.8 2.4 M23 13.8 l-0.6 2.4 M29 16 l-1.5 2 M32 21 l-2 1.5 M9 29 l2 -1.6 M15 32.5 l1 -2.2 M23 32.5 l-0.8 -2.2 M29.5 29.5 l-2 -1.6" stroke="${C.woodDark}" stroke-width="1.1" stroke-linecap="round"/>` +
+        // 鬆開的繩頭
+        ol('M32 27 Q38 31 34 37', C.rope, 3)
+      );
+    case '錨':
+      return anchorShape();
+    case '麥子':
+      return (
+        // 麥穗從袋口冒出
+        ol('M20 14 L15 3', '#d9a83a', 1.4) +
+        ol('M20 14 L20 2', '#d9a83a', 1.4) +
+        ol('M20 14 L25 3', '#d9a83a', 1.4) +
+        [
+          [15.5, 4.5, -25],
+          [16.8, 7.4, -25],
+          [20, 3.2, 0],
+          [20, 6.4, 0],
+          [24.5, 4.5, 25],
+          [23.2, 7.4, 25],
+        ]
+          .map(
+            ([x, y, r]) =>
+              `<ellipse cx="${x}" cy="${y}" rx="1.9" ry="3" transform="rotate(${r} ${x} ${y})" fill="${C.gold}" stroke="${C.ink}" stroke-width="0.9"/>`,
+          )
+          .join('') +
+        // 貨袋
+        `<path d="M8 17 Q8 13 12 13 L28 13 Q32 13 32 17 L33 32 Q33 36 29 36 L11 36 Q7 36 7 32 Z" fill="#eadcae" ${INK}/>` +
+        `<path d="M10 15.5 Q20 18 30 15.5" fill="none" stroke="${C.woodDark}" stroke-width="1.6"/>` +
+        // 袋上的麥穗印記
+        `<path d="M20 33 L20 21 M20 24 l-3 -2.5 M20 24 l3 -2.5 M20 28 l-3 -2.5 M20 28 l3 -2.5" stroke="${C.goldDeep}" stroke-width="1.6" stroke-linecap="round" fill="none"/>`
+      );
+    case '器具':
+      return (
+        // 桅桿＋帆
+        ol('M12 4 L12 37', C.woodLight, 2.4) +
+        `<path d="M14.5 6 L14.5 31 L33 31 Z" fill="${C.sail}" ${INK}/>` +
+        `<path d="M14.5 14 L22 31 M14.5 22 L27 31" stroke="#cbbf9f" stroke-width="1"/>` +
+        // 滑輪＋索具
+        ol('M12 6 L30 9', C.rope, 1.4) +
+        `<rect x="26.5" y="6.5" width="7" height="9" rx="3" fill="${C.woodLight}" ${INK}/>` +
+        `<circle cx="30" cy="11" r="2" fill="${C.steelDark}" stroke="${C.ink}" stroke-width="1"/>` +
+        ol('M31.5 15.5 L35 31', C.rope, 1.4) +
+        ol('M5 37 L35 37', C.woodDark, 2)
+      );
+    case '小船':
+      return (
+        // 槳
+        ol('M9 9 L29 29', C.woodLight, 2) +
+        `<ellipse cx="31.5" cy="31.5" rx="2.6" ry="5" transform="rotate(-45 31.5 31.5)" fill="${C.woodLight}" ${INK}/>` +
+        // 小艇
+        `<path d="M3 20 L37 20 Q34 32 25 33 L15 33 Q6 32 3 20 Z" fill="#b5713f" ${INK}/>` +
+        `<path d="M5.5 25 Q20 27 35 25" fill="none" stroke="${C.woodDark}" stroke-width="1.2"/>` +
+        `<path d="M3 20 L37 20" stroke="${C.woodLight}" stroke-width="2.4" stroke-linecap="round"/>` +
+        `<path d="M3 20 L37 20 Q34 32 25 33 L15 33 Q6 32 3 20 Z" fill="none" ${INK}/>`
+      );
+    default:
+      return crateShape();
+  }
+}
+
+/** 船上的東西圖示。未知 id 畫一個箱子。 */
+function item(id, size = 40) {
+  const label = ITEM_LABEL[id] || `箱子：${id ?? '未知的東西'}`;
+  return `${svgOpen({ viewBox: '0 0 40 40', size, label, cls: 'art-item', extra: `data-item="${esc(id ?? '')}"` })}${itemArt(id)}</svg>`;
+}
+
+// ───────────────────────── 2. 上岸三件事 ─────────────────────────
+
+function needArt(id, lit) {
+  // 亮：金色實心＋深色描邊；不亮：空心、灰色虛線輪廓（形狀相同，不只靠顏色）
+  const f = (light) => (lit ? (light ? C.gold2 : C.gold) : 'none');
+  const s = lit
+    ? `stroke="${C.ink}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"`
+    : `stroke="${C.grey}" stroke-width="1.8" stroke-dasharray="3 2.2" stroke-linejoin="round" stroke-linecap="round"`;
+  const line = lit ? C.ink : C.grey;
+  switch (id) {
+    case '力氣':
+      return (
+        `<ellipse cx="20" cy="24" rx="15" ry="10" fill="${f(false)}" ${s}/>` +
+        `<path d="M8 21 Q20 9 32 21" fill="${f(true)}" ${s}/>` +
+        `<path d="M13 22 l3 -4 M19 21 l3 -4.5 M25 22 l3 -4" stroke="${line}" stroke-width="1.6" stroke-linecap="round"/>`
+      );
+    case '船身':
+      return (
+        `<path d="M3 15 L37 15 Q35 30 23 32 L17 32 Q5 30 3 15 Z" fill="${f(false)}" ${s}/>` +
+        `<path d="M3 15 L37 15" stroke="${line}" stroke-width="2.2" stroke-linecap="round"/>` +
+        // 兩道繩子繞過船底
+        `<path d="M12 11 Q11 24 14 33" fill="none" stroke="${lit ? C.ink : C.grey}" stroke-width="${lit ? 4.6 : 3}" stroke-linecap="round"/>` +
+        `<path d="M27 11 Q28 24 25 33" fill="none" stroke="${lit ? C.ink : C.grey}" stroke-width="${lit ? 4.6 : 3}" stroke-linecap="round"/>` +
+        (lit
+          ? `<path d="M12 11 Q11 24 14 33 M27 11 Q28 24 25 33" fill="none" stroke="${C.rope}" stroke-width="2.4" stroke-dasharray="2 1.4" stroke-linecap="round"/>`
+          : '')
+      );
+    case '天亮':
+      return (
+        // 日出（太陽＋光芒）
+        `<path d="M11 24 A9 9 0 0 1 29 24 Z" fill="${f(true)}" ${s}/>` +
+        `<path d="M20 9 L20 12 M9 14 L11 16 M31 14 L29 16 M5 21 L8 21.5 M35 21 L32 21.5" stroke="${line}" stroke-width="1.8" stroke-linecap="round"/>` +
+        `<path d="M3 24 L37 24" stroke="${line}" stroke-width="2" stroke-linecap="round"/>` +
+        // 小錨
+        `<g transform="translate(13.5 25) scale(0.34)">` +
+        `<path d="M20 4 L20 34 M12 13 L28 13 M7 24 Q10 35 20 36 Q30 35 33 24" fill="none" stroke="${lit ? C.ink : C.grey}" stroke-width="${lit ? 6 : 5}" stroke-linecap="round"/>` +
+        (lit ? `<path d="M20 4 L20 34 M12 13 L28 13 M7 24 Q10 35 20 36 Q30 35 33 24" fill="none" stroke="${C.gold}" stroke-width="3" stroke-linecap="round"/>` : '') +
+        `</g>`
+      );
+    default:
+      return `<circle cx="20" cy="20" r="13" fill="${f(false)}" ${s}/>`;
+  }
+}
+
+const NEED_LABEL = { 力氣: '大家有力氣（餅）', 船身: '船身撐得住（纜索捆綁船身）', 天亮: '平安等到天亮（錨與日出）' };
+
+/** 上岸三件事圖示。lit=true 金色實心並帶 class need-lit。 */
+function need(id, lit, size = 40) {
+  const label = `${NEED_LABEL[id] || id}：${lit ? '已顧好' : '還沒顧好'}`;
+  const cls = `art-need ${lit ? 'need-lit' : 'need-off'}`;
+  return `${svgOpen({ viewBox: '0 0 40 40', size, label, cls, extra: `data-need="${esc(id)}"` })}${needArt(id, !!lit)}</svg>`;
+}
+
+// ───────────────────────── 3. 職能圖示 ─────────────────────────
+// 32×32，外圈一個圓形徽章，讓所有職能圖示風格一致、在任何底色上都清楚。
+
+const ROLE_LABEL = {
+  nav: '船長（舵輪）',
+  supply: '管倉（木箱）',
+  comms: '伙房（湯鍋）',
+  eng: '木匠（槌子）',
+  medic: '醫生（藥袋）',
+  observer: '瞭望（望遠鏡）',
+  scout: '測水深（鉛錘繩）',
+  liaison: '船主（錢袋）',
+  store: '水手長（繩結）',
+  backup: '舵手（羅盤）',
+};
+
+function roleArt(id) {
+  switch (id) {
+    case 'nav': {
+      let spokes = '';
+      for (let i = 0; i < 8; i++) {
+        const a = (i * Math.PI) / 4;
+        const x1 = 16 + Math.cos(a) * 2.5;
+        const y1 = 16 + Math.sin(a) * 2.5;
+        const x2 = 16 + Math.cos(a) * 10.2;
+        const y2 = 16 + Math.sin(a) * 10.2;
+        spokes += `<line x1="${x1.toFixed(2)}" y1="${y1.toFixed(2)}" x2="${x2.toFixed(2)}" y2="${y2.toFixed(2)}" stroke="${C.gold}" stroke-width="1.8" stroke-linecap="round"/>`;
+        spokes += `<circle cx="${(16 + Math.cos(a) * 10.6).toFixed(2)}" cy="${(16 + Math.sin(a) * 10.6).toFixed(2)}" r="1.4" fill="${C.gold}"/>`;
+      }
+      return `${spokes}<circle cx="16" cy="16" r="6.8" fill="none" stroke="${C.gold}" stroke-width="2.2"/><circle cx="16" cy="16" r="2.4" fill="${C.text}"/>`;
+    }
+    case 'supply':
+      return `<g transform="translate(4 3.5) scale(0.6)">${crateShape()}</g>`;
+    case 'comms':
+      return (
+        `<path d="M12 7 q-2 2 0 4 t0 4 M16 6 q-2 2 0 4 t0 4 M20 7 q-2 2 0 4 t0 4" fill="none" stroke="${C.text}" stroke-width="1.4" stroke-linecap="round" opacity="0.9"/>` +
+        `<path d="M7 16 L25 16 L23.5 24 Q23 26 21 26 L11 26 Q9 26 8.5 24 Z" fill="${C.steel}" ${INK}/>` +
+        `<path d="M5 17.5 H8 M24 17.5 H27" stroke="${C.steel}" stroke-width="2.4" stroke-linecap="round"/>` +
+        `<rect x="6" y="14.5" width="20" height="2.6" rx="1.3" fill="${C.gold}" ${INK}/>`
+      );
+    case 'eng':
+      return (
+        `<path d="M10 25 L19.5 13.5" stroke="${C.ink}" stroke-width="5" stroke-linecap="round"/>` +
+        `<path d="M10 25 L19.5 13.5" stroke="${C.woodLight}" stroke-width="2.8" stroke-linecap="round"/>` +
+        `<g transform="rotate(40 20 12)"><rect x="13" y="8.5" width="14" height="6.5" rx="1.5" fill="${C.steel}" ${INK}/><rect x="13" y="8.5" width="3" height="6.5" fill="${C.steelDark}"/></g>`
+      );
+    case 'medic':
+      return (
+        `<path d="M12.5 11 Q12.5 6.5 16 6.5 Q19.5 6.5 19.5 11" fill="none" stroke="${C.text}" stroke-width="1.8"/>` +
+        `<rect x="7" y="10.5" width="18" height="14.5" rx="3" fill="#d96a5b" ${INK}/>` +
+        `<path d="M16 13.5 V22 M11.8 17.8 H20.2" stroke="${C.text}" stroke-width="3" stroke-linecap="round"/>`
+      );
+    case 'observer':
+      return (
+        `<g transform="rotate(-28 16 16)">` +
+        `<rect x="4" y="13" width="9" height="7" rx="1.5" fill="${C.gold}" ${INK}/>` +
+        `<rect x="12.5" y="13.8" width="8" height="5.4" rx="1" fill="${C.goldDeep}" ${INK}/>` +
+        `<rect x="20" y="14.5" width="7" height="4" rx="1" fill="${C.gold}" ${INK}/>` +
+        `<ellipse cx="4.6" cy="16.5" rx="1.2" ry="3.2" fill="#8fd0ff" stroke="${C.ink}" stroke-width="1"/>` +
+        `</g>`
+      );
+    case 'scout':
+      return (
+        `<path d="M5 20 q2.75 -2 5.5 0 t5.5 0 t5.5 0 t5.5 0" fill="none" stroke="#6fb6e8" stroke-width="1.6" stroke-linecap="round"/>` +
+        `<path d="M16 5 L16 20" stroke="${C.rope}" stroke-width="1.6"/>` +
+        `<path d="M14 8.5 H18 M14 12 H18 M14 15.5 H18" stroke="${C.text}" stroke-width="1.4" stroke-linecap="round"/>` +
+        `<path d="M16 20 L12.5 25 Q16 29 19.5 25 Z" fill="${C.steelDark}" stroke="${C.text}" stroke-width="1.3" stroke-linejoin="round"/>`
+      );
+    case 'liaison':
+      return (
+        `<path d="M12 9 Q16 6 20 9 L18.5 12 L13.5 12 Z" fill="${C.sack}" ${INK}/>` +
+        `<path d="M13.5 12 Q6 17 7.5 23 Q9 27 16 27 Q23 27 24.5 23 Q26 17 18.5 12 Z" fill="${C.sack}" ${INK}/>` +
+        `<path d="M12.5 12 H19.5" stroke="${C.woodDark}" stroke-width="2" stroke-linecap="round"/>` +
+        `<circle cx="16" cy="20.5" r="3.6" fill="${C.gold}" ${INK}/>` +
+        `<path d="M16 18.6 V22.4" stroke="${C.ink}" stroke-width="1.2"/>`
+      );
+    case 'store':
+      // 八字結
+      return (
+        `<g transform="translate(3 3) scale(0.8125)">` +
+        ol('M6 30 Q12 30 16 24 Q22 14 16 9 Q10 4 8 10 Q6 16 16 20 Q26 24 24 30 Q22 36 16 30 Q12 26 17 18 Q20 12 26 10', C.rope, 3.2) +
+        `</g>`
+      );
+    case 'backup':
+      return (
+        `<circle cx="16" cy="16" r="9.5" fill="${C.text}" ${INK}/>` +
+        `<path d="M16 7.5 V9.5 M16 22.5 V24.5 M7.5 16 H9.5 M22.5 16 H24.5" stroke="${C.ink}" stroke-width="1.3"/>` +
+        `<path d="M16 9 L19 16 L13 16 Z" fill="${C.red}" stroke="${C.ink}" stroke-width="1"/>` +
+        `<path d="M16 23 L19 16 L13 16 Z" fill="${C.steelDark}" stroke="${C.ink}" stroke-width="1"/>` +
+        `<circle cx="16" cy="16" r="1.4" fill="${C.ink}"/>` +
+        `<text x="16" y="6.8" text-anchor="middle" font-size="4.5" font-weight="700" fill="${C.gold}" font-family="system-ui,sans-serif">N</text>`
+      );
+    default:
+      return `<text x="16" y="21" text-anchor="middle" font-size="14" font-weight="700" fill="${C.gold}" font-family="system-ui,sans-serif">?</text>`;
+  }
+}
+
+/** 職能圖示（圓形徽章）。 */
+function role(id, size = 32) {
+  const label = ROLE_LABEL[id] || `職能 ${id}`;
+  return (
+    svgOpen({ viewBox: '0 0 32 32', size, label, cls: 'art-role', extra: `data-role="${esc(id)}"` }) +
+    `<circle cx="16" cy="16" r="15.2" fill="${C.card2}" stroke="${C.gold}" stroke-width="1.2"/>` +
+    roleArt(id) +
+    `</svg>`
+  );
+}
+
+// ───────────────────────── 4. 背包物品 ─────────────────────────
+
+const PREF_LABEL = { lamp: '油燈', coat: '外衣', nuts: '乾果', song: '一首歌（音符）' };
+
+function prefArt(id) {
+  switch (id) {
+    case 'lamp':
+      return (
+        `<path d="M16 5 Q19 9 16 12 Q13 9 16 5 Z" fill="${C.gold2}" stroke="${C.goldDeep}" stroke-width="1"/>` +
+        `<path d="M6 18 Q6 13 14 13 L19 13 Q26 13 27 16 L22 17 Q24 22 16 23 Q7 23 6 18 Z" fill="${C.woodLight}" ${INK}/>` +
+        `<ellipse cx="15" cy="15" rx="2.5" ry="1.2" fill="${C.ink}"/>` +
+        `<path d="M11 23 L10 26 H22 L21 23" fill="${C.wood}" ${INK}/>`
+      );
+    case 'coat':
+      return (
+        `<path d="M12 6 L20 6 L27 11 L24.5 15 L22 13.5 L23 27 L9 27 L10 13.5 L7.5 15 L5 11 Z" fill="#7a9cc6" ${INK}/>` +
+        `<path d="M12 6 Q16 11 20 6" fill="none" stroke="${C.ink}" stroke-width="1.4"/>` +
+        `<path d="M16 9.5 V27" stroke="${C.ink}" stroke-width="1.2"/>` +
+        `<path d="M10 21 H22" stroke="${C.gold}" stroke-width="1.6"/>`
+      );
+    case 'nuts':
+      return [
+        [11, 14, -20],
+        [20, 13, 25],
+        [15.5, 22, 5],
+      ]
+        .map(
+          ([x, y, r]) =>
+            `<g transform="rotate(${r} ${x} ${y})"><path d="M${x} ${y - 6} Q${x + 5} ${y} ${x} ${y + 5} Q${x - 5} ${y} ${x} ${y - 6} Z" fill="#b97a45" ${INK}/>` +
+            `<path d="M${x} ${y - 3.5} Q${x + 1} ${y} ${x} ${y + 3}" fill="none" stroke="${C.woodDark}" stroke-width="1"/></g>`,
+        )
+        .join('');
+    case 'song':
+      return (
+        `<path d="M12 22 V9 L24 6.5 V19.5" fill="none" stroke="${C.gold}" stroke-width="2.2" stroke-linejoin="round"/>` +
+        `<path d="M12 9 L24 6.5 L24 10 L12 12.5 Z" fill="${C.gold}"/>` +
+        `<ellipse cx="9.5" cy="22.5" rx="3.4" ry="2.6" transform="rotate(-20 9.5 22.5)" fill="${C.gold}"/>` +
+        `<ellipse cx="21.5" cy="20" rx="3.4" ry="2.6" transform="rotate(-20 21.5 20)" fill="${C.gold}"/>`
+      );
+    default:
+      return `<text x="16" y="21" text-anchor="middle" font-size="14" font-weight="700" fill="${C.gold}" font-family="system-ui,sans-serif">?</text>`;
+  }
+}
+
+/** 背包物品圖示（圓角方形徽章）。 */
+function pref(id, size = 32) {
+  const label = PREF_LABEL[id] || `背包物品 ${id}`;
+  return (
+    svgOpen({ viewBox: '0 0 32 32', size, label, cls: 'art-pref', extra: `data-pref="${esc(id)}"` }) +
+    `<rect x="0.8" y="0.8" width="30.4" height="30.4" rx="8" fill="${C.card2}" stroke="${C.gold}" stroke-width="1.2"/>` +
+    prefArt(id) +
+    `</svg>`
+  );
+}
+
+// ───────────────────────── 共用：小人、船 ─────────────────────────
+
+/**
+ * 簡單剪影小人，腳底在 (x, y)，身高 h。不畫臉。
+ * opt.raise：舉起一隻手（勸阻）；opt.helmet：頭頂羽冠（百夫長）
+ */
+function person(x, y, h, color, opt = {}) {
+  const r = h * 0.14;
+  const hy = y - h + r;
+  const top = hy + r + h * 0.04;
+  const sw = h * 0.2;
+  const bw = h * 0.24;
+  let s = '';
+  if (opt.raise) {
+    const dir = opt.raise === 'left' ? -1 : 1;
+    s += `<path d="M${x + dir * sw * 0.6} ${top + h * 0.08} L${x + dir * sw * 1.4} ${top - h * 0.22}" stroke="${color}" stroke-width="${h * 0.09}" stroke-linecap="round"/>`;
+    s += `<circle cx="${x + dir * sw * 1.45}" cy="${top - h * 0.26}" r="${h * 0.065}" fill="${color}"/>`;
+  }
+  if (opt.helmet) {
+    s += `<path d="M${x - r * 0.9} ${hy - r * 0.6} Q${x} ${hy - r * 2.4} ${x + r * 0.9} ${hy - r * 0.6} Z" fill="${opt.helmet}"/>`;
+  }
+  s += `<circle cx="${x}" cy="${hy}" r="${r}" fill="${color}"/>`;
+  s += `<path d="M${x - sw} ${top + h * 0.06} Q${x - sw} ${top} ${x - sw * 0.6} ${top} L${x + sw * 0.6} ${top} Q${x + sw} ${top} ${x + sw} ${top + h * 0.06} L${x + bw} ${y} L${x - bw} ${y} Z" fill="${color}"/>`;
+  return `<g class="person">${s}</g>`;
+}
+
+/** 頭＋肩的小人頭像（用於很多人的畫面）。 */
+function bust(x, y, r, color, extra = '') {
+  x = +x; y = +y; r = +r;
+  const f = (v) => +v.toFixed(2);
+  return `<g ${extra}><circle cx="${f(x)}" cy="${f(y)}" r="${f(r)}" fill="${color}"/><path d="M${f(x - r * 1.6)} ${f(y + r * 2.6)} Q${f(x - r * 1.6)} ${f(y + r * 1.15)} ${f(x)} ${f(y + r * 1.15)} Q${f(x + r * 1.6)} ${f(y + r * 1.15)} ${f(x + r * 1.6)} ${f(y + r * 2.6)} Z" fill="${color}"/></g>`;
+}
+
+/** 一般的船身（側面，船頭朝右），局部座標：甲板 y=0、寬 0~w。 */
+function simpleHull(w, h, fill = C.wood) {
+  return (
+    `<path d="M0 -6 L8 0 L${w - 12} 0 L${w} -10 Q${w - 4} ${h * 0.7} ${w - 26} ${h} L22 ${h} Q4 ${h * 0.8} 0 -6 Z" fill="${fill}" ${INK}/>` +
+    `<path d="M6 ${h * 0.35} Q${w / 2} ${h * 0.42} ${w - 6} ${h * 0.25}" fill="none" stroke="${C.woodDark}" stroke-width="1.2"/>` +
+    `<path d="M14 ${h * 0.7} Q${w / 2} ${h * 0.78} ${w - 20} ${h * 0.62}" fill="none" stroke="${C.woodDark}" stroke-width="1.2"/>`
+  );
+}
+
+/** 水平方向重複的波浪路徑（往下封閉到 bottom，可當海面填色）。 */
+function wavePath(y, amp, period, x0, x1, bottom) {
+  let d = `M${x0} ${y}`;
+  d += ` q${period / 4} ${-amp} ${period / 2} 0`;
+  for (let x = x0 + period / 2; x < x1; x += period / 2) d += ` t${period / 2} 0`;
+  if (bottom != null) d += ` L${x1 + period} ${bottom} L${x0} ${bottom} Z`;
+  return d;
+}
+
+/** 斜雨。用格狀排列，往 (-10, 40) 平移一格就無縫循環。 */
+function rain(w, h, color, opacity, cls = 'rain') {
+  let s = '';
+  const rows = Math.ceil(h / 40) + 2;
+  const cols = Math.ceil(w / 18) + 4;
+  for (let j = -1; j < rows; j++) {
+    for (let i = 0; i < cols; i++) {
+      const jitter = ((i * 37) % 23) - 11; // 只跟 i 有關，平移一列仍無縫
+      const x = 18 * i - 10 * j + (j % 2 ? 0 : 0);
+      const y = 40 * j + jitter;
+      s += `M${x} ${y} l-3 12 `;
+    }
+  }
+  return `<g class="${cls}" opacity="${opacity}"><path d="${s}" stroke="${color}" stroke-width="1.1" stroke-linecap="round"/></g>`;
+}
+
+function lightningBolt(x, y, s = 1, cls = 'lightning') {
+  return (
+    `<g class="${cls}">` +
+    `<rect x="-20" y="-20" width="400" height="300" fill="#e8e4ff" opacity="0.18"/>` +
+    `<path transform="translate(${x} ${y}) scale(${s})" d="M0 0 L-8 22 L-2 22 L-10 44 L8 16 L1 16 L8 0 Z" fill="#fff8d6" stroke="#cfc6ff" stroke-width="1"/>` +
+    `</g>`
+  );
+}
+
+// ───────────────────────── 5. 故事卡插圖 ─────────────────────────
+
+const CARD_LABEL = {
+  A1: '保羅勸他們不要開船，百夫長卻信從船主：船主抱著麥子袋，一個人舉手勸阻',
+  A2: '狂風從島上撲下來：島與強風',
+  A3: '朋友照應，準備了一籃乾糧',
+  A4: '用纜索捆綁船底：繩子繞過船身',
+  A5: '亞里達古同去：兩個人並肩',
+  B1: '把貨與器具拋在海裡：箱子落海',
+  B2: '兵丁砍斷小船的繩子：小船漂走',
+  B3: '船上共有 276 人',
+  B4: '保羅站在眾人中間說：你們可以放心',
+  B5: '探深淺、拋錨盼天亮：鉛錘繩與錨',
+};
+
+function cardFrame(bgA, bgB, inner) {
+  const g = uid('cardbg');
+  const clip = uid('cardclip');
+  return (
+    `<defs><linearGradient id="${g}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${bgA}"/><stop offset="1" stop-color="${bgB}"/></linearGradient>` +
+    `<clipPath id="${clip}"><rect x="1" y="1" width="158" height="98" rx="10"/></clipPath></defs>` +
+    `<g clip-path="url(#${clip})"><rect width="160" height="100" fill="url(#${g})"/>${inner}</g>` +
+    `<rect x="1" y="1" width="158" height="98" rx="10" fill="none" stroke="${C.gold}" stroke-width="1.5" opacity="0.85"/>`
+  );
+}
+
+function seaBand(y, color = C.sea, amp = 2.5) {
+  return `<path d="${wavePath(y, amp, 20, -10, 170, 110)}" fill="${color}"/>` +
+    `<path d="${wavePath(y + 7, amp * 0.7, 26, -16, 170)}" fill="none" stroke="${C.foam}" stroke-width="1" opacity="0.5"/>`;
+}
+
+function cardArt(id) {
+  const sil = '#16243f'; // 淺色背景上的深剪影
+  const lite = C.text; // 深色背景上的淺剪影
+  switch (id) {
+    case 'A1':
+      return cardFrame(
+        '#f1cf8e',
+        '#c99a62',
+        // 遠方港口的船
+        `<g transform="translate(100 56) scale(0.42)">${simpleHull(110, 24, '#7a5236')}<path d="M55 0 V-58" stroke="#5a3a24" stroke-width="3"/><path d="M57 -54 L57 -8 L92 -8 Z" fill="#f6ecd6" opacity="0.9"/></g>` +
+          seaBand(64, '#4d7ea3', 1.6) +
+          `<rect x="0" y="74" width="160" height="30" fill="#8a6440"/>` +
+          `<path d="M0 74 H160" stroke="#6b4a2c" stroke-width="2"/>` +
+          // 舉手勸阻的人（保羅）
+          person(34, 92, 46, sil, { raise: 'right' }) +
+          // 百夫長
+          person(78, 92, 48, '#2c3a5a', { helmet: '#b8473b' }) +
+          // 船主抱著麥子袋
+          person(122, 92, 46, sil) +
+          `<g transform="translate(108 58) scale(0.72)">${itemArt('麥子')}</g>`,
+      );
+    case 'A2': {
+      let wind = '';
+      [
+        [30, 'M28 30 Q60 20 92 34 Q118 46 150 38'],
+        [0, 'M34 44 Q66 38 96 50 Q120 60 152 54'],
+        [0, 'M20 22 Q52 10 84 20 Q108 28 132 22'],
+      ].forEach(([, d], i) => {
+        wind += `<path class="card-wind" style="animation-delay:${i * 0.3}s" d="${d}" fill="none" stroke="${C.text}" stroke-width="${2.6 - i * 0.4}" stroke-linecap="round"/>`;
+      });
+      return cardFrame(
+        '#3b3556',
+        '#5a5372',
+        // 島
+        `<path d="M-6 74 L10 44 L22 52 L34 30 L50 58 L62 74 Z" fill="#2c4a3e" stroke="#1a2f27" stroke-width="1.2"/>` +
+          `<path d="M28 38 L34 30 L40 40" fill="none" stroke="#e8f1ff" stroke-width="2" opacity="0.6"/>` +
+          wind +
+          `<path d="M146 34 l6 4 l-7 3 M148 50 l6 4 l-7 3" fill="none" stroke="${C.text}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>` +
+          // 被風抓住的船
+          `<g transform="translate(96 66) rotate(10) scale(0.42)">${simpleHull(110, 24)}<path d="M55 0 V-50" stroke="${C.woodDark}" stroke-width="4"/></g>` +
+          seaBand(72, C.seaDark, 4),
+      );
+    }
+    case 'A3':
+      return cardFrame(
+        '#f3dcae',
+        '#d6ab72',
+        `<rect x="0" y="80" width="160" height="20" fill="#a9784a"/>` +
+          // 布巾
+          `<path d="M30 82 L130 82 L120 92 L40 92 Z" fill="#e9e1cf" stroke="${C.ink}" stroke-width="1.2" stroke-linejoin="round"/>` +
+          // 餅
+          `<ellipse cx="62" cy="44" rx="15" ry="9" fill="${C.bread}" ${INK}/><path d="M54 43 l3 -4 M61 42 l3 -4.5 M68 43 l3 -4" stroke="${C.ink}" stroke-width="1.3"/>` +
+          `<ellipse cx="94" cy="42" rx="15" ry="9" fill="#d99446" ${INK}/><path d="M86 41 l3 -4 M93 40 l3 -4.5 M100 41 l3 -4" stroke="${C.ink}" stroke-width="1.3"/>` +
+          `<ellipse cx="78" cy="38" rx="13" ry="8" fill="#ecb065" ${INK}/>` +
+          // 小瓶
+          `<path d="M112 30 h6 v5 q6 3 6 12 v10 h-18 v-10 q0 -9 6 -12 Z" fill="#7aa6c9" ${INK}/>` +
+          // 籃子
+          `<path d="M38 48 L122 48 L112 84 L48 84 Z" fill="#b8844a" ${INK}/>` +
+          `<path d="M42 58 H118 M45 68 H115 M47 77 H113" stroke="${C.woodDark}" stroke-width="1.4"/>` +
+          `<path d="M56 48 L60 84 M72 48 L73 84 M88 48 L87 84 M104 48 L100 84" stroke="${C.woodDark}" stroke-width="1.2"/>` +
+          `<path d="M44 48 Q80 6 116 48" fill="none" stroke="${C.ink}" stroke-width="5.4"/>` +
+          `<path d="M44 48 Q80 6 116 48" fill="none" stroke="#c99357" stroke-width="3"/>`,
+      );
+    case 'A4':
+      return cardFrame(
+        '#4e6d93',
+        '#2c4d73',
+        `<g transform="translate(22 42)">${simpleHull(118, 36)}</g>` +
+          // 三道纜索繞過船底（船下延伸到水中）
+          [52, 80, 108]
+            .map(
+              (x) =>
+                `<path d="M${x - 2} 30 Q${x - 4} 62 ${x + 2} 86" fill="none" stroke="${C.ink}" stroke-width="5.6" stroke-linecap="round"/>` +
+                `<path d="M${x - 2} 30 Q${x - 4} 62 ${x + 2} 86" fill="none" stroke="${C.rope}" stroke-width="3.2" stroke-dasharray="3 1.6" stroke-linecap="round"/>`,
+            )
+            .join('') +
+          // 兩個人在甲板上拉繩
+          person(60, 42, 20, lite) +
+          person(100, 42, 20, lite) +
+          `<path d="M64 32 L76 30 M96 32 L84 30" stroke="${C.rope}" stroke-width="1.6"/>` +
+          `<g opacity="0.85">${seaBand(70, C.sea, 3)}</g>`,
+      );
+    case 'A5':
+      return cardFrame(
+        '#f0c98a',
+        '#e39a6a',
+        `<circle cx="128" cy="26" r="11" fill="#fff1c4" opacity="0.9"/>` +
+          seaBand(58, '#4b7fa6', 1.6) +
+          `<rect x="0" y="70" width="160" height="30" fill="#8a6440"/><path d="M0 70 H160" stroke="#6b4a2c" stroke-width="2"/>` +
+          person(66, 92, 50, sil) +
+          person(94, 92, 50, sil) +
+          // 搭在肩上的手
+          `<path d="M70 58 Q80 52 88 56" fill="none" stroke="${sil}" stroke-width="4.5" stroke-linecap="round"/>` +
+          // 行李
+          `<rect x="112" y="80" width="18" height="12" rx="2" fill="${C.woodLight}" ${INK}/><path d="M117 80 q4 -5 8 0" fill="none" stroke="${C.ink}" stroke-width="1.4"/>`,
+      );
+    case 'B1':
+      return cardFrame(
+        '#3b3556',
+        '#5a5372',
+        `<g transform="translate(-30 52)">${simpleHull(100, 30)}</g>` +
+          `<path d="M54 38 Q88 14 112 52" fill="none" stroke="${C.text}" stroke-width="1.4" stroke-dasharray="3 3" opacity="0.7"/>` +
+          `<g transform="translate(70 18) rotate(18) scale(0.55)">${crateShape()}</g>` +
+          `<g transform="translate(100 46) rotate(40) scale(0.6)">${itemArt('器具')}</g>` +
+          seaBand(70, C.seaDark, 3.5) +
+          // 水花
+          `<path d="M110 70 l-6 -12 M116 68 l0 -14 M122 70 l6 -12 M104 72 l-9 -4 M128 72 l9 -4" stroke="${C.foam}" stroke-width="2.2" stroke-linecap="round"/>` +
+          `<g transform="translate(124 68) rotate(-12) scale(0.5)">${crateShape()}</g>` +
+          seaBand(80, C.sea, 2.5),
+      );
+    case 'B2':
+      return cardFrame(
+        '#1d2b4f',
+        '#2a3c66',
+        `<circle cx="134" cy="18" r="6" fill="#e9eefc" opacity="0.8"/>` +
+          `<g transform="translate(-40 46)">${simpleHull(100, 30)}</g>` +
+          // 船尾垂下的兩段斷繩
+          ol('M50 46 Q58 56 62 64', C.rope, 2) +
+          // 斷口：鋸齒
+          `<path d="M60 60 l3 2 l-1 3 l3 2" fill="none" stroke="${C.text}" stroke-width="1.4"/>` +
+          // 小船漂走，帶著另一段斷繩
+          `<g transform="translate(104 56) rotate(-6) scale(0.95)">${ol('M2 22 Q-8 26 -16 22', C.rope, 2)}<path d="M-16 20 l-3 2 l1 3" fill="none" stroke="${C.text}" stroke-width="1.4"/>` +
+          `<path d="M3 20 L37 20 Q34 32 25 33 L15 33 Q6 32 3 20 Z" fill="#b5713f" ${INK}/><path d="M3 20 L37 20" stroke="${C.woodLight}" stroke-width="2.4"/></g>` +
+          // 漂走的動態線
+          `<path d="M144 70 h10 M146 78 h8 M142 62 h8" stroke="${C.foam}" stroke-width="1.6" stroke-linecap="round" opacity="0.7"/>` +
+          seaBand(76, C.seaDark, 3),
+      );
+    case 'B3': {
+      let heads = '';
+      const rows = [
+        { y: 30, n: 11, r: 4 },
+        { y: 44, n: 10, r: 4.6 },
+        { y: 59, n: 9, r: 5.2 },
+        { y: 75, n: 8, r: 6 },
+      ];
+      rows.forEach((row, ri) => {
+        const span = 150;
+        const step = span / row.n;
+        for (let i = 0; i < row.n; i++) {
+          const x = 5 + step * (i + 0.5) + (ri % 2 ? step * 0.25 : -step * 0.15);
+          const shade = ['#2a3e66', '#33507f', '#3d5f95', '#4a70aa'][ri];
+          heads += bust(x.toFixed(1), row.y, row.r, shade);
+        }
+      });
+      return cardFrame(
+        '#0f2147',
+        '#1a3566',
+        heads +
+          `<rect x="100" y="6" width="54" height="22" rx="11" fill="${C.gold}" stroke="${C.ink}" stroke-width="1.4"/>` +
+          `<text x="127" y="22.5" text-anchor="middle" font-size="15" font-weight="800" fill="${C.ink}" font-family="system-ui,sans-serif">276</text>`,
+      );
+    }
+    case 'B4': {
+      let ring = '';
+      const pts = [
+        [30, 78],
+        [52, 88],
+        [108, 88],
+        [130, 78],
+        [44, 62],
+        [116, 62],
+      ];
+      pts.forEach(([x, y]) => {
+        ring += bust(x, y - 6, 5.2, '#2b3d62');
+      });
+      return cardFrame(
+        '#53607e',
+        '#3a4664',
+        rain(160, 100, C.text, 0.25, 'card-rain') +
+          `<path d="M0 74 Q80 66 160 74 L160 100 L0 100 Z" fill="#6b4a2c"/>` +
+          `<ellipse cx="80" cy="76" rx="62" ry="16" fill="#7c5634"/>` +
+          person(80, 80, 52, C.text, { raise: 'right' }) +
+          ring,
+      );
+    }
+    case 'B5': {
+      let anchors = '';
+      [0, 1, 2, 3].forEach((i) => {
+        const x = 18 + i * 9;
+        anchors += `<path d="M${x} 50 L${x - 2 + i} 70" stroke="${C.rope}" stroke-width="1.2"/>`;
+        anchors += `<g transform="translate(${x - 7 + i} 66) scale(0.35)">${anchorShape(C.steel, 3)}</g>`;
+      });
+      return cardFrame(
+        '#0e1a33',
+        '#1d3157',
+        `<circle cx="140" cy="16" r="1" fill="${C.text}"/><circle cx="118" cy="10" r="0.8" fill="${C.text}"/>` +
+          `<g transform="translate(-50 40)">${simpleHull(100, 28, '#6d4a2c')}</g>` +
+          `<path d="M0 54 L160 54 L160 100 L0 100 Z" fill="${C.seaDark}" opacity="0.92"/>` +
+          `<path d="${wavePath(54, 2, 18, -10, 170)}" fill="none" stroke="${C.foam}" stroke-width="1.2" opacity="0.6"/>` +
+          anchors +
+          // 鉛錘繩＋刻度
+          `<path d="M100 18 L100 84" stroke="${C.rope}" stroke-width="1.6"/>` +
+          `<path d="M96 30 H104 M96 42 H104 M96 66 H104 M96 78 H104" stroke="${C.text}" stroke-width="1.3"/>` +
+          `<path d="M100 84 L95 92 Q100 98 105 92 Z" fill="${C.steelDark}" stroke="${C.text}" stroke-width="1.2" stroke-linejoin="round"/>` +
+          `<text x="112" y="70" font-size="9" font-weight="700" fill="${C.gold}" font-family="system-ui,sans-serif">20</text>` +
+          `<text x="112" y="84" font-size="9" font-weight="700" fill="${C.gold}" font-family="system-ui,sans-serif">15</text>` +
+          // 遠方的礁石
+          `<path d="M134 100 L140 88 L148 92 L156 84 L164 100 Z" fill="#2a3346" stroke="#566179" stroke-width="1"/>`,
+      );
+    }
+    default:
+      // 卡背
+      return cardFrame(
+        C.card2,
+        C.navy,
+        `<rect x="8" y="8" width="144" height="84" rx="7" fill="none" stroke="${C.gold}" stroke-width="1" stroke-dasharray="4 3" opacity="0.7"/>` +
+          `<g transform="translate(80 50)">` +
+          [0, 45, 90, 135]
+            .map(
+              (r) =>
+                `<path transform="rotate(${r})" d="M0 -30 L5 0 L0 30 L-5 0 Z" fill="${r % 90 ? C.goldDeep : C.gold}" opacity="${r % 90 ? 0.7 : 1}"/>`,
+            )
+            .join('') +
+          `<circle r="10" fill="${C.navy}" stroke="${C.gold}" stroke-width="1.5"/>` +
+          `<text y="5" text-anchor="middle" font-size="14" font-weight="800" fill="${C.gold}" font-family="system-ui,sans-serif">?</text>` +
+          `</g>`,
+      );
+  }
+}
+
+/** 故事卡插圖（160×100）。未知 id 畫卡背。 */
+function card(id) {
+  const label = CARD_LABEL[id] || '故事卡背面';
+  return `${svgOpen({ viewBox: '0 0 160 100', label, cls: 'art-card', extra: `data-card="${esc(id ?? '')}"` })}${cardArt(id)}</svg>`;
+}
+
+// ───────────────────────── 6. 主場景 ─────────────────────────
+
+const SEA = 130; // 海平面（場景座標）
+const DECK_Y = 100; // 甲板（船的局部座標）
+const DECK_SCALE = 0.72;
+const FLOAT_SCALE = 0.62;
+// 甲板上的固定位置（中心 x），中間 180 是桅桿
+const DECK_X = { 糧食: 109, 纜索: 137, 錨: 164, 麥子: 197, 器具: 225, 小船: 253 };
+// 漂浮的固定位置（中心）
+const FLOAT_POS = {
+  糧食: [34, 146],
+  纜索: [124, 172],
+  錨: [322, 148],
+  麥子: [66, 168],
+  器具: [294, 172],
+  小船: [212, 176],
+};
+
+function skyArt(sky) {
+  const g = uid('sky');
+  const grad = (a, b, c) =>
+    `<defs><linearGradient id="${g}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${a}"/><stop offset="0.75" stop-color="${b}"/><stop offset="1" stop-color="${c || b}"/></linearGradient></defs><rect width="360" height="190" fill="url(#${g})"/>`;
+  const cloud = (x, y, s, fill, op = 1) =>
+    `<g transform="translate(${x} ${y}) scale(${s})" opacity="${op}"><path d="M0 20 Q-2 6 14 6 Q20 -6 36 0 Q50 -6 58 8 Q72 8 70 20 Z" fill="${fill}"/></g>`;
+  switch (sky) {
+    case 'harbor':
+      return (
+        grad('#6fa6dc', '#bfe0f2', '#d9eef7') +
+        `<circle cx="300" cy="36" r="16" fill="#fff3c2"/><circle cx="300" cy="36" r="24" fill="#fff3c2" opacity="0.25"/>` +
+        cloud(40, 24, 0.9, '#ffffff', 0.85) +
+        cloud(200, 14, 0.7, '#ffffff', 0.7) +
+        // 遠方港口：山、房子、燈塔
+        `<path d="M-10 132 L-10 104 Q30 90 70 102 Q100 92 130 108 L130 132 Z" fill="#6f9a86"/>` +
+        `<g fill="#e9e1cf" stroke="#7d6b55" stroke-width="0.8">` +
+        `<rect x="8" y="108" width="14" height="12"/><rect x="26" y="104" width="12" height="16"/><rect x="42" y="110" width="16" height="10"/><rect x="62" y="106" width="10" height="14"/>` +
+        `</g>` +
+        `<g fill="#b8574a"><path d="M6 108 L15 101 L24 108 Z"/><path d="M24 104 L32 97 L40 104 Z"/><path d="M40 110 L50 103 L60 110 Z"/></g>` +
+        `<rect x="84" y="94" width="6" height="26" fill="#f4f1e8" stroke="#7d6b55" stroke-width="0.8"/><path d="M83 94 L87 88 L91 94 Z" fill="#b8574a"/>` +
+        `<rect x="0" y="120" width="120" height="6" fill="#8b7355"/>` +
+        // 海鷗
+        `<path d="M150 50 q4 -4 8 0 q4 -4 8 0 M178 64 q3 -3 6 0 q3 -3 6 0" fill="none" stroke="#3d4f6b" stroke-width="1.4" stroke-linecap="round"/>`
+      );
+    case 'storm':
+      return (
+        grad('#28233c', '#4c4566', '#5b5470') +
+        `<g class="clouds">` +
+        cloud(-20, 6, 1.6, '#3a3452') +
+        cloud(90, 0, 1.9, '#433c5d') +
+        cloud(220, 8, 1.7, '#3a3452') +
+        cloud(320, 2, 1.4, '#433c5d') +
+        cloud(30, 40, 1.1, '#5a5274', 0.8) +
+        cloud(250, 46, 1, '#5a5274', 0.8) +
+        `</g>`
+      );
+    case 'dark':
+      return (
+        grad('#030409', '#080b14', '#0b0f1b') +
+        cloud(20, 10, 1.8, '#0b0e18') +
+        cloud(200, 6, 2, '#0b0e18')
+      );
+    case 'night':
+      return (
+        grad('#0a1430', '#18284d', '#22355e') +
+        // 雲裂開的地方：幾顆星與月亮
+        `<g fill="#f4f1e8"><circle cx="232" cy="22" r="0.9"/><circle cx="262" cy="14" r="1.1"/><circle cx="318" cy="18" r="0.8"/><circle cx="246" cy="44" r="0.7"/></g>` +
+        `<circle cx="290" cy="40" r="20" fill="#f4f1e8" opacity="0.12"/>` +
+        `<circle cx="290" cy="40" r="12" fill="#f3eed8"/>` +
+        `<circle cx="285" cy="37" r="2.2" fill="#ddd6bb"/><circle cx="294" cy="44" r="1.6" fill="#ddd6bb"/>` +
+        `<g class="clouds">` +
+        cloud(-30, 4, 2.4, '#1c2846') +
+        cloud(120, 0, 1.9, '#22304f') +
+        cloud(300, 52, 1.2, '#22304f', 0.9) +
+        cloud(150, 50, 1.1, '#1c2846', 0.85) +
+        `</g>`
+      );
+    case 'dawn':
+    default:
+      return (
+        grad('#5a6fa8', '#f2a77a', '#f7cf94') +
+        `<circle cx="250" cy="112" r="18" fill="#ffe7a8"/><circle cx="250" cy="112" r="30" fill="#ffe7a8" opacity="0.25"/>` +
+        cloud(30, 30, 1, '#f6c4a0', 0.6) +
+        cloud(150, 18, 0.8, '#f6c4a0', 0.5) +
+        // 遠方海灣與沙灘
+        `<path d="M170 128 Q200 102 236 108 Q270 96 300 104 Q336 94 370 100 L370 128 Z" fill="#5f7d6c"/>` +
+        `<path d="M176 128 Q230 118 280 122 Q330 116 370 120 L370 130 L176 130 Z" fill="${C.sand}"/>` +
+        `<path d="M-10 128 L-10 112 Q20 104 50 114 L70 128 Z" fill="#6c8576"/>`
+      );
+  }
+}
+
+function shipHull() {
+  return (
+    // 舵
+    `<path d="M84 98 L72 134 L80 136 L90 102 Z" fill="${C.woodDark}" ${INK}/>` +
+    // 船身
+    `<path d="M80 88 L94 100 L268 100 L292 82 Q286 122 244 142 L120 142 Q90 138 80 88 Z" fill="${C.wood}" ${INK}/>` +
+    `<path d="M88 112 Q180 118 284 104 M98 134 Q180 140 262 128" fill="none" stroke="${C.woodDark}" stroke-width="1.4"/>` +
+    // 船舷
+    `<path d="M80 88 L94 100 L268 100 L292 82" fill="none" stroke="${C.woodLight}" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>` +
+    `<path d="M80 88 L94 100 L268 100 L292 82" fill="none" stroke="${C.ink}" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" transform="translate(0 2)" opacity="0.6"/>` +
+    // 船頭眼睛（古船常見的裝飾）改用圓形舷窗，不畫臉
+    `<circle cx="112" cy="106" r="2.4" fill="${C.woodDark}"/><circle cx="252" cy="106" r="2.4" fill="${C.woodDark}"/>`
+  );
+}
+
+function safeLine() {
+  // 金色安全吃水線＋載重線圓標（形狀可辨識，不只靠顏色）
+  return (
+    `<g class="safe-line">` +
+    `<path d="M100 124 L266 124" stroke="${C.ink}" stroke-width="4.2" stroke-linecap="round"/>` +
+    `<path d="M100 124 L266 124" stroke="${C.gold}" stroke-width="2.4" stroke-linecap="round"/>` +
+    `<circle cx="180" cy="124" r="5.2" fill="${C.wood}" stroke="${C.gold}" stroke-width="2"/>` +
+    `<path d="M173 124 H187" stroke="${C.gold}" stroke-width="2"/>` +
+    `</g>`
+  );
+}
+
+function mastAndSail(sky) {
+  const full = sky === 'harbor';
+  return (
+    ol('M180 100 L180 20', C.woodLight, 3.2) +
+    ol('M150 32 L210 32', C.woodLight, 2.4) +
+    (full
+      ? `<path d="M152 34 L208 34 Q214 56 206 76 L154 76 Q146 56 152 34 Z" fill="${C.sail}" ${INK}/>` +
+        `<path d="M166 34 L166 76 M194 34 L194 76" stroke="#cbbf9f" stroke-width="1.2"/>` +
+        ol('M154 76 L92 98 M206 76 L270 98', C.rope, 1)
+      : // 風暴中把帆收起來捆在橫桁上（27:17 落下篷來）
+        `<path d="M150 31 Q180 42 210 31 L210 36 Q180 47 150 36 Z" fill="${C.sail}" ${INK}/>` +
+        `<path d="M160 33 l2 6 M172 35 l1 6.5 M188 35 l-1 6.5 M200 33 l-2 6" stroke="${C.rope}" stroke-width="1.6"/>` +
+        ol('M180 22 L88 92 M180 22 L284 88', C.rope, 0.9)) +
+    // 桅頂小旗
+    `<path d="M180 20 L194 23 L180 27 Z" fill="${C.gold}" stroke="${C.ink}" stroke-width="1"/>`
+  );
+}
+
+function deckItem(id, dyShip, rescued) {
+  const x = DECK_X[id];
+  const s = DECK_SCALE;
+  const tx = x - 20 * s;
+  const ty = DECK_Y - 40 * s - 0.5;
+  let inner = `<g transform="translate(${tx} ${ty}) scale(${s})">${itemArt(id)}</g>`;
+  if (rescued) {
+    // 從漂浮位置跳回：offset＝漂浮中心 −（甲板中心＋船的吃水位移）
+    const [fx, fy] = FLOAT_POS[id];
+    const dx = (fx - x).toFixed(1);
+    const dy = (fy - (DECK_Y - 20 * s + dyShip)).toFixed(1);
+    inner = `<g class="just-rescued" style="--fx:${dx}px"><g class="jr-y" style="--fy:${dy}px">${inner}</g></g>`;
+  }
+  return `<g class="deck-item" data-item="${esc(id)}">${inner}</g>`;
+}
+
+function floatItem(id, dyShip, thrown) {
+  const [cx, cy] = FLOAT_POS[id] || [180, 176];
+  const s = FLOAT_SCALE;
+  const half = 20 * s;
+  let body = `<g transform="translate(${cx - half} ${cy - half - 3})"><g class="bob"><g transform="scale(${s})">${itemArt(id)}</g></g></g>`;
+  if (thrown) {
+    const dx = ((DECK_X[id] ?? 180) - cx).toFixed(1);
+    const dy = (DECK_Y - 20 * DECK_SCALE + dyShip - cy).toFixed(1);
+    body = `<g class="just-thrown" style="--fx:${dx}px"><g class="jt-y" style="--fy:${dy}px">${body}</g></g>`;
+  }
+  // 蓋在東西下半部的一小片海水，看起來半沉
+  const cap = `<g class="float-cap${thrown ? ' appear-late' : ''}"><path d="${wavePath(cy + 1, 1.6, 8, cx - 13, cx + 9, cy + 10)}" fill="${C.sea}" opacity="0.9"/><path d="${wavePath(cy + 1, 1.6, 8, cx - 13, cx + 9)}" fill="none" stroke="${C.foam}" stroke-width="1" opacity="0.8"/></g>`;
+  const splash = thrown ? splashArt(cx, cy, 'splash') : '';
+  return `<g class="float-item" data-item="${esc(id)}">${body}${cap}${splash}</g>`;
+}
+
+function splashArt(cx, cy, cls) {
+  return (
+    `<g class="${cls}" opacity="0"><g transform="translate(${cx} ${cy})">` +
+    `<path d="M-2 -2 L-8 -16 M2 -3 L2 -20 M5 -2 L12 -15 M-6 0 L-16 -6 M8 0 L18 -6" stroke="${C.foam}" stroke-width="2.4" stroke-linecap="round"/>` +
+    `<circle cx="-10" cy="-19" r="1.8" fill="${C.foam}"/><circle cx="14" cy="-18" r="1.8" fill="${C.foam}"/><circle cx="2" cy="-24" r="2" fill="${C.foam}"/>` +
+    `<ellipse cx="0" cy="2" rx="12" ry="3" fill="none" stroke="${C.foam}" stroke-width="1.6"/>` +
+    `</g></g>`
+  );
+}
+
+/** 依載重算船的上下位移：越重越低，超過上限明顯下沉。 */
+function draftOffset(weight, cap) {
+  const w = Math.max(0, Number(weight) || 0);
+  const c = Number(cap) > 0 ? Number(cap) : 6;
+  const r = w / c;
+  if (r <= 1) return -10 + 16 * r; // 安全：金線在海面上方 0~16
+  return Math.min(22, 10 + (r - 1) * 24); // 超重：金線沉到海面下
+}
+
+const SKY_LABEL = {
+  harbor: '平靜的港口',
+  storm: '暴風雨中',
+  dark: '一片漆黑、只有雨',
+  night: '夜裡，雲縫裡有月光',
+  dawn: '天亮了，遠方有海灣和沙灘',
+};
+
+/**
+ * 主場景。
+ * @param {{sky?: string, onDeck?: string[], afloat?: string[], justThrown?: string[], justRescued?: string[],
+ *          load?: {weight:number, cap:number}, rock?: 'calm'|'storm'}} opts
+ */
+function scene(opts = {}) {
+  const sky = SKY_LABEL[opts.sky] ? opts.sky : 'storm';
+  const rock = opts.rock === 'calm' || opts.rock === 'storm' ? opts.rock : sky === 'harbor' ? 'calm' : 'storm';
+  const has = (arr) => new Set(Array.isArray(arr) ? arr : []);
+  const deckSet = has(opts.onDeck);
+  const thrownSet = has(opts.justThrown);
+  const rescuedSet = has(opts.justRescued);
+  const onDeck = ITEM_ORDER.filter((id) => deckSet.has(id));
+  const floatSet = has([...(opts.afloat || []), ...thrownSet]);
+  const afloat = ITEM_ORDER.filter((id) => floatSet.has(id) && !deckSet.has(id));
+  const load = opts.load || {};
+  const weight = Number(load.weight) || 0;
+  const cap = Number(load.cap) > 0 ? Number(load.cap) : 6;
+  const over = weight > cap;
+  const dy = draftOffset(weight, cap);
+  const amp = rock === 'storm' ? 6 : 2.5;
+
+  // 無障礙說明
+  const parts = [SKY_LABEL[sky]];
+  parts.push(onDeck.length ? `甲板上有${onDeck.join('、')}` : '甲板上空了');
+  if (afloat.length) parts.push(`海上漂著${afloat.join('、')}`);
+  parts.push(over ? `超重：載重 ${weight}／${cap}，船吃水過深、海水打上甲板` : `載重 ${weight}／${cap}，吃水線以內`);
+  const label = parts.join('；');
+
+  const cls = `art-scene scene sky-${sky} ${over ? 'is-over' : 'is-safe'}`;
+  let s = `<svg xmlns="http://www.w3.org/2000/svg" class="art ${cls}" viewBox="0 0 360 190" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${esc(label)}" data-weight="${weight}" data-cap="${cap}">`;
+  s += `<g class="sky">${skyArt(sky)}</g>`;
+  if (sky === 'storm') s += lightningBolt(250, 20, 1.2, 'lightning');
+
+  // 後方的浪
+  const backCol = { harbor: '#4f8fbf', storm: '#2c4767', dark: '#0b1424', night: '#1c3459', dawn: '#5d8db8' }[sky];
+  const frontCol = { harbor: '#2d78ad', storm: C.seaDark, dark: '#0a1220', night: '#16304f', dawn: '#3f78a6' }[sky];
+  const foamOp = sky === 'dark' ? 0.25 : 0.7;
+  s += `<g class="waves waves-back"><path d="${wavePath(SEA - 6, amp * 0.6, 48, -96, 456, 190)}" fill="${backCol}"/></g>`;
+
+  // 船（外層負責吃水，內層負責搖擺）
+  s += `<g class="ship-draft" transform="translate(0 ${dy.toFixed(1)})"><g class="ship rock-${rock}">`;
+  s += shipHull();
+  s += safeLine();
+  s += mastAndSail(sky);
+  s += onDeck.map((id) => deckItem(id, dy, rescuedSet.has(id))).join('');
+  if (over) {
+    // 海水打上甲板
+    s += `<g class="deck-water"><path d="M94 100 Q108 90 124 98 Q140 92 156 100 Z M206 100 Q222 91 238 98 Q252 92 268 100 Z" fill="#6fb6e8" opacity="0.85"/>` +
+      `<path d="M100 92 l-3 -6 M116 90 l0 -7 M232 90 l0 -7 M248 92 l3 -6" stroke="${C.foam}" stroke-width="2" stroke-linecap="round"/></g>`;
+  }
+  s += `</g></g>`;
+
+  // 前方的海（半透明，沉到水下的金線還隱約看得到）
+  s += `<g class="waves waves-front"><path d="${wavePath(SEA, amp, 60, -120, 480, 190)}" fill="${frontCol}" opacity="0.88"/>` +
+    `<path d="${wavePath(SEA, amp, 60, -120, 480)}" fill="none" stroke="${C.foam}" stroke-width="1.4" opacity="${foamOp}"/>` +
+    `<path d="${wavePath(SEA + 22, amp * 0.6, 40, -120, 480)}" fill="none" stroke="${C.foam}" stroke-width="1" opacity="${foamOp * 0.5}"/></g>`;
+
+  if (sky === 'night') {
+    // 月光倒影
+    s += `<g class="moonlight" opacity="0.5"><path d="M276 138 h28 M280 146 h20 M272 154 h34 M282 162 h16" stroke="#f3eed8" stroke-width="1.6" stroke-linecap="round"/></g>`;
+  }
+
+  if (over) {
+    // 超重警告：紅色虛線吃水線＋三角驚嘆號（形狀＋顏色）
+    s += `<g class="overload-warn">` +
+      `<path d="M86 ${SEA - 2} L292 ${SEA - 2}" stroke="${C.red}" stroke-width="2.4" stroke-dasharray="7 4"/>` +
+      `<path d="M318 92 L334 120 L302 120 Z" fill="${C.red}" stroke="#3a0b0b" stroke-width="1.6" stroke-linejoin="round"/>` +
+      `<path d="M318 101 V111" stroke="#3a0b0b" stroke-width="3" stroke-linecap="round"/><circle cx="318" cy="115.5" r="1.7" fill="#3a0b0b"/>` +
+      `</g>`;
+  }
+
+  s += afloat.map((id) => floatItem(id, dy, thrownSet.has(id))).join('');
+
+  if (sky === 'storm') s += rain(360, 190, '#cfd8ff', 0.45);
+  if (sky === 'dark') s += rain(360, 190, '#8a9abb', 0.35);
+  s += `</svg>`;
+  return s;
+}
+
+// ───────────────────────── 7. 停電遮罩背景 ─────────────────────────
+
+/** 全黑、雨絲、偶爾很暗的閃電、中間隱約的船影。 */
+function darkness() {
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" class="art art-darkness" viewBox="0 0 360 240" width="100%" height="100%" preserveAspectRatio="xMidYMid slice" role="img" aria-label="一片漆黑，多日不見日頭星辰，只有雨">` +
+    `<rect width="360" height="240" fill="#04060b"/>` +
+    `<g class="dim-lightning" opacity="0"><rect width="360" height="240" fill="#9aa6d6" opacity="0.12"/></g>` +
+    // 隱約的船影
+    `<g opacity="0.9" transform="translate(0 30)">` +
+    `<path d="M80 88 L94 100 L268 100 L292 82 Q286 122 244 142 L120 142 Q90 138 80 88 Z" fill="#0c1222"/>` +
+    `<path d="M180 100 L180 20 M150 32 L210 32" stroke="#0c1222" stroke-width="3"/>` +
+    `<path d="M80 88 L94 100 L268 100 L292 82" fill="none" stroke="#18213a" stroke-width="1.5"/>` +
+    `</g>` +
+    `<g class="waves waves-front"><path d="${wavePath(166, 4, 60, -120, 480, 240)}" fill="#060a14"/><path d="${wavePath(166, 4, 60, -120, 480)}" fill="none" stroke="#1a2440" stroke-width="1.2"/></g>` +
+    rain(360, 240, '#7d8cb0', 0.28) +
+    `</svg>`
+  );
+}
+
+// ───────────────────────── 8. 吃飯（擘餅）動畫 ─────────────────────────
+
+/** 約 2.5 秒：一雙手擘開餅、碎屑、周圍一圈人亮起來（27:35–36）。結尾停在靜態畫面。 */
+function meal() {
+  const n = 10;
+  let heads = '';
+  for (let i = 0; i < n; i++) {
+    const ang = (i / n) * Math.PI * 2 - Math.PI / 2;
+    const x = 120 + Math.cos(ang) * 96;
+    const y = 82 + Math.sin(ang) * 56;
+    heads += `<g class="meal-head" style="animation-delay:${(1.2 + i * 0.1).toFixed(2)}s">${bust(x.toFixed(1), (y - 6).toFixed(1), 7, C.gold2)}</g>`;
+  }
+  const crumbs = [
+    [-12, -28],
+    [-3, -36],
+    [9, -32],
+    [17, -24],
+    [-4, 22],
+    [6, 26],
+    [0, 34],
+  ]
+    .map(
+      ([x, y], i) =>
+        `<g class="meal-crumb" style="--cx:${-x}px;--cy:${-y}px;animation-delay:${(0.8 + i * 0.05).toFixed(2)}s"><circle cx="${120 + x}" cy="${78 + y}" r="${i % 2 ? 1.6 : 2.2}" fill="#f0bd6c" stroke="${C.ink}" stroke-width="0.6"/></g>`,
+    )
+    .join('');
+  // 半個餅（左半），右半用鏡像
+  const half = (side) => {
+    const m = side === 'L' ? '' : ' transform="translate(240 0) scale(-1 1)"';
+    return (
+      `<g${m}><path d="M117 64 Q92 62 90 79 Q92 95 117 94 L113 89 L118 85 L113 80 L118 75 L113 70 Z" fill="${C.bread}" ${INK}/>` +
+      `<path d="M113 89 L118 85 L113 80 L118 75 L113 70 L109 72 L111 79 L108 86 Z" fill="#f6e3b8"/>` +
+      `<path d="M96 74 Q101 67 109 66" fill="none" stroke="#f6cf86" stroke-width="2.4" stroke-linecap="round"/></g>`
+    );
+  };
+  const hand = (side) => {
+    const m = side === 'L' ? '' : ' transform="translate(240 0) scale(-1 1)"';
+    return `<g${m}><path d="M74 124 Q82 100 94 90 Q102 86 110 88 Q114 92 108 95 L102 96 Q98 106 92 126 Z" fill="#e9d2b0" ${INK}/>` +
+      `<path d="M96 92 q2 -3 6 -3 M100 94 q2 -3 6 -3" fill="none" stroke="${C.ink}" stroke-width="1"/></g>`;
+  };
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" class="art art-meal" viewBox="0 0 240 160" width="100%" role="img" aria-label="保羅拿著餅擘開，大家都放下心，也吃了（使徒行傳 27:35–36）">` +
+    `<ellipse cx="120" cy="82" rx="112" ry="72" fill="${C.card}"/>` +
+    `<ellipse cx="120" cy="82" rx="70" ry="40" fill="${C.card2}"/>` +
+    heads +
+    `<g class="meal-hands">` +
+    `<g class="meal-half meal-half-l">${half('L')}${hand('L')}</g>` +
+    `<g class="meal-half meal-half-r">${half('R')}${hand('R')}</g>` +
+    `</g>` +
+    crumbs +
+    `</svg>`
+  );
+}
+
+// ───────────────────────── 9. 上岸動畫 ─────────────────────────
+
+/**
+ * 約 4 秒：天亮的海灣 → 船駛向沙灘 → 兩水夾流擱淺、船尾被浪打壞 → 有的游、有的抱木板上岸 → 岸上生火。
+ * 每個人都會上岸（27:44）。lit 只改細節。
+ * @param {{lit?: {力氣?: boolean, 船身?: boolean, 天亮?: boolean}}} [opt]
+ */
+function landing({ lit = {} } = {}) {
+  const strong = !!lit['力氣'];
+  const hullOk = !!lit['船身'];
+  const daylight = !!lit['天亮'];
+  const g = uid('land');
+  const sea = uid('landsea');
+
+  // 天空：天亮＝true 時較明亮
+  const skyTop = daylight ? '#7e93c4' : '#4a4f7e';
+  const skyLow = daylight ? '#ffc58f' : '#d98f78';
+  let s = `<svg xmlns="http://www.w3.org/2000/svg" class="art art-landing${strong ? '' : ' is-weak'}" viewBox="0 0 360 200" width="100%" role="img" aria-label="天亮時船駛向海灘，在兩水夾流的地方擱淺，船尾被浪打壞；大家有的游水、有的抱著木板，全都上了岸，岸上生起了火（使徒行傳 27:39–44、28:2）">`;
+  s += `<defs><linearGradient id="${g}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${skyTop}"/><stop offset="1" stop-color="${skyLow}"/></linearGradient>` +
+    `<linearGradient id="${sea}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4f86b4"/><stop offset="1" stop-color="#22557f"/></linearGradient></defs>`;
+  s += `<rect width="360" height="112" fill="url(#${g})"/>`;
+  s += `<circle cx="300" cy="${daylight ? 104 : 112}" r="16" fill="#ffe7a8"/><circle cx="300" cy="${daylight ? 104 : 112}" r="28" fill="#ffe7a8" opacity="0.25"/>`;
+  // 遠方岬角
+  s += `<path d="M-10 112 L-10 96 Q30 86 60 98 Q90 92 110 112 Z" fill="#5e7a6b"/>`;
+  s += `<path d="M300 112 Q330 90 370 94 L370 112 Z" fill="#5e7a6b"/>`;
+  // 海
+  s += `<rect y="112" width="360" height="88" fill="url(#${sea})"/>`;
+  s += `<g class="waves waves-landing"><path d="${wavePath(126, 1.6, 30, -60, 420)} ${wavePath(146, 1.8, 36, -60, 420).replace('M', 'M')}" fill="none" stroke="${C.foam}" stroke-width="1" opacity="0.5"/></g>`;
+  // 沙灘
+  s += `<path d="M232 200 L246 152 Q276 128 360 120 L360 200 Z" fill="${C.sand}" stroke="#c9a96a" stroke-width="1.2"/>`;
+  s += `<path d="M246 152 Q276 128 360 120" fill="none" stroke="${C.foam}" stroke-width="2" opacity="0.8"/>`;
+  // 兩水夾流：兩股水流在沙洲匯合
+  s += `<g class="currents" opacity="0.85">` +
+    `<path d="M150 128 Q190 136 222 150" fill="none" stroke="${C.foam}" stroke-width="1.6" stroke-dasharray="5 4"/>` +
+    `<path d="M150 190 Q192 176 222 158" fill="none" stroke="${C.foam}" stroke-width="1.6" stroke-dasharray="5 4"/>` +
+    `<path d="M216 146 l7 4 l-7 3 M216 162 l7 -4 l-1 7" fill="none" stroke="${C.foam}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>` +
+    `<ellipse cx="226" cy="156" rx="16" ry="4" fill="#d9c08a" opacity="0.8"/>` +
+    `</g>`;
+  if (!daylight) {
+    // 天還不夠亮：沙洲旁露出幾塊礁石
+    s += `<path d="M196 170 l6 -8 l7 3 l4 5 Z M180 158 l4 -6 l5 3 l2 3 Z" fill="#3f4658" stroke="#262b38" stroke-width="1"/>`;
+  }
+
+  // 船：最終停在沙洲，船頭卡住、船尾已碎
+  const brokenHull = hullOk
+    ? `M130 136 L138 140 L214 140 L232 128 Q228 152 206 160 L148 160 L142 154 L146 150 L140 146 L136 142 Z`
+    : `M150 140 L214 140 L232 128 Q228 152 206 160 L166 160 L160 152 L166 148 L156 146 L162 142 Z`;
+  const sternPiece = hullOk
+    ? `M120 128 L130 136 L136 142 L140 146 L146 150 L142 154 L148 160 Q124 158 120 128 Z`
+    : `M120 128 L138 140 L150 140 L162 142 L156 146 L166 148 L160 152 L166 160 L148 160 Q124 158 120 128 Z`;
+  s += `<g class="land-ship-wrap"><g class="land-ship">` +
+    `<g class="stern-intact" opacity="0"><path d="${sternPiece}" fill="${C.wood}" ${INK}/></g>` +
+    `<path d="${brokenHull}" fill="${C.wood}" ${INK}/>` +
+    `<path d="M140 150 Q190 152 226 140" fill="none" stroke="${C.woodDark}" stroke-width="1.2"/>` +
+    ol('M182 140 L182 82', C.woodLight, 2.4) +
+    `<path d="M184 86 L184 120 L210 120 Z" fill="${C.sail}" ${INK}/>` +
+    `</g></g>`;
+
+  // 碎木板（船尾被浪打壞）
+  const debris = hullOk
+    ? [
+        [118, 170, 20],
+        [104, 156, -15],
+        [130, 184, 8],
+      ]
+    : [
+        [118, 170, 20],
+        [104, 156, -15],
+        [130, 184, 8],
+        [92, 176, 35],
+        [140, 194, -25],
+        [86, 148, 5],
+      ];
+  s += debris
+    .map(
+      ([x, y, r], i) =>
+        `<g transform="translate(${x} ${y})"><g class="land-debris" style="--dx:${(136 - x).toFixed(0)}px;--dy:${(148 - y).toFixed(0)}px;animation-delay:${(i * 0.05).toFixed(2)}s"><rect x="-9" y="-2" width="18" height="4" rx="1" transform="rotate(${r})" fill="${C.woodLight}" ${INK}/></g></g>`,
+    )
+    .join('');
+  // 浪打船尾的水花
+  s += splashArt(132, 146, 'land-splash');
+
+  // 火（28:2）
+  s += `<g transform="translate(304 180)"><g class="land-fire">` +
+    `<path d="M-12 4 L12 -2 M-12 -2 L12 4" stroke="${C.woodDark}" stroke-width="4" stroke-linecap="round"/>` +
+    `<g class="flame"><path d="M0 -26 Q12 -12 8 -2 Q4 4 0 4 Q-4 4 -8 -2 Q-12 -12 0 -26 Z" fill="#ff8a3d" ${INK}/>` +
+    `<path d="M0 -15 Q6 -8 4 -2 Q0 2 -4 -2 Q-6 -8 0 -15 Z" fill="${C.gold2}"/></g>` +
+    `</g></g>`;
+
+  // 人：最終都站在岸上圍著火；起點在船旁的水裡
+  const people = [
+    [262, 160, 206, 172, true],
+    [276, 176, 214, 184, false],
+    [286, 192, 196, 192, true],
+    [326, 192, 230, 192, false],
+    [338, 176, 182, 178, true],
+    [344, 158, 238, 174, false],
+    [284, 146, 244, 160, false],
+    [322, 150, 222, 168, true],
+  ];
+  s += people
+    .map(([fx, fy, sx, sy, plank], i) => {
+      const plankSvg = plank ? `<rect x="3" y="-18" width="4" height="20" rx="1" fill="${C.woodLight}" ${INK}/>` : '';
+      const color = i % 2 ? '#22324f' : '#2e2a3f';
+      return (
+        `<g transform="translate(${fx} ${fy})" stroke="${C.text}" stroke-width="0.8"><g class="land-person${strong ? '' : ' slow'}" style="--sx:${sx - fx}px;--sy:${sy - fy}px;animation-delay:${(i * 0.06).toFixed(2)}s">` +
+        plankSvg +
+        person(0, 0, 20, color) +
+        `</g></g>`
+      );
+    })
+    .join('');
+  s += `</svg>`;
+  return s;
+}
+
+// ───────────────────────── 10. 水花 ─────────────────────────
+
+/** 小的水花圖（獨立使用，會播一次動畫）。 */
+function throwSplash(size = 40) {
+  return `${svgOpen({ viewBox: '-20 -28 40 36', size, label: '水花', cls: 'art-splash' })}${splashArt(0, 0, 'splash')}</svg>`;
+}
+
+// ───────────────────────── 10. 拋錨、捆船底（天亮前只來得及做一件） ─────────────────────────
+
+/** 約 2 秒：船尾放下四個錨，繩子拉直、沉進夜海（27:29）。靜止時就是錨已沉在水裡。 */
+function anchorDrop() {
+  const anchors = [0, 1, 2, 3]
+    .map((i) => {
+      const x = 52 + i * 14;
+      return (
+        `<g class="ad-rope" style="animation-delay:${(0.2 + i * 0.15).toFixed(2)}s">${ol(`M${x} 64 L${x} 118`, C.rope, 1.6)}</g>` +
+        `<g class="ad-anchor" style="animation-delay:${(0.2 + i * 0.15).toFixed(2)}s"><g transform="translate(${x - 9} 112) scale(0.45)">${anchorShape(C.steel, 3.4)}</g></g>`
+      );
+    })
+    .join('');
+  return (
+    svgOpen({ viewBox: '0 0 240 160', label: '從船尾拋下四個錨，盼望天亮（使徒行傳 27:29）', cls: 'art-use art-anchor' }) +
+    `<rect width="240" height="160" rx="16" fill="${C.navy}"/>` +
+    `<circle cx="200" cy="28" r="10" fill="${C.sail}" opacity="0.85"/>` +
+    `<path d="M0 80 Q30 74 60 80 T120 80 T180 80 T240 80 V160 H0 Z" fill="${C.seaDark}"/>` +
+    anchors +
+    `<path d="M30 66 L40 52 L200 52 L214 66 Q200 82 170 86 L66 86 Q40 84 30 66 Z" fill="${C.wood}" ${INK}/>` +
+    `<path d="M0 82 Q30 76 60 82 T120 82 T180 82 T240 82" fill="none" stroke="${C.foam}" stroke-width="1.6" opacity="0.7"/>` +
+    `</svg>`
+  );
+}
+
+/** 約 2 秒：繩子一圈一圈繞過船底、拉緊（27:17）。靜止時就是船底已捆好。 */
+function undergird() {
+  const loops = [0, 1, 2]
+    .map((i) => {
+      const x = 84 + i * 36;
+      return `<g class="ug-loop" style="animation-delay:${(0.2 + i * 0.3).toFixed(2)}s">${ol(`M${x} 48 Q${x - 8} 92 ${x} 112 Q${x + 8} 92 ${x + 2} 48`, C.rope, 2.4)}</g>`;
+    })
+    .join('');
+  return (
+    svgOpen({ viewBox: '0 0 240 160', label: '用繩子捆綁船底（使徒行傳 27:17）', cls: 'art-use art-undergird' }) +
+    `<rect width="240" height="160" rx="16" fill="${C.navy}"/>` +
+    `<path d="M0 104 Q30 98 60 104 T120 104 T180 104 T240 104 V160 H0 Z" fill="${C.seaDark}"/>` +
+    `<path d="M36 52 L48 40 L196 40 L210 52 Q198 106 160 112 L82 112 Q46 106 36 52 Z" fill="${C.wood}" ${INK}/>` +
+    `<path d="M50 70 Q122 78 200 66 M58 92 Q122 100 190 88" fill="none" stroke="${C.woodDark}" stroke-width="1.4"/>` +
+    loops +
+    `</svg>`
+  );
+}
+
+return { item, need, role, scene, darkness, meal, landing };
+})();
+
+// ───── 示意資料（6 人局）─────
+const CREW = [
+  { n: '阿明', r: 'comms' }, { n: '小芳', r: 'supply' }, { n: '大衛', r: 'nav' },
+  { n: '美玲', r: 'medic' }, { n: '志豪', r: 'eng' }, { n: '佳慧', r: 'observer' },
+];
+const R = {
+  nav: { name: '船長', line: '大家講好了，由我喊出發。', bib: '故事裡：掌船的（徒 27:11）', btn: '決定好了／衝向海灘', when: '認識隊友結束後才能按', secret: '船最多只能留 <b>8 重</b>', q: ['你方向感好嗎？', '你最想帶大家去哪裡玩？'] },
+  supply: { name: '管倉', line: '丟什麼、留什麼，我來按。', bib: '故事裡：船上的人', btn: '丟／撈東西', when: '一開始就能按', secret: '上岸要顧好<b>三件事</b>：力氣、船身、錨住船', q: ['出遠門你行李多還是少？', '你出遠門一定會帶的東西？'] },
+  comms: { name: '伙房', line: '全船的飯歸我管。', bib: '故事裡：船上的人', btn: '🍞 召集大家吃飯', when: '補好船以後（第十四天夜裡）才會出現', secret: '今晚吃的是<b>哪一樣</b>', q: ['你最拿手（或最想吃）的一道菜？', '宵夜首選？'] },
+  eng: { name: '木匠', line: '天黑了，我來補船。', bib: '故事裡：水手（徒 27:27–30）', btn: '補船面板', when: '天黑時才會出現', secret: '船身要靠<b>繩子</b>撐住', q: ['你修好過最得意的東西？', '你手巧還是手殘？'] },
+  medic: { name: '醫生', line: '我顧大家的身體。', bib: '故事裡：路加醫生（西 4:14；傳統認為他寫了使徒行傳）', btn: null, secret: '食物要<b>吃下去</b>才有力氣', q: ['累了你怎麼恢復元氣？', '你喜歡早起還是晚睡？'] },
+  observer: { name: '瞭望', line: '我看天色和風浪。', bib: '故事裡：水手（徒 27:27–30）', btn: '⚓ 從船尾拋錨', when: '補好船以後、水變淺時才會出現', secret: '風浪會變大：船能留的會從 8 變 <b>5</b>', q: ['日出派還是夕陽派？', '看過最美的天空在哪？'] },
+};
+const VIEWS = [
+  { id: 'comms', label: '🍲 伙房 阿明', roles: ['comms'], n: '阿明' },
+  { id: 'supply', label: '📦 管倉 小芳', roles: ['supply'], n: '小芳' },
+  { id: 'nav', label: '☸️ 船長 大衛', roles: ['nav'], n: '大衛' },
+  { id: 'medic', label: '🩺 醫生 美玲（沒有按鈕）', roles: ['medic'], n: '美玲' },
+  { id: 'combo', label: '3 人局：船長＋瞭望', roles: ['nav', 'observer'], n: '大衛' },
+];
+let view = VIEWS[0];
+let step = 0;
+let sub = 0; // 故事動畫、輪流念、船員回憶的子頁
+let timers = [];
+
+const YOU = {
+  comms: ['只有你知道今晚吃哪一樣，去告訴管倉，他才知道要留什麼。', '你手上會有一個記號，說給木匠聽。', '補好船以後，由你按「召集大家吃飯」顧好力氣。'],
+  supply: ['你是唯一能按「丟」的人：先問清楚大家，再丟。', '你手上會有一個記號，說給木匠聽。', '浪變大以後，船只能載 5，你要再決定一次留什麼。'],
+  nav: ['大家講好了，由你按「決定好了」。', '你手上會有一個記號，說給木匠聽。', '天亮前準備好了，由你按「衝向海灘」。'],
+  medic: ['只有你知道「食物要吃下去才算力氣」。少了你這句，大家會以為留著食物就夠了。', '你手上會有一個記號，說給木匠聽。', '提醒大家：要吃飯，力氣才算顧好。'],
+};
+const ICON = { nav: '☸️', supply: '📦', comms: '🍲', eng: '🔨', medic: '🩺', observer: '🔭' };
+const roleNames = () => view.roles.map((r) => R[r].name).join('＋');
+const main = () => view.roles[0];
+
+function topbar(clock, sub2) {
+  return `<div class="tb"><div class="me">${view.roles.map((r) => A.role(r, 30)).join('')}<b>${roleNames()}</b><span>${view.n}</span></div><div class="clock">${clock}${sub2 ? `<div style="font-size:12px;font-weight:500;color:var(--muted);text-align:right">${sub2}</div>` : ''}</div></div>`;
+}
+function roster(hl) {
+  const crew = view.id === 'combo' ? [{ n: '阿明', r: 'comms', r2: 'eng' }, { n: '小芳', r: 'supply', r2: 'medic' }, { n: '大衛', r: 'nav', r2: 'observer' }] : CREW;
+  return `<div class="roster" aria-label="全隊名冊">${crew.map((c) => `<span class="${c.n === hl ? 'hl' : ''} ${c.n === view.n ? 'self' : ''}">${A.role(c.r, 20)}${c.r2 ? A.role(c.r2, 20) : ''}${c.n}${c.n === hl ? ' ★' : ''}</span>`).join('')}</div>`;
+}
+function needs(night, lit = {}) {
+  const sub2 = { 力氣: night ? '要吃了才算' : '要吃飯・吃哪樣？', 船身: night ? '靠纜索' : '留繩子・哪條？', 天亮: night ? '撐到天亮' : '留著錨' };
+  const name = { 力氣: '力氣', 船身: '船身', 天亮: '錨住船' };
+  return `<div class="needs"><div class="h">上岸要顧好的三件事（顧好 2 件以上＝平安上岸）</div><div class="row">${['力氣', '船身', '天亮'].map((k) => `<div>${A.need(k, !!lit[k], 34)}<span>${name[k]}</span><small>${sub2[k]}</small></div>`).join('')}</div></div>`;
+}
+function gauge(w, cap) {
+  let cells = '';
+  for (let i = 0; i < w; i++) cells += `<i class="${i >= cap ? 'o' : ''}"></i>`;
+  return `<div class="gauge"><span aria-hidden="true">⚖️</span><div class="cells">${cells}</div><b>${w}<small style="font-size:13px;color:var(--muted)">／${cap}</small></b>${w > cap ? `<span class="ov">還要丟 ${w - cap}</span>` : ''}</div>`;
+}
+function clue(pic, title, text, tag) {
+  return `<div class="clue"><div class="pic">${pic}</div><div><div class="t">${title}${tag ? `<small>${tag}</small>` : ''}</div><p>${text}</p></div></div>`;
+}
+const CLUES = {
+  comms: [clue(A.item('糧食', 34), '今晚的飯', '倉底的乾糧還好好的：今晚煮<b>糧食</b>。', '只有你看到'), clue(A.need('力氣', true, 34), '伙房', '大家好些日子沒吃什麼了（27:21）。倉底有乾糧，貨艙有麥子。')],
+  supply: [clue(A.need('船身', true, 34), '上岸三件事', '力氣、船身、錨住船。今晚各靠哪一樣東西，每次都不一樣，要問隊友。'), clue(A.item('纜索', 34), '捆船的繩子', '纜索完好：捆船底就用纜索。', '只有你看到')],
+  nav: [clue('<span style="font-size:28px">⚖️</span>', '安全載重', '船最多只能留 <b>8 重</b>的東西，超過了吃水太深，不能開船。')],
+  medic: [clue(A.need('力氣', true, 34), '力氣', '人要真的<b>吃下去</b>才有力氣；食物留在船上不吃，不會變成力氣。今晚吃哪一樣，問伙房。')],
+  observer: [clue(A.item('錨', 34), '水深', '還探不到底：錨先留著，等水變淺、快靠岸時再拋。', '只有你看到'), clue('<span style="font-size:28px">🌊</span>', '風浪', '風浪會越來越大，之後船能留的東西會更少（8 → 5）。')],
+};
+function intel() {
+  const groups = view.roles.map((r) => {
+    const cs = CLUES[r] || [];
+    return `${view.roles.length > 1 ? `<div style="font-size:12px;color:var(--muted)">${ICON[r]} ${R[r].name}的</div>` : ''}${cs[0] || ''}${cs.length > 1 ? `<details><summary class="more">還有 ${cs.length - 1} 張 ▸</summary><div style="display:flex;flex-direction:column;gap:8px;margin-top:6px">${cs.slice(1).join('')}</div></details>` : ''}`;
+  });
+  return `<section class="sec"><div class="sh">我的情報 <span class="r">別人不知道的</span></div><div class="in">${groups.join('')}</div></section>`;
+}
+const ALL = ['糧食', '纜索', '錨', '麥子', '器具', '小船'];
+function shipStatus(open, night) {
+  const tray = main() === 'supply' && !night ? `<div class="tray">${ALL.map((i) => `<button>${A.item(i, 34)}${i}<small style="color:var(--muted);font-weight:400">按一下＝丟</small></button>`).join('')}</div>` : '';
+  const sc = night ? A.scene({ sky: 'night', onDeck: ['糧食', '纜索', '錨'], afloat: ['麥子', '器具', '小船'], load: { weight: 8, cap: 5 }, rock: 'storm' })
+    : A.scene({ sky: 'harbor', onDeck: ALL, load: { weight: 15, cap: 8 }, rock: 'calm' });
+  const w = night ? [8, 5] : [15, 8];
+  return `<details class="sec" ${open ? 'open' : ''}><summary>全船狀態 <span class="r">${w[0] > w[1] ? `船上 ${w[0]} 重，最多載 ${w[1]}：還要丟 ${w[0] - w[1]}（${main() === 'supply' ? '由你按' : '管倉小芳按'}）` : `${w[0]}／${w[1]} 不超重`} ▾</span></summary><div class="in"><div class="mini-scene">${sc}</div>${gauge(...w)}${needs(night, night ? { 船身: true, 天亮: true } : {})}${tray}</div></details>`;
+}
+
+// ───── 每個畫面 ─────
+const STEPS = [
+  { grp: '開始前（不計時）', t: '大廳', fix: [1], note: ['拿掉最底下沒人看的「怎麼玩」三句，改由下一步的動畫說。', '房主多一個「開場怎麼說」，可以照念，不念也能玩。', '開始鈕改成「開始：先上船點名」，讓人知道接下來不是馬上計時。'], was: '「怎麼玩」在大廳最底下，要捲到底才看得到；按開始的那一秒 8 分鐘就開始倒數。',
+    r: () => `<div class="tb"><div class="me"><b>房號 EWZJ</b><span>${view.n}</span></div></div><div class="body">
+      <section class="sec"><div class="sh">船員（6／10）</div><div class="in lobby-list">${CREW.map((c) => `<div>${c.n}${c.n === '阿明' ? '<small>房主</small>' : ''}</div>`).join('')}</div></section>
+      <section class="sec"><div class="sh">上船前，你會多帶一樣什麼？<span class="r">可以跳過</span></div><div class="in chips"><button>🪔 油燈</button><button aria-pressed="true">🧥 外衣</button><button>🌰 乾果</button><button>🎵 一首歌</button><button>跳過</button></div></section>
+      <details class="script"><summary>ⓘ 房主：開場可以這樣說（約 30 秒）</summary><p>「我們是一艘運麥子的船上的船員，故事在使徒行傳 27 章。風暴要來了，船太重。每個人手機上只有一部分情報，所以要開口問，也可以直接看別人的手機。等一下每個人會拿到一個角色，輪流大聲念出來，順便回答一個小問題，不想答可以跳過。」</p></details>
+      </div><div class="bar" style="position:static"><button class="big" data-go="next">開始：先上船點名</button><div class="st">點名不計時，大約 1–2 分鐘</div></div>` },
+  { grp: '開始前（不計時）', t: '你的角色卡', fix: [3], note: ['角色第一次被「交給」玩家：大圖、一句第一人稱台詞（原本 ROLES.job 寫好了但從沒顯示）。', '「你負責的按鈕長這樣」是灰色虛線示意，不能按，寫明什麼時候才會出現；沒有按鈕的角色寫「你的情報就是別人缺的那一塊」。', '「只有你知道」先預告他手上情報的價值。', '底下一行徒 27 章人物（待使用者決定）；不扮演保羅。', '切換上方的角色看不同手機；「3 人局」看一人兩個角色。'], was: '角色只是頂端 22px 的小膠囊，旁邊沒有任何說明。',
+    r: () => `<div class="rolecard"><div style="display:flex;justify-content:center;gap:8px">${view.roles.map((r) => A.role(r, view.roles.length > 1 ? 72 : 96)).join('')}</div>
+      <div class="you">${view.n}，你是</div><h2>${roleNames()}</h2>
+      <div class="line">「${view.roles.map((r) => R[r].line).join('也')}」</div>
+      <div class="bib">${view.roles.map((r) => R[r].bib).join('；')}</div><hr>
+      <div class="k">你負責的按鈕長這樣</div>
+      ${view.roles.map((r) => R[r].btn ? `<div class="fakebtn">${R[r].btn}<small>${R[r].when}</small></div>` : `<div class="fakebtn">你沒有按鈕<small>你的情報就是別人缺的那一塊</small></div>`).join('')}
+      <div class="k">只有你知道</div>${view.roles.map((r) => `<div class="secret">${R[r].secret}</div>`).join('')}
+      </div><div class="bar"><button class="big" data-go="next">我看好了</button><div class="st">接著全隊一起看 30 秒動畫，再輪流念角色</div></div>` },
+  { grp: '開始前（不計時）', t: '30 秒故事動畫', fix: [1, 4], note: ['三格就是整局的三幕：起風 → 天黑 → 天亮。所有手機同時播，每格 10 秒，可點一下跳下一格（原型 5 秒）。', '第三格第一次說清楚：<b>天亮＝衝向海灘的時刻</b>，以及「上岸要顧好三件事」。', '「等天亮」改名「錨住船」（撐到天亮，不撞上石頭）。'], was: '新人第一眼看到的是起風卡上的三行經文，還不知道「風暴」「這局」是什麼。',
+    r: () => {
+      const P = [
+        { art: A.scene({ sky: 'storm', onDeck: ALL, load: { weight: 15, cap: 8 }, rock: 'storm' }), h: '風暴要來了，船太重', p: '船上的東西重 15，船最多只能載 8——<b>超重</b>就會進水。大家一起決定<b>丟什麼、留什麼</b>；每個人只知道一部分，要開口問。', c: '徒 27:14–15', you: YOU[main()][0] },
+        { art: `<div style="height:190px;border-radius:14px;overflow:hidden;position:relative">${A.darkness()}<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">${A.role('eng', 72)}</div></div>`, h: '天會黑一陣子', p: '看不見了。只有<b>木匠</b>（🔨）手機上有補船面板，其他人手上各有一個記號，<b>用說的</b>告訴木匠。', c: '徒 27:20', you: YOU[main()][1] },
+        { art: A.landing({ lit: { 力氣: true, 船身: true, 天亮: true } }), h: '天亮時，衝向海灘', p: '頂端的「離天亮」倒數走完＝天亮＝衝向海灘。三件事顧好 2 件以上，全船就平安上岸；3 件都顧好最棒。', c: '徒 27:39–44', you: YOU[main()][2], extra: `<div class="three"><div>${A.need('力氣', true, 40)}力氣<small style="font-weight:400;color:var(--muted)">要吃飯</small></div><div>${A.need('船身', true, 40)}船身<small style="font-weight:400;color:var(--muted)">留著繩子</small></div><div>${A.need('天亮', true, 40)}錨住船<small style="font-weight:400;color:var(--muted)">留著錨</small></div></div>` },
+      ];
+      const k = sub % 3; const s = P[k];
+      timers.push(setTimeout(() => { sub = (sub + 1) % 3; render(); }, 5000));
+      return `<div class="full" data-sub="1">${s.art}<h2>${s.h}</h2><p>${s.p}</p>${s.extra || ''}${s.you ? `<div class="secret"><b>你（${roleNames()}）這段：</b>${s.you}</div>` : ''}<cite>${s.c}</cite><div class="pbar"><i style="animation-duration:5s"></i></div><div class="dots">${[0, 1, 2].map((i) => `<i class="${i === k ? 'on' : ''}"></i>`).join('')}</div><button class="ghost" data-go="next">跳過動畫</button></div>`;
+    } },
+  { grp: '開始前（不計時）', t: '輪流念（別人在說）', fix: [3, 5], note: ['輪到的人手機全螢幕顯示自己的角色卡；<b>其他人的手機都顯示「現在輪到誰」＋他的台詞和小問題</b>，所以大家會抬頭看他。', '小問題只用說的，不打字、不記錄、不計分。', '輪到的人按「我說完了」換下一位（或 10 秒自動換）；這是接力棒，不是全員同意。房主有「跳過點名」。'], was: '沒有任何時刻讓人說到自己；也沒有人知道隊友是什麼角色。',
+    r: () => {
+      const order = CREW.filter((c) => c.n !== view.n);
+      const k = sub % order.length; const c = order[k];
+      timers.push(setTimeout(() => { sub++; render(); }, 4500));
+      return `<div class="full"><div style="font-size:15px;color:var(--muted)">現在輪到</div><div>${A.role(c.r, 88)}</div><h2>${c.n}（${R[c.r].name}）</h2><p style="font-size:20px;font-weight:700">「${R[c.r].line}」</p>
+        <div class="q"><small>他會順便說說</small>${R[c.r].q[0]}</div>
+        <div class="turns">${CREW.map((x, i) => `<span class="${x.n === c.n ? 'now' : CREW.indexOf(c) > i ? 'done' : ''}">${x.n}</span>`).join('')}</div>
+        <div class="pbar"><i style="animation-duration:4.5s"></i></div><div style="font-size:14px;color:var(--muted)">你現在：抬頭聽他說。他說完會換下一位，輪到你時你的手機會變。</div></div>`;
+    } },
+  { grp: '開始前（不計時）', t: '輪流念（輪到你）', fix: [3, 5], note: ['大字照念就好：「我是＿＿，今天當＿＿。」接著一個跟角色有關的輕鬆題。', '「換一題」和「跳過」一樣大，不想說就跳過。題目不問信仰、家庭、感情、收入、外表。', '「我說完了」只有正在說的人看得到、只有他能按。'], was: '背包題在大廳點一下就沒下文，沒有人會被問「你為什麼帶外衣？」。',
+    r: () => `<div class="full"><div style="font-size:15px;color:var(--gold);font-weight:700">輪到你了，大聲念</div>
+      <div style="display:flex;justify-content:center;gap:8px">${view.roles.map((r) => A.role(r, 72)).join('')}</div>
+      <p style="font-size:22px;font-weight:900">「我是${view.n}，今天當${roleNames()}。<br>${view.roles.map((r) => R[r].line).join('')}」</p>
+      <div class="q"><small>順便說說（不想答就跳過；想答別題就換一題）</small>${R[main()].q[sub % 2]}</div>
+      <div class="row2"><button class="ghost" data-act="swapq">換一題</button><button class="ghost" data-go="next">跳過</button></div>
+      <button class="big" data-go="next">我說完了</button></div>` },
+  { grp: '8 分鐘開始', t: '開局主畫面', fix: [2, 3], note: ['<b>一個畫面只有一條「現在要做」</b>（金框），合併了原本的「我的任務」「下一步」「狀態列」三處指令；寫名字也寫角色。', '頂端角色放大；下面一排全隊名冊，★ 是任務條提到的人。', '「我的情報」只展開一張，其他收成「還有 N 張」。', '「全船狀態」：管倉、船長預設展開，其他人預設收起（仍可點開，也可看管倉的手機）。大船圖縮小。', '三件事有標題「上岸要顧好的三件事」，危機前寫「？問隊友」。'], was: '開局一次攤開 7–10 個區塊、210–244 字，要捲將近 2 個螢幕；三處指令同時出現。',
+    r: () => {
+      const T = { comms: ['去找 <em>小芳（📦管倉）</em>，走過去當面叫她的名字，告訴她：今晚吃的是<em>糧食</em>。', '小芳'],
+        supply: ['先問 <em>阿明（🍲伙房）</em>今晚吃哪一樣，再決定丟什麼。', '阿明'],
+        nav: ['去問 <em>小芳（📦管倉）</em>：船上現在多重？大家講好了再按「決定好了」。', '小芳'],
+        medic: ['去找 <em>阿明（🍲伙房）</em>，告訴他：食物要吃下去才算力氣。', '阿明'] };
+      const t = T[main()];
+      const open = main() === 'supply' || main() === 'nav';
+      const bar = main() === 'nav' ? `<div class="bar"><div class="st">認識隊友：<strong>00:32</strong> 後才能決定</div><button class="big dim" aria-disabled="true">決定好了</button></div>` : '';
+      return `${topbar('<small>🌅 離天亮還有</small>7:15', '🌬 風暴 2:13 後來')}${roster(t[1])}<div class="body"><div class="task"><div class="lbl">▶ 現在要做</div><p>${t[0]}</p></div>${main() === 'supply' ? shipStatus(true) + intel() : intel() + shipStatus(open)}</div>${bar}`;
+    } },
+  { grp: '8 分鐘開始', t: '起風卡（0:45 才翻）', fix: [1], note: ['第一局的起風卡不在開局第一秒蓋上來，改在認識隊友結束時翻，那時大家已經懂「超重」「風暴」。', '卡片規則不變（從開局就生效），只是翻開的時機。第二局起照舊開局就翻。', '「卡片效果是遊戲設定」只在第一張卡出現一次，之後收成卡角 ⓘ。'], was: '按下開始的第一個畫面就是這張卡，經文三行加效果說明。',
+    r: () => `${topbar('<small>🌅 離天亮還有</small>6:30', '🌬 風暴 1:30 後來')}<div class="body" style="padding-top:12px"><div class="sec" style="border:2px solid var(--gold);padding:14px;display:flex;flex-direction:column;gap:8px"><div style="font-size:12px;color:var(--gold)">起風時發生的事</div><h3 style="margin:0;font-size:22px">朋友的照應</h3><div style="border-left:3px solid var(--gold);padding-left:10px;font-size:15px">第二天，到了西頓；猶流寬待保羅，准他往朋友那裏去，受他們的照應。<br><cite style="color:var(--gold);font-style:normal;font-size:13px">徒 27:3</cite></div><div class="secret"><b>所以這局：</b>朋友幫忙把乾糧烤乾、分成小包：<b>糧食變輕</b>，重 3 → 重 2。</div><div style="font-size:12px;color:var(--muted)">ⓘ 卡片效果是遊戲設定；經文記的是事件本身。</div><button class="big" data-go="next">知道了</button></div></div>` },
+  { grp: '8 分鐘開始', t: '天黑：形容記號', fix: [5], note: ['提示改成先說「它像生活中的什麼東西」，這是全遊戲最自然的笑點，讓它更好笑。', '「原本顧好 3／3 件・船只能留 5」移到電來了以後再說，天黑時只留一件事。', '補船規則不變；可以和 docs/15「記號隨機轉向」一起試。'], was: '「按住看，用說的讓木匠找出來：形狀？幾個缺口？開口朝哪？」，上面還有新人看不懂的「原本顧好 3／3 件」。',
+    r: () => `<div class="scr dark" style="flex:1"><div class="full" style="justify-content:flex-start;gap:14px"><h2 style="text-align:left">天黑了</h2><div style="display:flex;justify-content:space-between;font-size:16px"><span>補船限時 <b style="color:var(--gold);font-size:22px">00:48</b></span><span>補好 <b style="color:var(--gold);font-size:22px">0／2</b> 格</span></div>
+      <div style="text-align:left;font-weight:700;font-size:17px">木匠的面板要補 2 格，<span style="color:var(--gold2)">第 2 格的答案在你手上</span></div>
+      <div class="hold" id="hold">按住這裡才會顯示記號</div>
+      <div class="hint"><b>按住不放</b>就看得到記號，放開就藏起來。<br>先說它<b>像生活中的什麼東西</b>（例：「像缺一角的甜甜圈」），<br>再說<b>幾個缺口、開口朝哪</b>。<br>說給木匠 <b>志豪（🔨）</b>聽，他從面板上選出來。</div></div></div>` },
+  { grp: '8 分鐘開始', t: '第十四天夜裡（章節卡）', fix: [4], note: ['電來了，先浮一張 3 秒的章節卡（不擋操作），用一句故事說清楚：<b>天一亮就衝向海灘，在那之前只來得及再做一件事</b>。', '之後的「天亮」只剩一個意思。'], was: '補好船直接回到儀表板，畫面寫「天亮前全隊只來得及做一件」，但沒有說天亮是什麼時候。',
+    r: () => { timers.push(setTimeout(() => { if (step === 8) { step = 9; sub = 0; render(); } }, 3500)); return `<div class="full">${A.scene({ sky: 'night', onDeck: ['糧食', '纜索', '錨'], load: { weight: 8, cap: 5 }, rock: 'storm' })}<cite>徒 27:27</cite><h2>第十四天夜裡</h2><p>水手覺得快到陸地了。<br><b>天一亮，就衝向海灘。</b></p><p style="font-size:16px;color:var(--muted)">在那之前，全隊只來得及再做一件事：<br>吃飯、拋錨、捆船底，選一件。<br><small>按鈕在負責的人手機上：吃飯＝伙房、捆船底＝木匠、拋錨＝瞭望。大家先商量。</small></p><div class="pbar"><i style="animation-duration:3.5s"></i></div></div>`; } },
+  { grp: '8 分鐘開始', t: '夜裡：離天亮', fix: [4, 2], note: ['頂端倒數改成「🌅 離天亮 3:20」，下面一條天色條，太陽從夜走到日出；走到底＝8:00＝天亮。（同一個 8 分鐘，規則不變）', '「天亮前只來得及一件」改成「<b>出發前</b>只來得及做一件」。', '「等天亮」改名「錨住船」，小字「撐到天亮」。', '吃飯按鈕旁一行經文：「天漸亮的時候，保羅勸眾人吃飯」（27:33），說明為什麼夜裡要吃飯。', '上一階段的表決結果橫幅換階段就清掉。'], was: '「天」只有月亮，沒有天快亮的過程；「天亮」同時是要顧的事、期限、出發時刻三個意思。',
+    r: () => {
+      const T = { comms: '要不要由你召集大家吃飯？先和大家商量。', supply: '浪更大了，船只能留 5：再決定一次留什麼。', nav: '大家都準備好了，就由你按「衝向海灘」。', medic: '你有新線索：十四天沒吃東西了（27:33）。去跟 <em>阿明（🍲伙房）</em> 說：現在就該召集大家吃飯。伙房一按，每個人手機都會跳出「同意／等一下」，<em>大家會先看你怎麼說</em>。' };
+      const use = main() === 'comms' ? `<div class="use"><div class="rule">出發前，全隊只來得及做<b>一件</b>（吃飯也算）</div><button class="big" data-go="next">🍞 召集大家吃飯</button><div class="verse">天漸亮的時候，保羅勸眾人都吃飯（徒 27:33）</div></div>` : '';
+      const bar = main() === 'nav' ? `<div class="bar"><div class="st">浪變大了，船最多只能載 5：還要再丟 3 重才能出發</div><button class="big dim" aria-disabled="true">衝向海灘</button></div>` : '';
+      return `${topbar('<small>🌅 離天亮還有</small>3:20', '🌙 補好船了')}<div class="skybar" aria-label="天色：夜裡，離天亮 3 分 20 秒"><i></i></div><div class="skycap"><span>🌙 第十四天夜裡</span><span>🌅 天亮＝衝向海灘</span></div>${roster(main() === 'medic' ? '阿明' : '')}<div class="body"><div class="task"><div class="lbl">▶ 現在要做</div><p>${T[main()] || T.nav}</p></div>${use}${shipStatus(main() !== 'comms', true)}${intel()}</div>${bar}`;
+    } },
+  { grp: '8 分鐘開始', t: '開飯時刻', fix: [5], note: ['吃飯通過、擘餅動畫播放時，所有手機下方浮一行 5 秒：「跟旁邊的人說：你現在最想吃什麼？」', '不擋操作、不用回答、不計時。經文裡這正是大家「放下心」的一刻（27:36）。'], was: '只有動畫和一句經文，沒有給人說話的理由。',
+    r: () => `<div class="full" style="position:relative">${A.meal()}<h2>大家吃飯了</h2><p>保羅說了這話，就拿着餅，在眾人面前祝謝了神，擘開吃。於是他們都放下心，也就吃了。</p><cite>徒 27:35–36</cite><div class="toast">🍞 跟旁邊的人說：你現在最想吃什麼？</div></div>` },
+  { grp: '8 分鐘開始', t: '天亮，衝向海灘', fix: [4], note: ['和故事動畫第三格同一張圖，玩家一看就知道「終點到了」。', '結算標題等動畫播完才顯示（現在動畫後面會先透出結果）。'], was: '新人到這裡才第一次看懂「原來天亮是終點」。',
+    r: () => `<div class="full">${A.landing({ lit: { 力氣: true, 船身: true, 天亮: true } })}<h2>天亮了，衝向海灘！</h2><cite>徒 27:39–41</cite><button class="big" data-go="next">看結果</button></div>` },
+  { grp: '結算（不計時）', t: '船員回憶＋謝謝誰', fix: [5], note: ['「船員回憶」排在經文前：依序顯示每位隊員和他剛才的小問題，大家一起回想、說出來。畫面不顯示答案（本來就沒記錄），沒有對錯、沒有分數，可以整張略過。', '「謝謝誰」多一排原因，結果顯示「小芳 → 阿明：說得很清楚」；仍可跳過、不計票。'], was: '破冰問題是全頁最小、最淡的一行灰字，在排行榜和經文後面。',
+    r: () => {
+      const c = CREW[sub % CREW.length];
+      return `<div class="tb"><div class="me"><b>全船平安上岸</b></div></div><div class="body">
+        <div style="display:flex;justify-content:center;gap:18px;padding:6px 0">${['力氣', '船身', '天亮'].map((k) => `<div style="text-align:center;font-size:13px">${A.need(k, true, 36)}<br>${k === '天亮' ? '錨住船' : k}</div>`).join('')}</div>
+        <div style="text-align:center;font-size:14px;color:var(--muted)">經文裡，船上 276 人全都上了岸（徒 27:37、44）</div>
+        <section class="sec"><div class="sh">船員回憶 <span class="r">說出來就好・不計分</span></div><div class="in memory">${A.role(c.r, 56)}<div class="who2">${c.n}（${R[c.r].name}）</div><div class="qq">「${R[c.r].q[0]}」<br>他剛才怎麼說的？</div><div class="row2"><button class="ghost" data-act="mem">下一位 ▸</button><button class="ghost">略過</button></div><div class="turns">${CREW.map((x) => `<span class="${x.n === c.n ? 'now' : ''}">${x.n}</span>`).join('')}</div></div></section>
+        <section class="sec"><div class="sh">謝謝誰？<span class="r">可以跳過・不計分</span></div><div class="in"><div class="chips">${CREW.filter((x) => x.n !== view.n).map((x, i) => `<button aria-pressed="${i === 0}">${x.n}</button>`).join('')}</div><div class="chips"><button aria-pressed="true">說得很清楚</button><button>提醒了我</button><button>帶大家吃飯</button><button>補船好快</button><button>其他</button></div><div style="font-size:14px;color:var(--muted)">大家的手機會看到：${view.n} → ${CREW.find((x) => x.n !== view.n).n}：說得很清楚</div></div></section>
+        </div>`;
+    } },
+];
+
+const whoEl = document.getElementById('who');
+const stepsEl = document.getElementById('steps');
+const scr = document.getElementById('scr');
+const notes = document.getElementById('notes');
+const PROBLEM = { 1: '問題 1 看不懂', 2: '問題 2 資訊太多', 3: '問題 3 角色', 4: '問題 4 天亮', 5: '問題 5 破冰' };
+
+function render() {
+  timers.forEach(clearTimeout); timers = [];
+  whoEl.innerHTML = VIEWS.map((v) => `<button data-view="${v.id}" aria-pressed="${v === view}">${v.label}</button>`).join('');
+  let g = '';
+  stepsEl.innerHTML = STEPS.map((s, i) => { const h = s.grp !== g ? `<div class="grp">${(g = s.grp)}</div>` : ''; return `${h}<button data-step="${i}" aria-current="${i === step}"><b>${i + 1}</b>${s.t}</button>`; }).join('');
+  const s = STEPS[step];
+  scr.className = 'scr' + (step === 7 ? ' dark' : '');
+  scr.innerHTML = s.r();
+  scr.scrollTop = 0;
+  notes.innerHTML = `<h2>${step + 1}. ${s.t}</h2><div class="fix">${s.fix.map((f) => `<span>${PROBLEM[f]}</span>`).join('')}</div><ul>${s.note.map((n) => `<li>${n}</li>`).join('')}</ul><div class="was"><b>現在的遊戲：</b>${s.was}</div>`;
+  const hold = document.getElementById('hold');
+  if (hold) {
+    const show = () => { hold.innerHTML = '<svg viewBox="0 0 60 60" width="110" height="110" aria-label="記號：一個圓，右上缺兩個口"><path d="M30 6 A24 24 0 1 0 54 30" fill="none" stroke="#ffd97a" stroke-width="6" stroke-dasharray="60 8 140 0"/><circle cx="30" cy="30" r="6" fill="#ffd97a"/></svg>'; };
+    const hide = () => { hold.textContent = '按住這裡才會顯示記號'; };
+    hold.addEventListener('pointerdown', show); hold.addEventListener('pointerup', hide); hold.addEventListener('pointerleave', hide);
+  }
+}
+function go(i) { step = Math.max(0, Math.min(STEPS.length - 1, i)); sub = 0; render(); }
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.view) { view = VIEWS.find((v) => v.id === b.dataset.view); sub = 0; render(); }
+  else if (b.dataset.step) go(+b.dataset.step);
+  else if (b.dataset.go === 'next' || b.id === 'next') go(step + 1);
+  else if (b.id === 'prev') go(step - 1);
+  else if (b.dataset.act === 'swapq' || b.dataset.act === 'mem') { sub++; render(); }
+  else if (b.closest('.full[data-sub]')) { sub++; render(); }
+});
+const q = new URLSearchParams(location.search);
+if (location.hash.startsWith('#s')) step = Math.min(STEPS.length - 1, Math.max(0, parseInt(location.hash.slice(2), 10) - 1 || 0));
+if (q.get('v')) view = VIEWS.find((v) => v.id === q.get('v')) || view;
+render();
+</script>
