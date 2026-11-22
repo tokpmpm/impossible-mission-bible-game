@@ -175,8 +175,31 @@ button, input { font: inherit; color: inherit; }
   color: #ffd9cc;
   border: 1px solid var(--warn);
   padding: 4px 14px;
-  border-radius: 999px;
+  border-radius: 14px;
   font-size: 0.85rem;
+  max-width: calc(100vw - 32px);
+  text-align: center;
+}
+.conn .conn-sub {
+  display: block;
+  font-size: 0.78rem;
+  opacity: 0.9;
+}
+.conn .conn-reload {
+  margin: 4px 0 2px;
+}
+/* 遊戲中的連線說明：暫停、隊友斷線（docs/16） */
+.conn-note {
+  margin: 8px 16px 0;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--warn);
+  background: var(--warn-bg);
+  color: #ffd9cc;
+  font-size: 0.88rem;
+}
+.conn-note.paused {
+  font-size: 0.95rem;
 }
 .toast {
   position: fixed;
