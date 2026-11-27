@@ -44,6 +44,9 @@ export function qrSvg(text: string): string {
   return SvgTag.render(data, { margin: 1, color: { dark: '#0b1d3a', light: '#ffffff' } }) as string;
 }
 
+/** 進行中的局，至少每幾毫秒存一次檔。 */
+export const LIVE_SAVE_EVERY_MS = 5_000;
+
 export class Hub {
   rooms = new Map<string, Room>();
   conns = new Set<Conn>();
@@ -90,6 +93,9 @@ export class Hub {
       }
     }
   }
+
+  /** 進行中的局上次「定時存檔」的時間。 */
+  private liveSaved = new Map<string, number>();
 
   /** 標記房間要存檔（實際寫入在 flush，最多每秒一次）。 */
   private markDirty(code: string | null | undefined): void {
@@ -174,6 +180,8 @@ export class Hub {
   }
 
   close(conn: Conn): void {
+    // 同一條連線可能被關兩次（心跳逾時先關，ws 的 close 事件又來一次）：第二次什麼都不做（審查 #29 建議 3）
+    if (!this.conns.has(conn)) return;
     this.conns.delete(conn);
     const room = conn.roomCode ? this.rooms.get(conn.roomCode) : undefined;
     if (room && conn.playerId) {
@@ -313,10 +321,16 @@ export class Hub {
   /** 定時呼叫：推進各房間時間（2:15 提示、2:45 危機、修復協助、8:00）、關掉沒心跳的連線、存檔。 */
   tick(): void {
     this.reapStale();
+    const now = this.now();
     for (const room of this.rooms.values()) {
       if (room.tick()) {
         this.markDirty(room.code);
         this.broadcast(room);
+      }
+      // 進行中（沒暫停）的局每 5 秒至少存一次：伺服器當掉時，讀回的倒數不會跳回很久以前（審查 #29 建議 2）
+      if (room.isLive() && now - (this.liveSaved.get(room.code) ?? 0) >= LIVE_SAVE_EVERY_MS) {
+        this.liveSaved.set(room.code, now);
+        this.markDirty(room.code);
       }
     }
     this.flush();
