@@ -228,3 +228,50 @@ test('存檔格式：serialize → restore 後每個人看到的畫面一樣（M
     assert.deepEqual(b, a);
   }
 });
+
+test('審查 #29：暫停中投完的票不會讓動作執行；恢復後才結算', () => {
+  const clock = { t: 1_000_000 };
+  const room = new Room('P', { now: () => clock.t, seed: 5, introMs: 0 });
+  const ps = Array.from({ length: 4 }, (_, i) => room.addPlayer('p' + i));
+  room.start(room.hostId!);
+  const nav = ps.find((p) => room.round!.roles.get(p.id)!.includes('nav'))!;
+  const sup = ps.find((p) => room.round!.roles.get(p.id)!.includes('supply'))!;
+  for (const item of ['麥子', '器具', '小船'] as const) room.act(sup.id, 'x' + item, { type: 'setItem', item, on: false });
+  clock.t += 1000;
+  room.tick();
+  assert.equal(room.act(nav.id, 'lock1', { type: 'lock' }), null);
+  const prop = room.round!.proposal!;
+  const others = ps.filter((p) => p.id !== nav.id);
+  room.disconnect(others[0].id);
+  room.disconnect(others[1].id);
+  assert.ok(room.pausedAt !== null, '2/4 斷線＝暫停');
+  room.vote(others[2].id, prop.id, 'yes');
+  assert.equal(room.round!.game.phase, 'planning', '暫停中不執行');
+  assert.ok(room.round!.proposal, '表決還在');
+  room.resume(others[0].id, others[0].token);
+  room.tick();
+  assert.equal(room.round!.proposal?.id ?? null, prop.id, '恢復後還在等 others[0] 的票');
+  room.vote(others[0].id, prop.id, 'yes');
+  assert.equal(room.round!.game.phase, 'blackout', '恢復後投完就執行');
+});
+
+test('審查 #29：進行中的局即使沒有變化也每 5 秒存一次檔；同一條連線關兩次不出錯', async () => {
+  const { Hub, LIVE_SAVE_EVERY_MS } = await import('../src/server/hub.ts');
+  let t = 1_000_000;
+  const store = new MemoryRoomStore();
+  const hub = new Hub({ store, now: () => t, introMs: 0 });
+  const conns = Array.from({ length: 3 }, () => ({ sent: [] as string[], send(d: string) { this.sent.push(d); }, close() {}, origin: '', roomCode: null as string | null, playerId: null as string | null }));
+  for (const c of conns) hub.open(c as never);
+  hub.message(conns[0] as never, JSON.stringify({ t: 'create', nickname: 'a' }));
+  const code = conns[0].roomCode!;
+  for (const c of conns.slice(1)) hub.message(c as never, JSON.stringify({ t: 'join', code, nickname: 'b' }));
+  hub.message(conns[0] as never, JSON.stringify({ t: 'start' }));
+  t += 2000;
+  hub.tick();
+  const n1 = store.saves;
+  t += LIVE_SAVE_EVERY_MS + 1000;
+  hub.tick();
+  assert.ok(store.saves > n1, '沒有變化也存了一次');
+  hub.close(conns[2] as never);
+  assert.doesNotThrow(() => hub.close(conns[2] as never));
+});

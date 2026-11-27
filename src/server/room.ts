@@ -712,7 +712,13 @@ export class Room {
     return null;
   }
 
-  /** 投票。重複投同一個表決會被忽略；表決已經結束會丟錯誤。 */
+  /** 這局正在進行、沒有暫停（伺服器定時存檔用）。 */
+  isLive(): boolean {
+    const g = this.round?.game;
+    return !!g && g.phase !== 'settled' && g.phase !== 'ended' && this.pausedAt === null;
+  }
+
+  /** 投票。重複投同一個表決會被忽略；表決已經結束會丟錯誤。暫停中的票先記著，恢復後才結算。 */
   vote(pid: string, proposalId: string, choice: VoteChoice): void {
     const r = this.round;
     const p = r?.proposal;
@@ -724,7 +730,8 @@ export class Room {
     if (p.votes.has(pid)) return;
     p.votes.set(pid, choice);
     this.touch();
-    this.settleVote();
+    // 暫停中不結算（審查 #29 建議 1）：票先記著，大家連回來 tick 時才看結果、才執行
+    if (this.pausedAt === null) this.settleVote();
   }
 
   /** 表決還能不能成立（階段變了、提案的人離線＝取消）。 */
