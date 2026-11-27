@@ -47,11 +47,13 @@ export function lanAddress(): string | null {
 }
 
 export function startServer(
-  opts: { port?: number; publicUrl?: string; tickMs?: number; introMs?: number; sweepWarningMs?: number; voteMs?: number; leaderboardFile?: string; store?: RoomStore; staleMs?: number } = {},
+  opts: { port?: number; publicUrl?: string; tickMs?: number; introMs?: number; boardingMs?: number; sweepWarningMs?: number; voteMs?: number; leaderboardFile?: string; store?: RoomStore; staleMs?: number } = {},
 ) {
   const port = opts.port ?? Number(process.env.PORT ?? 3000);
   // INTRO_MS：只給自動測試縮短「認識隊友」時間用；正式遊戲固定 60 秒
   const introMs = opts.introMs ?? (process.env.INTRO_MS ? Number(process.env.INTRO_MS) : undefined);
+  // BOARDING_MS：只給自動測試縮短「上船」（倒數前的角色卡＋動畫，正式首局 40 秒）
+  const boardingMs = opts.boardingMs ?? (process.env.BOARDING_MS ? Number(process.env.BOARDING_MS) : undefined);
   // SWEEP_WARN_MS：同上，只給自動測試縮短「捲走前 10 秒提醒」
   const sweepWarningMs = opts.sweepWarningMs ?? (process.env.SWEEP_WARN_MS ? Number(process.env.SWEEP_WARN_MS) : undefined);
   // LEADERBOARD_FILE：排行榜存檔位置（例如 data/leaderboard.json）；不給就只在記憶體，伺服器重開會清空
@@ -60,7 +62,7 @@ export function startServer(
   const voteMs = opts.voteMs ?? (process.env.VOTE_MS ? Number(process.env.VOTE_MS) : undefined);
   // STALE_MS：同上，只給自動測試縮短心跳逾時（正式 45 秒）
   const staleMs = opts.staleMs ?? (process.env.STALE_MS ? Number(process.env.STALE_MS) : undefined);
-  const hub = new Hub({ publicUrl: opts.publicUrl ?? process.env.PUBLIC_URL ?? null, introMs, sweepWarningMs, voteMs, leaderboard, store: opts.store, staleMs });
+  const hub = new Hub({ publicUrl: opts.publicUrl ?? process.env.PUBLIC_URL ?? null, introMs, boardingMs, sweepWarningMs, voteMs, leaderboard, store: opts.store, staleMs });
   let actualPort = port;
 
   function originOf(req: IncomingMessage): string {

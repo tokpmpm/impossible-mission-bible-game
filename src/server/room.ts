@@ -39,6 +39,7 @@ import {
   PREFERENCES,
   QUESTIONS,
   ROLE_BUNDLES,
+  ROLE_CARD,
   ROLES,
   SPLIT_FROM,
   STORY,
@@ -51,6 +52,13 @@ import {
 import type { Action, CardView, MomentView, Rejection, View, ViewPhase, VoteChoice } from './view.ts';
 
 export const INTRO_MS = 60_000;
+/**
+ * 上船（不計時，DECISIONS 20 新手引導 v2 ①A）：按開始後先看角色卡＋短動畫，再開始 8 分鐘倒數。
+ * 首局 40 秒（角色卡 8 秒＋三格動畫 30 秒），第二局起 10 秒（只看角色卡）。房主可以提早開船。
+ * Room 預設 0（直接開始，方便單元測試）；Hub 預設 BOARDING_MS。
+ */
+export const BOARDING_MS = 40_000;
+export const BOARDING_LATER_MS = 10_000;
 export const MIN_PLAYERS = 3;
 export const MAX_PLAYERS = 10;
 export const SEED_ID: SeedId = 'ship 001';
@@ -114,7 +122,7 @@ interface Round {
   /** 各動作表決沒通過幾次（通過或強制後歸零）。 */
   fails: Map<string, number>;
   /** 最近一次表決結果。 */
-  lastVote: { key: string; by: string; outcome: 'rejected' | 'forced' | 'cancelled'; wait: number; info: number; at: number; tries: number } | null;
+  lastVote: { key: string; by: string; outcome: 'rejected' | 'forced' | 'cancelled'; wait: number; info: number; at: number; tries: number; phase?: string } | null;
   /** 這局表決的紀錄（結尾回顧用）。 */
   voteLog: { key: string; by: string; outcome: 'passed' | 'rejected' | 'forced' | 'cancelled'; at: number }[];
   /** 剛結束的表決代號（最近幾個）：連點送來的晚到票安靜忽略，不跳錯誤（docs/15 M1）。 */
@@ -123,6 +131,8 @@ interface Round {
   introMs?: number;
   /** 停電時記號持有者看到的圖案轉幾度（0／90／180／270；每格一個，DECISIONS 20 試行）。 */
   slotRots?: number[];
+  /** 這局上船（不計時的角色卡＋動畫）多久；倒數從 startedAt 開始，上船期間 elapsed() 是負的。 */
+  boardingMs?: number;
 }
 
 const EXTRA_REASON_TEXT: Record<string, string> = {
@@ -191,9 +201,12 @@ export class Room {
   practice: boolean;
   /** 表決沒回應算同意的時間（正式 10 秒；只給自動測試縮短）。 */
   voteMs: number;
+  /** 首局上船多久（不計時；第二局起按比例縮成 1/4）。 */
+  boardingMs: number;
 
-  constructor(code: string, opts: { now?: () => number; seed?: number; introMs?: number; sweepWarningMs?: number; voteMs?: number; practice?: boolean } = {}) {
+  constructor(code: string, opts: { now?: () => number; seed?: number; introMs?: number; sweepWarningMs?: number; voteMs?: number; practice?: boolean; boardingMs?: number } = {}) {
     this.code = code;
+    this.boardingMs = opts.boardingMs ?? 0;
     this.voteMs = opts.voteMs ?? VOTE_MS;
     this.practice = !!opts.practice;
     this.introMs = opts.introMs ?? INTRO_MS;
@@ -370,6 +383,7 @@ export class Room {
     // 第二局起同一群人已經認識，認識隊友從 60 秒縮成 30 秒（DECISIONS 20）；測試縮短 introMs 時同比例
     const introMs = firstRound ? this.introMs : Math.round((this.introMs * LOCK_OPENS_AT_LATER) / LOCK_OPENS_AT);
     const slotRots = slots.map(() => [0, 90, 180, 270][Math.floor(this.random() * 4)]);
+    const boardingMs = firstRound ? this.boardingMs : Math.round((this.boardingMs * BOARDING_LATER_MS) / BOARDING_MS);
     this.roundsPlayed++;
     const btHolders = this.assignBreakthrough(participants, roles);
     const tonightHolders = new Map<DialId, string>();
@@ -382,7 +396,7 @@ export class Room {
       id: `${this.code}-${this.roundsPlayed}-${randomId(8)}`,
       no: this.roundsPlayed,
       seedId: SEED_ID,
-      startedAt: this.now(),
+      startedAt: this.now() + boardingMs, // 倒數在上船之後才開始
       firstRound,
       game: createGame({ seedId: SEED_ID, playerCount: n, firstRound, slots, cards, tonight, sweep: !firstRound, sweepWarningMs: this.sweepWarningMs, grayOrder, lockOpensAt: introMs }),
       participants,
@@ -404,7 +418,21 @@ export class Room {
       endedVotes: [],
       introMs,
       slotRots,
+      boardingMs,
     };
+    this.touch();
+  }
+
+  /** 還在上船（倒數還沒開始）。 */
+  boarding(): boolean {
+    return !!this.round && this.elapsed() < 0;
+  }
+
+  /** 房主：大家都看完角色卡了，提早開船（倒數從現在開始）。 */
+  skipBoarding(byId: string): void {
+    if (byId !== this.hostId) throw new Error('只有房主可以開船');
+    if (!this.boarding() || this.pausedAt !== null) return;
+    this.round!.startedAt = this.now();
     this.touch();
   }
 
@@ -495,6 +523,13 @@ export class Room {
     const r = this.round;
     if (!r || r.game.phase === 'settled' || r.game.phase === 'ended') return pauseChanged;
     if (this.pausedAt !== null) return pauseChanged;
+    if (this.elapsed() < 0) {
+      // 上船中：倒數還沒開始，規則時間不走
+      const sig = 'boarding';
+      if (sig === this.lastSig) return pauseChanged;
+      this.lastSig = sig;
+      return true;
+    }
     r.game = apply(r.game, { type: 'tick', at: this.elapsed() });
     if (r.proposal) this.settleVote();
     const sig = this.signature();
@@ -600,6 +635,7 @@ export class Room {
         lastActivity: this.lastActivity,
         pausedAt: this.pausedAt,
         introMs: this.introMs,
+        boardingMs: this.boardingMs,
         sweepWarningMs: this.sweepWarningMs ?? null,
         practice: this.practice,
         voteMs: this.voteMs,
@@ -618,7 +654,7 @@ export class Room {
   static restore(json: string, opts: { now?: () => number } = {}): Room {
     const d = JSON.parse(json, reviver);
     if (d.v !== 1) throw new Error('看不懂的房間存檔版本');
-    const room = new Room(d.code, { now: opts.now, introMs: d.introMs, sweepWarningMs: d.sweepWarningMs ?? undefined, voteMs: d.voteMs, practice: d.practice });
+    const room = new Room(d.code, { now: opts.now, introMs: d.introMs, boardingMs: d.boardingMs ?? 0, sweepWarningMs: d.sweepWarningMs ?? undefined, voteMs: d.voteMs, practice: d.practice });
     room.players = d.players;
     room.hostId = d.hostId;
     room.round = d.round;
@@ -648,6 +684,7 @@ export class Room {
     if (!r) throw new Error('還沒開始');
     if (!this.permitted(pid, a)) throw new Error('這不是你負責的操作');
     if (this.pausedAt !== null) return { action: a.type, reasons: [{ code: 'PAUSED', text: '一半以上的隊友斷線了，時間先停住：等大家連回來再繼續' }] };
+    if (this.elapsed() < 0) return { action: a.type, reasons: [{ code: 'BOARDING', text: '還在上船：看完角色卡、倒數開始後就能動' }] };
     if (VOTED.includes(a.type)) return this.propose(pid, a);
     return this.execute(pid, a);
   }
@@ -702,7 +739,7 @@ export class Room {
     const voters = r.participants.filter((p) => p !== pid && this.online(p));
     if (fails >= FORCE_AFTER) {
       r.fails.delete(key);
-      r.lastVote = { key, by: pid, outcome: 'forced', wait: 0, info: 0, at, tries: fails };
+      r.lastVote = { key, by: pid, outcome: 'forced', wait: 0, info: 0, at, tries: fails, phase: r.game.phase };
       r.voteLog.push({ key, by: pid, outcome: 'forced', at });
       return this.execute(pid, a);
     }
@@ -754,7 +791,7 @@ export class Room {
     };
     if (!this.proposalValid(p)) {
       end();
-      r.lastVote = { key: p.key, by: p.by, outcome: 'cancelled', wait: 0, info: 0, at, tries: r.fails.get(p.key) ?? 0 };
+      r.lastVote = { key: p.key, by: p.by, outcome: 'cancelled', wait: 0, info: 0, at, tries: r.fails.get(p.key) ?? 0, phase: r.game.phase };
       r.voteLog.push({ key: p.key, by: p.by, outcome: 'cancelled', at });
       return;
     }
@@ -763,7 +800,7 @@ export class Room {
       const tries = (r.fails.get(p.key) ?? 0) + 1;
       r.fails.set(p.key, tries);
       end();
-      r.lastVote = { key: p.key, by: p.by, outcome: 'rejected', wait: no.filter((v) => v === 'wait').length, info: no.filter((v) => v === 'info').length, at, tries };
+      r.lastVote = { key: p.key, by: p.by, outcome: 'rejected', wait: no.filter((v) => v === 'wait').length, info: no.filter((v) => v === 'info').length, at, tries, phase: r.game.phase };
       r.voteLog.push({ key: p.key, by: p.by, outcome: 'rejected', at });
       return;
     }
@@ -793,7 +830,7 @@ export class Room {
         return `天太黑了：先幫木匠 ${this.nick(this.operatorOf('eng'))} 補好船`;
       case 'WAIT_DAWN': {
         const open = dawnOpensAt(g) ?? at;
-        return `拋了錨，還在等天亮：再 ${Math.max(1, Math.ceil((open - at) / 1000))} 秒`;
+        return `拋了錨，還要等天色亮一點：再 ${Math.max(1, Math.ceil((open - at) / 1000))} 秒`;
       }
       case 'TOO_EARLY': {
         const sec = Math.max(1, Math.ceil((g.lockOpensAt - at) / 1000));
@@ -830,11 +867,51 @@ export class Room {
         const to = Room.holderIn(r.participants, r.roles, ask.to);
         if (!to || used.has(to)) continue;
         used.add(to);
-        out.push({ verb: ask.verb, nickname: this.nick(to), text: ask.text });
+        const toRole = (r.roles.get(to) ?? []).find((x) => x === ask.to || x === SPLIT_FROM[ask.to]) ?? ask.to;
+        out.push({ verb: ask.verb, nickname: this.nick(to), text: ask.text, roleId: toRole, roleName: ROLES[toRole].name });
         break;
       }
     }
     return out.slice(0, 2);
+  }
+
+  /**
+   * 任務條（docs/17 問題 2）：每個畫面只有一條「你現在要做的事」，合併 myTask 與下一步、寫出對方的角色。
+   * 有主按鈕的人（管倉、船長）：認識隊友後主句是自己的操作，先去問誰放副句；其他人主句是去找誰。
+   */
+  private taskOf(pid: string, phase: ViewPhase, myTask: string | null, steps: View['nextSteps']): View['task'] {
+    if (phase === 'boarding' || phase === 'blackout' || phase === 'lobby' || phase === 'settled' || phase === 'ended') return null;
+    const go = phase === 'replanning' ? undefined : steps[0];
+    const goTask = go ? { verb: go.verb, nickname: go.nickname, roleId: go.roleId, roleName: go.roleName, text: go.text } : null;
+    const operator = this.operatorOf('supply') === pid || (this.operatorOf('nav') === pid && phase !== 'intro');
+    if (operator && myTask) return { text: myTask, go: goTask };
+    if (goTask) return { text: null, go: goTask };
+    return myTask ? { text: myTask, go: null } : null;
+  }
+
+  /** 角色卡：這局我的職能（3 人局兩個）、台詞、故事裡的人、按鈕什麼時候出現、只有我知道的事。 */
+  private roleCard(pid: string): View['roleCard'] {
+    const r = this.round!;
+    const mine = r.roles.get(pid) ?? [];
+    const scoutPresent = r.participants.some((p) => r.roles.get(p)!.includes('scout'));
+    return {
+      roles: mine.map((id) => {
+        const c = ROLE_CARD[id];
+        // 6 人以下沒有測水深：拋錨按鈕回到瞭望手上
+        const anchor = id === 'observer' && !scoutPresent;
+        return {
+          id,
+          name: ROLES[id].name,
+          line: c.line,
+          who: c.who,
+          ref: c.ref || null,
+          note: c.note ?? null,
+          button: anchor ? '從船尾拋錨' : c.button,
+          when: anchor ? '補好船以後、水淺時' : c.when,
+          know: anchor ? '風浪會變大；水有多深' : c.know,
+        };
+      }),
+    };
   }
 
   thank(from: string, to: string | null): void {
@@ -920,7 +997,7 @@ export class Room {
     const elapsed = this.elapsed();
     let phase: ViewPhase = 'lobby';
     if (r && g && participant) {
-      phase = g.phase === 'planning' && elapsed < this.introOf() ? 'intro' : g.phase;
+      phase = elapsed < 0 ? 'boarding' : g.phase === 'planning' && elapsed < this.introOf() ? 'intro' : g.phase;
     } else if (r && g && (g.phase === 'settled' || g.phase === 'ended')) {
       phase = 'lobby';
     }
@@ -954,6 +1031,8 @@ export class Room {
       ship: null,
       myTask: null,
       nextSteps: [],
+      task: null,
+      roleCard: null,
       can: {
         start: this.hostId === pid && (!r || finished) && this.connectedPlayers().length >= MIN_PLAYERS,
         items: false,
@@ -991,10 +1070,11 @@ export class Room {
       elapsedMs: elapsed,
       timeLimitMs: TIME_UP_AT,
       introMs: this.introOf(),
+      boardingMs: r.boardingMs ?? 0,
       lockOpensAt: r.startedAt + g.lockOpensAt,
       crisisAt: r.startedAt + crisisAtFor(g.cards),
     };
-    const storyKey = phase === 'intro' ? 'intro' : phase === 'planning' ? 'planning' : phase === 'blackout' ? 'blackout' : phase === 'replanning' ? 'replanning' : 'landing';
+    const storyKey = phase === 'intro' || phase === 'boarding' ? 'intro' : phase === 'planning' ? 'planning' : phase === 'blackout' ? 'blackout' : phase === 'replanning' ? 'replanning' : 'landing';
     v.story = { ...STORY[storyKey] };
     const thrownBeforeB = g.planAtCrisis ? ITEMS.filter((i) => !g.planAtCrisis!.items.includes(i)) : [];
     v.cards = { a: cardView(g.cards.a), b: powered ? cardView(g.cards.b, thrownBeforeB) : null };
@@ -1028,8 +1108,12 @@ export class Room {
         ? { at: r.startedAt + g.lastRejection.at, action: g.lastRejection.action, reasons: g.lastRejection.reasons.map((x) => reasonText(x, ev.overweight)) }
         : null,
     };
-    v.myTask = this.myTask(pid, phase);
+    // 上船時角色卡上就寫「現在要做的一件事」：用開局（認識隊友）那一條
+    const taskPhase = phase === 'boarding' ? 'intro' : phase;
+    v.myTask = this.myTask(pid, taskPhase);
     v.nextSteps = this.nextSteps(pid);
+    v.task = this.taskOf(pid, taskPhase, v.myTask, v.nextSteps);
+    v.roleCard = this.roleCard(pid);
     v.can.items = editable && this.operatorOf('supply') === pid;
     v.can.lock = g.phase === 'planning' && !g.locked && this.operatorOf('nav') === pid;
     v.can.depart = g.phase === 'replanning' && this.operatorOf('nav') === pid;
@@ -1059,7 +1143,8 @@ export class Room {
       };
     }
     const lv = r.lastVote;
-    if (lv && !finished && elapsed - lv.at <= VOTE_RESULT_SHOW_MS) {
+    // 換階段就清掉上一階段的表決結果（docs/17 3.4：夜裡不該還掛著白天的「沒通過」）
+    if (lv && !finished && elapsed - lv.at <= VOTE_RESULT_SHOW_MS && (!lv.phase || lv.phase === g.phase)) {
       v.voteResult = { label: Room.voteLabel(lv.key), by: this.nick(lv.by), outcome: lv.outcome, wait: lv.wait, info: lv.info, at: r.startedAt + lv.at, tries: lv.tries };
     }
     v.can.next = finished && this.hostId === pid;
@@ -1202,7 +1287,7 @@ export class Room {
           points: score.teamwork,
           max: 200,
           // 不寫協助等級數字，避免矛頭指向木匠一個人（公平性審查）
-          detail: raw.repairMs === null ? '天亮前沒補好船' : `大家一起補船 ${Math.round(raw.repairMs / 1000)} 秒`,
+          detail: raw.repairMs === null ? '時間到還沒補好船' : `大家一起補船 ${Math.round(raw.repairMs / 1000)} 秒`,
         },
         { id: 'time', points: score.time, max: 100, detail: raw.safe ? `${Math.floor(raw.finishedAt / 60000)}:${String(Math.floor((raw.finishedAt % 60000) / 1000)).padStart(2, '0')} 上岸` : '沒能平安上岸' },
         { id: 'difficulty', points: score.difficulty, max: 100, detail: `三星解 ${raw.solutions} 種` + (raw.sweep ? '・風暴捲走' : '') },
@@ -1219,7 +1304,7 @@ export class Room {
   private tonightLine(): string {
     const g = this.round!.game;
     const p = providers(g);
-    const parts = [`力氣靠${p.力氣}`, CARDS[g.cards.a].done?.includes('船身') ? '船身早就捆好了' : `船身靠${p.船身}`, `等天亮靠錨`];
+    const parts = [`力氣靠${p.力氣}`, CARDS[g.cards.a].done?.includes('船身') ? '船身早就捆好了' : `船身靠${p.船身}`, `錨住船靠錨`];
     const extra = g.tonight.水 === '淺' ? '水夠淺、拋得了錨' : '水太深，錨要留到快靠岸時再拋';
     return `今晚${parts.join('、')}；${extra}。力氣要吃了才有。`;
   }
@@ -1251,13 +1336,13 @@ export class Room {
       const doer = [...r.actors].reverse().find((a) => a.kind === 'use' && a.at === g.used!.at);
       const scene = { 吃飯: 'meal', 拋錨: 'anchor', 捆船底: 'undergird' }[g.used.use];
       const how = g.used.use === '吃飯' ? `召集大家吃了${g.used.item}` : g.used.use === '拋錨' ? '從船尾拋下了錨' : `用${g.used.item === '纜索' ? '纜索' : g.used.item === '器具' ? '器具裡的繩具' : '小船上的拉繩'}捆綁了船底`;
-      out.push({ icon: { kind: 'scene', ids: [scene] }, text: `天亮前，${this.nick(doer?.playerId)} ${how}（${USE_TEXT[g.used.use].ref}）。` });
+      out.push({ icon: { kind: 'scene', ids: [scene] }, text: `出發前，${this.nick(doer?.playerId)} ${how}（${USE_TEXT[g.used.use].ref}）。` });
     }
     const served = (g.result?.served ?? []) as NeedId[];
     const why: Record<NeedId, string> = {
       力氣: '力氣沒顧到：大家沒吃東西，沒有力氣游。',
       船身: '船身沒顧到：船還沒靠近海灘就散開了。',
-      天亮: '等天亮沒顧到：船在黑夜裡被風浪推著走。',
+      天亮: '錨住船沒顧到：船在黑夜裡被風浪推著走。',
     };
     for (const n of NEEDS) if (!served.includes(n) && why[n]) out.push({ icon: { kind: 'need', ids: [n] }, text: why[n] });
     // 表決：只陳述次數與誰強制，不點名誰不同意

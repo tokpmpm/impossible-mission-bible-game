@@ -42,7 +42,7 @@ function actVoted(hub: Hub, c: FakeConn, ev: unknown, conns: FakeConn[]): void {
 
 /** 建房（房主＋2 位隊員），開局，一路玩到三星上岸（首局經典配置 A5＋B4）。 */
 function playToSettled(opts: { practice?: boolean; board?: MemoryStore; players?: number } = {}) {
-  const hub = new Hub({ introMs: 0, leaderboard: opts.board ?? new MemoryStore() });
+  const hub = new Hub({ boardingMs: 0, introMs: 0, leaderboard: opts.board ?? new MemoryStore() });
   const n = opts.players ?? 3;
   const conns = Array.from({ length: n }, () => new FakeConn());
   conns.forEach((c) => hub.open(c));
@@ -74,7 +74,7 @@ function playToSettled(opts: { practice?: boolean; board?: MemoryStore; players?
 }
 
 test('登記：局還沒結束被拒', () => {
-  const hub = new Hub({ introMs: 0 });
+  const hub = new Hub({ boardingMs: 0, introMs: 0 });
   const [host, b, c] = [new FakeConn(), new FakeConn(), new FakeConn()];
   [host, b, c].forEach((x) => hub.open(x));
   send(hub, host, { t: 'create', nickname: '房主' });
@@ -195,7 +195,7 @@ test('排行榜訊息：{t:"leaderboard"} 回傳前 10 名、公式版本與試�
   for (let i = 0; i < 13; i++) {
     board.add({ roundId: `seed-${i}`, name: `隊${i}`, key: `隊${i}`, score: 100 + i * 10, players: 4, at: i, formula: 'v3-trial', raw: {} as never });
   }
-  const hub = new Hub({ leaderboard: board });
+  const hub = new Hub({ boardingMs: 0, leaderboard: board });
   const c = new FakeConn();
   hub.open(c);
   send(hub, c, { t: 'leaderboard' });

@@ -6,7 +6,7 @@ import QRCore from 'qrcode/lib/core/qrcode.js';
 import SvgTag from 'qrcode/lib/renderer/svg-tag.js';
 import { FORMULA_VERSION, computeScore } from '../engine/score.ts';
 import { MemoryStore, NAME_REASON_TEXT, TOP_N, checkTeamName, type LeaderboardStore } from './leaderboard.ts';
-import { Room } from './room.ts';
+import { BOARDING_MS, Room } from './room.ts';
 import type { RoomStore } from './roomstore.ts';
 import type { ClientMessage, ServerMessage } from './view.ts';
 
@@ -54,6 +54,8 @@ export class Hub {
   private qrCache = new Map<string, string>();
   private fixedBaseUrl: string | null;
   private introMs: number | undefined;
+  /** 首局上船（不計時的角色卡＋動畫）多久；正式 40 秒。 */
+  private boardingMs: number;
   private sweepWarningMs: number | undefined;
   private voteMs: number | undefined;
   /** 團隊排行榜（Node：記憶體或 JSON 檔；Cloudflare：Durable Object 的 SQLite）。 */
@@ -66,7 +68,7 @@ export class Hub {
   private now: () => number;
 
   constructor(
-    opts: { publicUrl?: string | null; introMs?: number; sweepWarningMs?: number; voteMs?: number; leaderboard?: LeaderboardStore; store?: RoomStore | null; staleMs?: number; now?: () => number } = {},
+    opts: { publicUrl?: string | null; introMs?: number; boardingMs?: number; sweepWarningMs?: number; voteMs?: number; leaderboard?: LeaderboardStore; store?: RoomStore | null; staleMs?: number; now?: () => number } = {},
   ) {
     this.leaderboard = opts.leaderboard ?? new MemoryStore();
     // 公式改版（docs/13）：舊版本的紀錄用存下來的原始資料以目前公式重算，不必清榜
@@ -74,6 +76,7 @@ export class Hub {
     // （原始資料壞掉、算不出數字的紀錄由 rescore 保留原分數）
     this.fixedBaseUrl = opts.publicUrl || null;
     this.introMs = opts.introMs;
+    this.boardingMs = opts.boardingMs ?? BOARDING_MS;
     this.sweepWarningMs = opts.sweepWarningMs;
     this.voteMs = opts.voteMs;
     this.store = opts.store ?? null;
@@ -200,7 +203,7 @@ export class Hub {
         return this.send(conn, { t: 'leaderboard', ...this.leaderboardJson() });
       case 'create': {
         const code = this.newCode();
-        const r = new Room(code, { introMs: this.introMs, sweepWarningMs: this.sweepWarningMs, voteMs: this.voteMs, practice: msg.practice === true });
+        const r = new Room(code, { introMs: this.introMs, boardingMs: this.boardingMs, sweepWarningMs: this.sweepWarningMs, voteMs: this.voteMs, practice: msg.practice === true });
         this.rooms.set(code, r);
         this.roomOrigin.set(code, conn.origin);
         const p = r.addPlayer(String(msg.nickname ?? ''));
@@ -257,6 +260,9 @@ export class Hub {
         break;
       case 'next':
         room.next(pid);
+        break;
+      case 'sail':
+        room.skipBoarding(pid);
         break;
       case 'act': {
         const id = String(msg.id ?? '');

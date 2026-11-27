@@ -971,3 +971,59 @@ cite { display: block; margin-top: 4px; font-style: normal; color: var(--gold-2)
 .banner.vote-res.no { border-color: var(--warn); }
 .banner.vote-res.forced { border-color: var(--gold); }
 .result-hero.unsafe h1 { color: #ffd2c2; }
+
+/* ───────── 新手引導（2026-11-27，DECISIONS 20；docs/17） ───────── */
+/* 頂端：角色放大、可以點；離天亮時鐘；天色條 */
+.role-chip.big { font-size: 1.05rem; font-weight: 800; padding: 3px 10px 3px 4px; color: var(--text); cursor: pointer; border-color: var(--gold); background: rgba(242, 193, 78, 0.12); min-height: 34px; }
+.dawn-clock { flex-direction: column; align-items: flex-end; gap: 0; }
+.tb-cd-k { font-size: 0.72rem; color: var(--muted); white-space: nowrap; }
+.skybar { position: relative; height: 8px; margin: 0 12px 6px; border-radius: 999px; background: linear-gradient(90deg, #0d1840 0%, #2a3b7a 45%, #c76a4a 80%, #ffb347 100%); overflow: visible; }
+.skybar i { position: absolute; inset: 0 auto 0 0; border-radius: 999px; background: rgba(255, 255, 255, 0.18); }
+.sky-sun { position: absolute; top: 50%; transform: translate(-50%, -50%); font-size: 14px; line-height: 1; color: #ffd97a; text-shadow: 0 0 6px rgba(255, 200, 80, 0.8); }
+
+/* 任務條：每個畫面只有一條 */
+.task-bar { display: flex; flex-direction: column; gap: 4px; padding: 10px 14px; border-radius: var(--radius-s); border: 2px solid var(--gold); background: rgba(242, 193, 78, 0.12); }
+.tk-k { font-size: 0.78rem; font-weight: 800; color: var(--gold-2); letter-spacing: 0.04em; }
+.tk-main { font-size: 1.05rem; font-weight: 700; line-height: 1.45; }
+.tk-sub { font-size: 0.92rem; color: var(--muted); }
+.tk-role { display: inline-flex; align-items: center; gap: 2px; }
+.tk-role svg { vertical-align: middle; }
+
+/* 上船：角色卡＋故事動畫 */
+.screen.boarding { display: flex; flex-direction: column; gap: 14px; padding-bottom: 28px; }
+.boarding-k { margin: 0; text-align: center; font-size: 0.85rem; color: var(--muted); }
+.role-card { background: var(--card); border: 2px solid var(--gold); border-radius: var(--radius); padding: 18px 16px; text-align: center; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 8px; animation: rc-in 0.5s ease-out; }
+.role-card.in-ovl { max-width: 420px; margin: 0 auto; max-height: calc(100vh - 110px); overflow-y: auto; }
+.role-card h1 { margin: 4px 0 0; font-size: 1.7rem; color: var(--gold-2); font-weight: 900; }
+.rc-art { display: flex; justify-content: center; gap: 12px; }
+.rc-line { margin: 0; font-size: 1.2rem; font-weight: 700; }
+.rc-who { margin: 0; font-size: 0.92rem; color: var(--muted); }
+.rc-who cite { font-style: normal; color: var(--gold); margin-left: 6px; }
+.rc-who small { display: block; font-size: 0.78rem; }
+.rc-now { text-align: left; background: rgba(242, 193, 78, 0.12); border-left: 4px solid var(--gold); border-radius: var(--radius-s); padding: 8px 12px; }
+.rc-now b, .rc-btns b { font-size: 0.8rem; color: var(--gold-2); }
+.rc-now p, .rc-btns p { margin: 4px 0 0; font-weight: 600; }
+.rc-btns { text-align: left; padding: 8px 12px; border-radius: var(--radius-s); background: var(--bg-2); }
+.rc-btns p { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.fake-btn { display: inline-block; padding: 4px 12px; border-radius: 999px; border: 2px dashed var(--line); color: var(--muted); font-weight: 700; }
+.rc-when { font-size: 0.85rem; color: var(--muted); }
+.rc-btns.none p { font-weight: 700; }
+.rc-know { margin: 0; font-size: 0.9rem; color: var(--muted); }
+.rc-close { max-width: 420px; margin: 10px auto 0; }
+.story-frame { background: var(--card); border-radius: var(--radius); padding: 14px; text-align: center; display: flex; flex-direction: column; gap: 8px; animation: rc-in 0.6s ease-out; }
+.story-frame h1 { margin: 0; font-size: 1.5rem; color: var(--gold-2); }
+.story-frame p { margin: 0; font-size: 1.05rem; line-height: 1.55; }
+.story-frame cite { font-style: normal; color: var(--gold); font-size: 0.85rem; }
+.sf-art svg { width: 100%; height: auto; max-height: 220px; border-radius: var(--radius-s); }
+.sf-dark { position: relative; height: 190px; border-radius: var(--radius-s); overflow: hidden; }
+.sf-dark > svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.sf-eng { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+.sf-three { display: flex; justify-content: space-around; gap: 6px; }
+.sf-three span { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 0.95rem; }
+.sf-three small { color: var(--muted); font-size: 0.78rem; }
+.sf-dots { display: flex; justify-content: center; gap: 6px; }
+.sf-dots i { width: 8px; height: 8px; border-radius: 50%; background: var(--line); }
+.sf-dots i.on { background: var(--gold); }
+.boarding-foot { display: flex; flex-direction: column; gap: 8px; align-items: center; text-align: center; }
+.boarding-foot .btn.block { width: 100%; }
+@keyframes rc-in { from { opacity: 0; transform: translateY(12px) scale(0.98); } to { opacity: 1; transform: none; } }

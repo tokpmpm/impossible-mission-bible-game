@@ -58,7 +58,7 @@ const WS_SPY = () => {
 (async () => {
   const server = process.env.E2E_EXTERNAL
     ? null
-    : spawn(process.execPath, ['src/server/main.ts'], { cwd: root, env: { ...process.env, PORT: String(PORT), INTRO_MS: '0' }, stdio: 'ignore' });
+    : spawn(process.execPath, ['src/server/main.ts'], { cwd: root, env: { ...process.env, PORT: String(PORT), INTRO_MS: '0', BOARDING_MS: process.env.BOARDING_MS || '0' }, stdio: 'ignore' });
   let browser;
   try {
     for (let i = 0; i < 100; i++) {

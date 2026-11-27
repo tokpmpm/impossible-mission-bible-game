@@ -18,6 +18,26 @@ export const ROLES: Record<RoleId, { name: string; icon: string; job: string }> 
   backup: { name: '舵手', icon: '🧭', job: '幫木匠看補船面板' },
 };
 
+/**
+ * 角色卡（2026-11-27 使用者決定，DECISIONS 20：新手引導 v2 三個 A）：每局倒數開始前先看一張大角色卡。
+ * line：第一人稱台詞；who／ref：徒 27 章裡對應的人（掌船的、船主、水手、路加醫生；其他寫「船上的人」、不附出處）。
+ * 不扮演保羅、不扮演天使或百夫長。word：出處經文裡一定要有的字，由 tools/verify_verses.py 逐節核對。
+ * button／when：你負責的按鈕長什麼樣、什麼時候出現（示意文字，不是可以按的按鈕；DECISIONS 11）。know：只有你知道的事。
+ */
+export interface RoleCardText { line: string; who: string; ref: string; word: string; note?: string; button: string | null; when: string; know: string }
+export const ROLE_CARD: Record<RoleId, RoleCardText> = {
+  nav: { line: '大家講好了，由我喊出發。', who: '掌船的', ref: '徒 27:11', word: '掌船的', button: '決定好了／衝向海灘', when: '認識隊友結束後', know: '船最多只能留 8' },
+  supply: { line: '丟什麼、留什麼，我來按。', who: '船上的人', ref: '', word: '', button: '丟／撈東西', when: '一開始就能按', know: '上岸要顧好三件事' },
+  comms: { line: '全船的飯歸我管。', who: '船上的人', ref: '', word: '', button: '召集大家吃飯', when: '補好船以後（第十四天夜裡）', know: '今晚吃的是哪一樣' },
+  eng: { line: '天黑了，我來補船。', who: '水手', ref: '徒 27:27', word: '水手', button: '補船面板、捆綁船底', when: '天黑時', know: '船身要靠繩子撐住' },
+  medic: { line: '我顧大家的身體。', who: '路加醫生', ref: '西 4:14', word: '醫生路加', note: '傳統認為路加寫了使徒行傳', button: null, when: '', know: '食物要吃下去才有力氣' },
+  observer: { line: '我看天色和風浪。', who: '船上的人', ref: '', word: '', button: null, when: '', know: '風浪會變大，船能留的會變少' },
+  scout: { line: '海有多深，我來量。', who: '水手', ref: '徒 27:28', word: '探深淺', button: '從船尾拋錨', when: '補好船以後、水淺時', know: '水有多深' },
+  liaison: { line: '這船麥子是我的。', who: '船主', ref: '徒 27:11', word: '船主', button: null, when: '', know: '船主要保住麥子' },
+  store: { line: '帆具繩具歸我管。', who: '水手', ref: '徒 27:27', word: '水手', button: null, when: '', know: '今晚捆船用哪一條繩子' },
+  backup: { line: '我陪木匠補船。', who: '船上的人', ref: '', word: '', button: null, when: '', know: '天黑時一起看補船面板' },
+};
+
 /** 3–10 人的職能組合（沿用 01-GAME_DESIGN）。 */
 export const ROLE_BUNDLES: Record<number, RoleId[][]> = {
   3: [['nav', 'observer'], ['supply', 'medic'], ['comms', 'eng']],
@@ -59,7 +79,7 @@ export interface Clue {
 export const CLUES: Clue[] = [
   { role: 'nav', when: 'start', title: '安全載重', text: '船最多只能留 8 重的東西，超過了船吃水太深，不能開船。' },
   { role: 'liaison', when: 'start', title: '船主的話', item: '麥子', text: '船主要保住麥子：這船就是要把麥子運去意大利的（27:6、11）。' },
-  { role: 'supply', when: 'start', title: '上岸三件事', text: '上岸要顧好：力氣、船身、等天亮。今晚各靠哪一樣東西，每次都不一樣，要問隊友。' },
+  { role: 'supply', when: 'start', title: '上岸三件事', text: '上岸要顧好：力氣、船身、錨住船。今晚各靠哪一樣東西，每次都不一樣，要問隊友。' },
   { role: 'store', when: 'start', title: '器具', item: '器具', text: '器具是開船用的帆具和繩具，很佔重量；裡面的繩具也捆得了船。' },
   { role: 'comms', when: 'start', title: '伙房', need: '力氣', text: '大家好些日子沒吃什麼了（27:21）。倉底有乾糧，貨艙有麥子。' },
   { role: 'backup', when: 'start', title: '小船', item: '小船', text: '小船是逃生用的，水手都很想留著；小船上的拉繩也是一條好繩子。' },
@@ -70,7 +90,7 @@ export const CLUES: Clue[] = [
   { role: 'scout', when: 'start', title: '錨', item: '錨', need: '天亮', text: '快靠岸時要從船尾拋錨，才不會撞上石頭，等到天亮（27:29）。' },
   { role: 'backup', when: 'start', untilPower: true, onlyPresent: true, title: '補船小撇步', text: '每格選項都很像：先用排除線索刪掉不可能的，再請隊友形容。' },
   { role: 'medic', when: 'power', breakthrough: 1, title: '十四天', need: '力氣', text: '大家已經十四天沒吃東西了（27:33）。船上有食物也沒用，要真的吃了才有力氣。' },
-  { role: 'supply', when: 'power', breakthrough: 2, title: '用掉就輕了', text: '吃進肚子的食物、拋下去的錨、捆在船底的繩子，都不再佔船的重量。可是天亮前只來得及做一件；錨和繩子留在船上，靠岸前還來得及用。' },
+  { role: 'supply', when: 'power', breakthrough: 2, title: '用掉就輕了', text: '吃進肚子的食物、拋下去的錨、捆在船底的繩子，都不再佔船的重量。可是出發前只來得及做一件；錨和繩子留在船上，靠岸前還來得及用。' },
   { role: 'comms', when: 'power', breakthrough: 3, title: '開飯', need: '力氣', text: '召集大家吃飯的就是你（今晚的食物要還在船上）。按下去以前要大家都同意。' },
 ];
 
@@ -177,7 +197,7 @@ export const CARD_TEXT: Record<CardId, { title: string; ref: string; verse: stri
     title: '探深淺，拋錨盼天亮',
     ref: '徒 27:28–29',
     verse: '就探深淺，探得有十二丈；稍往前行，又探深淺，探得有九丈。恐怕撞在石頭上，就從船尾拋下四個錨，盼望天亮。',
-    effect: '錨已經從船尾拋下去了：等天亮顧好了，錨不在船上。',
+    effect: '錨已經從船尾拋下去了：錨住船顧好了，錨不在船上。',
     tone: 'good',
   },
 };
@@ -247,7 +267,7 @@ export const ASKS: Record<RoleId, Ask[]> = {
     { to: 'supply', verb: '告訴', text: '船身要靠繩子捆綁船底' },
   ],
   medic: [{ to: 'comms', verb: '告訴', text: '食物要吃下去才有力氣，留著不算' }],
-  observer: [{ to: 'supply', verb: '告訴', text: '錨顧的是等天亮；水有多深' }],
+  observer: [{ to: 'supply', verb: '告訴', text: '錨要留著才能錨住船；水有多深' }],
   scout: [{ to: 'supply', verb: '告訴', text: '錨要留；水有多深' }],
   liaison: [{ to: 'nav', verb: '告訴', text: '船主要保住麥子' }],
   store: [{ to: 'supply', verb: '告訴', text: '今晚捆船用哪一條繩子' }],

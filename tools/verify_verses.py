@@ -14,7 +14,8 @@ import sys
 import urllib.request
 from pathlib import Path
 
-SRC = 'https://raw.githubusercontent.com/brandonmcconnell/bible/main/zh-Hant/cuvt/acts/{}.mdx'
+SRC = 'https://raw.githubusercontent.com/brandonmcconnell/bible/main/zh-Hant/cuvt/{}/{}.mdx'
+BOOKS = {'徒': 'acts', '西': 'colossians'}
 CONTENT = Path(__file__).resolve().parent.parent / 'src' / 'server' / 'content.ts'
 
 # （標籤, 在 content.ts 找引文的正規式, 章, 起節, 迄節）
@@ -47,8 +48,8 @@ def norm(s):
     return PUNCT.sub('', s)
 
 
-def chapter(n):
-    with urllib.request.urlopen(SRC.format(n), timeout=30) as r:
+def chapter(n, book='acts'):
+    with urllib.request.urlopen(SRC.format(book, n), timeout=30) as r:
         t = r.read().decode('utf-8')
     out = {}
     parts = re.split(r'<span className="v" id="v(\d+)"[^>]*>', t)
@@ -73,6 +74,25 @@ def main():
         ref = f'{c}:{a}' + (f'–{b}' if b != a else '')
         print(f"[{'一致' if not bad else '不一致'}] {label}（徒 {ref}）" + ''.join(f'\n    ✗「{s}」' for s in bad))
         ok_all &= not bad
+    # 角色卡「故事裡」的人（DECISIONS 20）：出處那幾節裡一定要有 word 這個詞（例：掌船的 → 徒 27:11）
+    for m in re.finditer(r"(\w+): \{ line: '[^']*', who: '([^']*)', ref: '([^']*)', word: '([^']*)'", content):
+        role, who, ref, word = m.groups()
+        if not ref:
+            ok = who == '船上的人'
+            print(f"[{'一致' if ok else '不一致'}] 角色卡・{role}：{who}（不附出處）")
+            ok_all &= ok
+            continue
+        rm = re.match(r'(徒|西) (\d+):(\d+)(?:–(\d+))?$', ref)
+        if not rm:
+            print(f'[不一致] 角色卡・{role}：看不懂出處「{ref}」')
+            ok_all = False
+            continue
+        book, c, a, b = rm.group(1), int(rm.group(2)), int(rm.group(3)), int(rm.group(4) or rm.group(3))
+        vs = verses[c] if book == '徒' and c in verses else chapter(c, BOOKS[book])
+        src = ''.join(vs[n] for n in range(a, b + 1))
+        ok = bool(word) and word in src
+        print(f"[{'一致' if ok else '不一致'}] 角色卡・{role}：{who}（{ref}，經文有「{word}」）")
+        ok_all &= ok
     return 0 if ok_all else 1
 
 

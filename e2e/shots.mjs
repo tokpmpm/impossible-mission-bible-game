@@ -14,7 +14,7 @@ const scene = process.argv[2] || 'safety';
 const OUT = process.argv[3] || 'docs/screenshots/' + scene;
 mkdirSync(OUT, { recursive: true });
 
-const srv = await startServer({ port: 0, introMs: 60_000, sweepWarningMs: 10_000 });
+const srv = await startServer({ port: 0, introMs: 60_000, sweepWarningMs: 10_000, boardingMs: scene === 'safety' ? 0 : 40_000 });
 const BASE = `http://localhost:${srv.port}`;
 const browser = await chromium.launch();
 
@@ -78,6 +78,48 @@ async function shot(p, name, full = false) {
 }
 
 const SCENES = {
+  async 'onboarding-core'() {
+    // 6 人局：上船角色卡（醫生沒有按鈕、船長有按鈕）、三格動畫、開局任務條＋離天亮、夜裡錨住船／出發前、角色卡浮窗
+    const t = await table(6, 390);
+    await t.pages[0].click('[data-action=start]');
+    await sleep(1200);
+    await shot(t.pageOf(t.who('medic')), '01-boarding-rolecard-medic');
+    await shot(t.pageOf(t.who('nav')), '02-boarding-rolecard-captain');
+    const setBoard = async (msLeftOfBoarding) => {
+      t.room.round.startedAt = Date.now() + msLeftOfBoarding;
+      srv.hub.broadcast(t.room);
+      await sleep(900);
+    };
+    await setBoard(40_000 - 8_500);
+    await shot(t.pageOf(t.who('medic')), '03-boarding-story-1');
+    await setBoard(40_000 - 28_500);
+    await shot(t.pageOf(t.who('medic')), '04-boarding-story-3');
+    await t.pages[0].click('[data-action=sail]');
+    await sleep(1000);
+    await t.closeCards();
+    await shot(t.pageOf(t.who('medic')), '05-intro-taskbar-medic', true);
+    await shot(t.pageOf(t.who('supply')), '06-intro-taskbar-supply', true);
+    const mp = t.pageOf(t.who('medic'));
+    await mp.click('[data-action=role-card]');
+    await sleep(500);
+    await shot(mp, '07-rolecard-overlay');
+    await mp.click('[data-action=role-card-close]');
+    // 夜裡
+    for (const item of ['麥子', '器具', '小船']) t.act(t.who('supply'), { type: 'setItem', item, on: false });
+    await t.jump(CRISIS_AT);
+    for (const s of t.room.round.game.repair.slots) t.act(t.who('eng'), { type: 'repairPick', option: s.answer });
+    await sleep(600);
+    await t.closeCards();
+    await t.jump(t.room.elapsed() + 60_000);
+    await t.closeCards();
+    await shot(t.pageOf(t.who('comms')), '08-night-dawn-clock-comms', true);
+  },
+  async 'onboarding-3p'() {
+    const t = await table(3, 390);
+    await t.pages[0].click('[data-action=start]');
+    await sleep(1200);
+    for (let i = 0; i < 3; i++) await shot(t.pages[i], `01-boarding-3p-p${i}`);
+  },
   async safety() {
     // 6 人局：首局走完 → 第二局超重只丟小船，看捲走預警；也拍第二局開局 30 秒、記號轉向、面板鎖
     const t = await table(6, 390);
