@@ -29,12 +29,12 @@ export const ROLE_CARD: Record<RoleId, RoleCardText> = {
   nav: { line: '大家講好了，由我喊出發。', who: '掌船的', ref: '徒 27:11', word: '掌船的', button: '決定好了／衝向海灘', when: '認識隊友結束後', know: '船最多只能留 8' },
   supply: { line: '丟什麼、留什麼，我來按。', who: '船上的人', ref: '', word: '', button: '丟／撈東西', when: '一開始就能按', know: '上岸要顧好三件事' },
   comms: { line: '全船的飯歸我管。', who: '船上的人', ref: '', word: '', button: '召集大家吃飯', when: '補好船以後（第十四天夜裡）', know: '今晚吃的是哪一樣' },
-  eng: { line: '天黑了，我來補船。', who: '水手', ref: '徒 27:27–30', word: '水手', button: '補船面板、捆綁船底', when: '天黑時', know: '船身要靠繩子撐住' },
+  eng: { line: '天黑了，我來補船。', who: '水手', ref: '徒 27:27', word: '水手', button: '補船面板、捆綁船底', when: '天黑時', know: '船身要靠繩子撐住' },
   medic: { line: '我顧大家的身體。', who: '路加醫生', ref: '西 4:14', word: '醫生路加', note: '傳統認為路加寫了使徒行傳', button: null, when: '', know: '食物要吃下去才有力氣' },
   observer: { line: '我看天色和風浪。', who: '船上的人', ref: '', word: '', button: null, when: '', know: '風浪會變大，船能留的會變少' },
-  scout: { line: '海有多深，我來量。', who: '水手', ref: '徒 27:27–30', word: '探深淺', button: '從船尾拋錨', when: '補好船以後、水淺時', know: '水有多深' },
+  scout: { line: '海有多深，我來量。', who: '水手', ref: '徒 27:28', word: '探深淺', button: '從船尾拋錨', when: '補好船以後、水淺時', know: '水有多深' },
   liaison: { line: '這船麥子是我的。', who: '船主', ref: '徒 27:11', word: '船主', button: null, when: '', know: '船主要保住麥子' },
-  store: { line: '帆具繩具歸我管。', who: '水手', ref: '徒 27:27–30', word: '水手', button: null, when: '', know: '今晚捆船用哪一條繩子' },
+  store: { line: '帆具繩具歸我管。', who: '水手', ref: '徒 27:27', word: '水手', button: null, when: '', know: '今晚捆船用哪一條繩子' },
   backup: { line: '我陪木匠補船。', who: '船上的人', ref: '', word: '', button: null, when: '', know: '天黑時一起看補船面板' },
 };
 
