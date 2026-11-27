@@ -48,6 +48,12 @@ const ui = {
   holding: null,
   seenWrong: null,
   wrongUntil: 0,
+  /** 我已經投過票的表決（本地鎖定，docs/15 M1）。 */
+  votedFor: null,
+  /** 登記上榜送出的時間（8 秒逾時）。 */
+  subAt: 0,
+  /** 補船面板正顯示「鎖住」。 */
+  panelLockShown: false,
   leaveConfirm: false,
   prefSkipped: false,
   noFlicker: readFlag('im.noFlicker'),
@@ -87,6 +93,7 @@ const USE_DONE = { 吃飯: '召集大家吃了', 拋錨: '從船尾拋下了', �
 const USE_REF = { 吃飯: '徒 27:33–36', 拋錨: '徒 27:29', 捆船底: '徒 27:17' };
 const FLASH_BLOCK = { OVERWEIGHT: 'load', PINNED: 'items', NO_FOOD: 'items' };
 const MEAL_MS = 2800;
+const SUBMIT_TIMEOUT_MS = 8000;
 const REVEAL_MS = 4400;
 const CARD_AUTO_CLOSE_MS = 20000;
 
@@ -209,8 +216,8 @@ const conn = createConnection({
   },
   onError(msg, ctx) {
     ui.busy = false;
-    if (ui.subBusy) {
-      // 登記被伺服器擋下：訊息放在輸入框旁
+    if (ui.subBusy && (ctx.for === 'submitScore' || !ctx.for)) {
+      // 登記被伺服器擋下：訊息放在輸入框旁（其他訊息的錯誤不混進來；docs/15 L2）
       ui.subBusy = false;
       ui.subErr = msg;
       render();
@@ -577,13 +584,17 @@ function cardChips(v) {
 /** 管倉的托盤：按一下＝丟進海裡／撈回來。只有管倉看得到。 */
 function itemTray(v) {
   const s = v.ship;
+  // 捲走預警期間：會被捲走的東西（漂著的＋超重先捲走的）加 🌊 標記
+  const w = s.sweepWarning;
+  const doomed = w ? [...w.floating, ...(w.extra || [])] : [];
   const btns = s.items
     .filter((i) => !i.gone)
     .map((i) => {
       const blocks = '<i></i>'.repeat(Math.max(0, i.weight));
-      return `<button class="tray-item ${i.onShip ? 'on' : 'off'} ${i.pinned ? 'pinned' : ''}" data-action="item" data-item="${esc(i.id)}" data-on="${i.onShip ? '0' : '1'}"
-        aria-pressed="${i.onShip}" aria-label="${esc(i.id)}，重 ${i.weight}，${i.onShip ? '在船上，按一下丟進海裡' : '在海裡，按一下撈回來'}${i.pinned ? '（船主不准丟）' : ''}">
-        <span class="ti-pic">${art.item(i.id, 40)}${i.pinned ? '<span class="ti-lock" aria-hidden="true">🔒</span>' : ''}</span>
+      const wave = doomed.includes(i.id);
+      return `<button class="tray-item ${i.onShip ? 'on' : 'off'} ${i.pinned ? 'pinned' : ''} ${wave ? 'doomed' : ''}" data-action="item" data-item="${esc(i.id)}" data-on="${i.onShip ? '0' : '1'}"
+        aria-pressed="${i.onShip}" aria-label="${esc(i.id)}，重 ${i.weight}，${i.onShip ? '在船上，按一下丟進海裡' : '在海裡，按一下撈回來'}${i.pinned ? '（船主不准丟）' : ''}${wave ? '（風暴來時會被浪捲走）' : ''}">
+        <span class="ti-pic">${art.item(i.id, 40)}${i.pinned ? '<span class="ti-lock" aria-hidden="true">🔒</span>' : ''}${wave ? '<span class="ti-wave" aria-hidden="true">🌊</span>' : ''}</span>
         <span class="ti-name">${esc(i.id)}</span>
         <span class="ti-w" aria-hidden="true">${blocks}</span>
         <span class="ti-state" aria-hidden="true">${i.onShip ? '丟' : '撈回'}</span>
@@ -628,6 +639,10 @@ function voteCard(v) {
   if (!p) return '';
   const head = `<p class="vote-q"><strong>${esc(p.mine ? '你' : p.by)}</strong> 想「${esc(p.label)}」${p.attempt > 1 ? `（第 ${p.attempt} 次提）` : ''}</p>`;
   const meter = `<p class="vote-meter">已同意 <strong>${p.agreed}</strong>／${p.total}・<span data-cd="vote">${Math.max(0, Math.ceil((p.deadline - now()) / 1000))}</span> 秒後沒回應的算同意</p>`;
+  // 按下同意／等一下／我有情報後，本地立刻鎖住三顆鈕，連點不會再送（docs/15 M1）
+  if (p.canVote && ui.votedFor === p.id) {
+    return `<section class="vote-card wait" role="status">${head}<p class="muted small">已送出，等其他人。</p>${meter}</section>`;
+  }
   if (p.canVote) {
     return `<section class="vote-card ask" role="alertdialog" aria-label="表決：${esc(p.label)}">${head}<p class="muted small">同意嗎？不同意的話，說出你的理由。</p>
       <div class="vote-btns">
@@ -654,14 +669,24 @@ function sweepBanner(v) {
   const s = v.ship;
   if (!s || !s.sweep) return '';
   if (s.sweepWarning) {
-    const f = s.sweepWarning.floating;
-    return `<div class="banner sweep warn" role="alert"><span aria-hidden="true">🌊</span> 風暴快來了：${f.length ? `漂著的${esc(f.join('、'))}再 <strong data-cd="sweep">${Math.max(0, Math.ceil((s.sweepWarning.stormAt - now()) / 1000))}</strong> 秒就會被浪捲走` : `再 <strong data-cd="sweep">${Math.max(0, Math.ceil((s.sweepWarning.stormAt - now()) / 1000))}</strong> 秒`}</div>`;
+    // 預警列出的＝實際會捲走的：漂著的＋還超重時浪從最重的先捲走（docs/15 H1）
+    const w = s.sweepWarning;
+    const f = w.floating;
+    const x = w.extra || [];
+    const sec = `<strong data-cd="sweep">${Math.max(0, Math.ceil((w.stormAt - now()) / 1000))}</strong>`;
+    const lines = [];
+    if (f.length) lines.push(`漂著的${esc(f.join('、'))}`);
+    if (x.length) lines.push(`還超重 ${w.overweight}：浪會先捲走最重的<strong class="sweep-extra">${esc(x.join('、'))}</strong>`);
+    const body = lines.length ? `${lines.join('；')}——再 ${sec} 秒就會被捲走` : `再 ${sec} 秒`;
+    const fix = x.length ? `<br><span class="small">現在請管倉自己丟到不超重，就由你們決定留什麼。</span>` : '';
+    return `<div class="banner sweep warn" role="alert"><span aria-hidden="true">🌊</span> 風暴快來了：${body}${fix}</div>`;
   }
   const swept = s.items.filter((i) => i.swept).map((i) => i.id);
   if (swept.length && v.phase === 'replanning') {
     return `<div class="banner sweep ${Date.now() - ui.sweptAt < 4000 ? 'flash' : ''}" role="status"><span aria-hidden="true">🌊</span> ${esc(swept.join('、'))}被浪捲走了，撈不回來</div>`;
   }
-  if (v.phase === 'planning' || v.phase === 'intro') return `<div class="banner sweep rule" role="note"><span aria-hidden="true">🌊</span> 這局起：風暴一來，丟下海的東西就撈不回來</div>`;
+  if (v.phase === 'planning' || v.phase === 'intro')
+    return `<div class="banner sweep rule" role="note"><span aria-hidden="true">🌊</span> 這局起：風暴一來，丟下海的東西就撈不回來${s.overweight > 0 ? '；那時還超重的話，浪會從最重的先捲走' : ''}</div>`;
   return '';
 }
 
@@ -683,8 +708,9 @@ function renderShip(v) {
     ? `<div class="banner dawn" role="status">⚓ 拋了錨，等天亮：<strong data-cd="dawn">${mmss(s.dawnAt - now())}</strong></div>`
     : '';
   let button = '';
-  if (v.can.lock) button = `<button class="btn primary block big" data-action="lock" ${lockOpen(v) && !v.vote ? '' : 'aria-disabled="true"'}>${forceLabel(v, 'lock', '決定好了')}</button>`;
-  if (v.can.depart) button = `<button class="btn primary block big" data-action="depart" ${v.vote ? 'aria-disabled="true"' : ''}>${forceLabel(v, 'depart', '衝向海灘')}</button>`;
+  // 表決中：真的 disabled（連點不送出，docs/15 M1）；認識隊友時間只用 aria-disabled，按了會說還剩幾秒
+  if (v.can.lock) button = `<button class="btn primary block big" data-action="lock" ${v.vote ? 'disabled aria-disabled="true"' : lockOpen(v) ? '' : 'aria-disabled="true"'}>${forceLabel(v, 'lock', '決定好了')}</button>`;
+  if (v.can.depart) button = `<button class="btn primary block big" data-action="depart" ${v.vote ? 'disabled aria-disabled="true"' : ''}>${forceLabel(v, 'depart', '衝向海灘')}</button>`;
   const task = v.myTask ? `<p class="my-task">${esc(v.myTask)}</p>` : '';
   return `<main class="screen ship ${button ? 'has-bar' : ''}">
     <div class="ship-meta">${loadGauge(s)}${needsRow(v)}</div>
@@ -769,19 +795,24 @@ function engineerPanel(v, base) {
     .map((s) => `<span class="pill ${s.done ? 'ok' : cur && s.index === cur.index ? 'cur' : ''}">${s.done ? '✓ ' : ''}第 ${s.index + base} 格</span>`)
     .join('');
   if (!cur) return `<section class="bo-card"><h2>全部選好了！</h2><div class="pills">${pills}</div></section>`;
+  // 選錯後面板鎖 2–3 秒（不扣分；DECISIONS 20）：選項真的 disabled，顯示還剩幾秒
+  // 手機多鎖 0.3 秒，網路抖動時不會比伺服器早解鎖（審查 #30 建議 3）
+  const locked = !!r.lockedUntil && now() < r.lockedUntil + 300;
+  if (locked) ui.panelLockShown = true;
   const opts = cur.options
     .map(
-      (o) => `<button class="opt ${o.grayed ? 'gray' : ''}" data-action="pick" data-opt="${esc(o.id)}" ${o.grayed ? 'disabled aria-disabled="true"' : ''}>${symbolSvg(o.id, {
+      (o) => `<button class="opt ${o.grayed ? 'gray' : ''} ${locked ? 'locked' : ''}" data-action="pick" data-opt="${esc(o.id)}" ${o.grayed || locked ? 'disabled aria-disabled="true"' : ''}>${symbolSvg(o.id, {
         size: 64,
         title: '選項',
-      })}${r.assistLevel > 0 ? `<span>${esc(o.desc || describeSymbol(o.id))}</span>` : ''}</button>`,
+      })}${r.assistLevel > 0 ? `<span class="opt-desc">${descHtml(o.desc || describeSymbol(o.id))}</span>` : ''}</button>`,
     )
     .join('');
   const wrong = Date.now() < ui.wrongUntil;
-  return `<section class="bo-card eng">
+  const lockSec = locked ? Math.max(1, Math.ceil((r.lockedUntil - now()) / 1000)) : 0;
+  return `<section class="bo-card eng ${locked ? 'panel-locked' : ''}">
     <div class="pills">${pills}</div>
     <h2>${art.role('eng', 26)} 第 ${cur.index + base} 格：請問 <span class="ask">${esc(cur.askNickname)}</span></h2>
-    ${wrong ? '<p class="soft-warn" role="status">不是這個，再問問看。</p>' : ''}
+    ${locked ? `<p class="soft-warn" role="status">不是這個。面板鎖住 <strong data-cd="panel-lock">${lockSec}</strong> 秒：趁現在再問清楚。</p>` : wrong ? '<p class="soft-warn" role="status">不是這個，再問問看。</p>' : ''}
     <div class="opts">${opts}</div>
   </section>`;
 }
@@ -1292,6 +1323,9 @@ setInterval(() => {
     else if (k === 'sweep' && v.ship && v.ship.sweepWarning) {
       el.textContent = String(Math.max(0, Math.ceil((v.ship.sweepWarning.stormAt - now()) / 1000)));
       continue;
+    } else if (k === 'panel-lock' && v.repair && v.repair.lockedUntil) {
+      el.textContent = String(Math.max(1, Math.ceil((v.repair.lockedUntil - now()) / 1000)));
+      continue;
     } else if (k === 'vote' && v.vote) {
       el.textContent = String(Math.max(0, Math.ceil((v.vote.deadline - now()) / 1000)));
       continue;
@@ -1326,6 +1360,18 @@ setInterval(() => {
   }
   if (ui.wrongUntil && Date.now() > ui.wrongUntil) {
     ui.wrongUntil = 0;
+    redraw = true;
+  }
+  // 登記上榜送出 8 秒沒回音（斷線排隊中）：按鈕恢復，告訴房主可以再按（伺服器會擋重複登記；docs/15 L2）
+  if (ui.subBusy && Date.now() - ui.subAt > SUBMIT_TIMEOUT_MS) {
+    ui.subBusy = false;
+    ui.subErr = '還沒收到回音：網路可能斷了，連上後再按一次「登記」。';
+    redraw = true;
+  }
+  // 補船選錯後面板鎖住：時間到就解開
+  const lu = ui.view && ui.view.repair && ui.view.repair.lockedUntil;
+  if (lu && ui.panelLockShown && now() >= lu + 300) {
+    ui.panelLockShown = false;
     redraw = true;
   }
   if (redraw) render();
@@ -1363,6 +1409,7 @@ document.addEventListener('submit', (e) => {
     if (!name) return;
     ui.subErr = '';
     ui.subBusy = true;
+    ui.subAt = Date.now();
     conn.send({ t: 'submitScore', name });
     render();
     return;
@@ -1469,7 +1516,10 @@ document.addEventListener('click', (e) => {
       conn.act({ type: 'use', use: el.getAttribute('data-use') });
       break;
     case 'vote':
-      conn.send({ t: 'vote', id: el.getAttribute('data-vote'), choice: el.getAttribute('data-choice') });
+      if (ui.votedFor === el.getAttribute('data-vote')) break;
+      ui.votedFor = el.getAttribute('data-vote');
+      conn.send({ t: 'vote', id: ui.votedFor, choice: el.getAttribute('data-choice') });
+      render();
       break;
     case 'pick':
       conn.act({ type: 'repairPick', option: el.getAttribute('data-opt') });
@@ -1518,7 +1568,20 @@ function holdInner(v, slot) {
   const s = v && v.repair ? v.repair.mySymbols.find((x) => String(x.slot) === String(slot)) : null;
   if (!s) return '';
   const assist = v.repair.assistLevel > 0;
-  return `<span class="hold-sym">${symbolSvg(s.id, { size: 150, title: '你的記號' })}</span>${assist ? `<span class="hold-desc">${esc(s.desc || describeSymbol(s.id))}</span>` : ''}`;
+  // 記號隨機轉向，旁邊標「船頭↑」（DECISIONS 20 試行）：直接拿給木匠看也要先對一下方向。整塊一起轉，船頭箭頭指的就是木匠面板的「上」。
+  const rot = Number(s.rot) || 0;
+  // 「船頭」兩個字保持正的好讀，只有箭頭跟著圖轉、指向船頭（審查 #30 建議 2）
+  return `<span class="hold-bow" aria-hidden="true">船頭 <span class="bow-arrow" style="transform: rotate(${rot}deg)">↑</span></span><span class="hold-rot" style="transform: rotate(${rot}deg)"><span class="hold-sym">${symbolSvg(s.id, { size: 150, title: '你的記號' })}</span></span>${
+    rot ? '<span class="hold-note">你看到的圖是轉過的：箭頭指的那一邊是船頭，當作上面來形容</span>' : ''
+  }${assist ? `<span class="hold-desc">${rot ? '<small>協助：木匠面板上是</small>' : ''}${descHtml(s.desc || describeSymbol(s.id))}</span>` : ''}`;
+}
+
+/** 協助模式的描述：外形、缺口數、開口方向三個關鍵詞加粗（docs/15 L1）。 */
+function descHtml(text) {
+  return String(text)
+    .split('，')
+    .map((part) => esc(part).replace(/^(圓形|方形|三角形)$/, '<b>$1</b>').replace(/(\d) 個缺口/, '<b>$1 個缺口</b>').replace(/開口朝(.)/, '開口朝<b>$1</b>'))
+    .join('，');
 }
 const HOLD_COVER = '<span class="hold-cover">按住這裡<br>才會顯示記號</span>';
 function setHolding(slot) {

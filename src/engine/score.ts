@@ -3,12 +3,13 @@
 // 公式只吃「原始計分資料」（ScoreRaw），所以將來改公式時，排行榜可以用存下來的原始資料重算，不必清榜。
 // 只排團隊、不排個人；分數與信仰、聖經答題無關。
 // v2-trial（2026-11-20，DECISIONS 18）：這局沒能平安上岸（顧好 0–1 件或時間到還沒出發）→ 任務成果、時間、難度加成都是 0，只留合作順暢。
+// v3-trial（2026-11-27，DECISIONS 20）：時間項滿分線從 2:00 移到 3:30（8:00 為 0 不變）。舊紀錄用原始資料重算（rescoreAll）。
 import { DIFFICULTY, DIFF_MAX, SWEEP_BONUS } from './difficulty.ts';
 import { FIRST_ROUND_EXTRA, SAFE_MIN_STARS, SECOND_ASSIST_AFTER, TIME_UP_AT, symbolCount, type GameState } from './game.ts';
 import { DIALS, type CardId, type Tonight } from './seeds.ts';
 
 /** 公式版本：改公式就換版本號，舊紀錄可用新版本重算。 */
-export const FORMULA_VERSION = 'v2-trial';
+export const FORMULA_VERSION = 'v3-trial';
 export const SCORE_MAX = 1000;
 
 /** 四項的滿分。 */
@@ -24,8 +25,8 @@ export const REPAIR_SPEED_MAX = 140;
  */
 export const REPAIR_MS_PER_SLOT = 15_000;
 export const NO_ASSIST_POINTS: Record<0 | 1 | 2, number> = { 0: 60, 1: 30, 2: 0 };
-/** 時間：這個時間（含）以前上岸給滿分，8:00 為 0，中間線性。 */
-export const TIME_FULL_AT = 120_000;
+/** 時間：這個時間（含）以前上岸給滿分，8:00 為 0，中間線性。v3-trial 起 3:30（v1／v2 是 2:00）。 */
+export const TIME_FULL_AT = 210_000;
 
 /**
  * 人數校正係數（3–10 人）。試行期全部 1.0；等有真人試玩資料再調。
@@ -48,7 +49,7 @@ export interface ScoreRaw {
   /** 補船記號格數（3 人 2 格、4 人 3 格、5 人以上 4 格）。 */
   slots: number;
   firstRound: boolean;
-  /** 木匠選錯幾次（目前不計分；存下來給將來調整公式重算）。 */
+  /** 木匠選錯幾次（不計分；v3 起選錯後面板鎖 2.5 秒當作代價，存下來給將來調整公式重算）。 */
   wrongPicks: number;
   /** 結束時間（局內毫秒）：上岸時間；時間到＝8:00。 */
   finishedAt: number;

@@ -61,7 +61,7 @@ const RELIABLE = new Set(['pref', 'start', 'next', 'vote', 'thank', 'submitScore
  * @param {{
  *   onState: (view: any) => void,
  *   onWelcome: (w: any) => void,
- *   onError: (msg: string, ctx: {duringResume: boolean, code?: string}) => void,
+ *   onError: (msg: string, ctx: {duringResume: boolean, code?: string, for?: string}) => void,
  *   onStatus: (status: 'connecting'|'open'|'closed', info: {downSince: number|null, timeouts: number}) => void,
  *   onPending?: (n: number) => void,
  *   onSubmitted?: (m: {name: string, rank: number, best: boolean, bestScore: number}) => void,
@@ -219,7 +219,7 @@ export function createConnection(handlers) {
           }
           flushOut();
         }
-        handlers.onError(msg.msg, { duringResume, code: msg.code });
+        handlers.onError(msg.msg, { duringResume, code: msg.code, for: msg.for });
       }
     };
     sock.onclose = () => {

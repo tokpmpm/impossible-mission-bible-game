@@ -16,6 +16,8 @@ import {
   usesTonight,
   TIME_UP_AT,
   isSafe,
+  LOCK_OPENS_AT,
+  LOCK_OPENS_AT_LATER,
   type GameEvent,
   type GameState,
 } from '../engine/game.ts';
@@ -115,6 +117,12 @@ interface Round {
   lastVote: { key: string; by: string; outcome: 'rejected' | 'forced' | 'cancelled'; wait: number; info: number; at: number; tries: number } | null;
   /** 這局表決的紀錄（結尾回顧用）。 */
   voteLog: { key: string; by: string; outcome: 'passed' | 'rejected' | 'forced' | 'cancelled'; at: number }[];
+  /** 剛結束的表決代號（最近幾個）：連點送來的晚到票安靜忽略，不跳錯誤（docs/15 M1）。 */
+  endedVotes?: string[];
+  /** 這局認識隊友多久（首局 60 秒、第二局起 30 秒；DECISIONS 20）。舊存檔沒有＝房間預設。 */
+  introMs?: number;
+  /** 停電時記號持有者看到的圖案轉幾度（0／90／180／270；每格一個，DECISIONS 20 試行）。 */
+  slotRots?: number[];
 }
 
 const EXTRA_REASON_TEXT: Record<string, string> = {
@@ -124,7 +132,8 @@ const EXTRA_REASON_TEXT: Record<string, string> = {
   SWEPT: '已經被浪捲走了',
   NO_ITEM: '那樣東西不在船上',
   CANNOT_TONIGHT: '今晚做不到',
-  ALREADY_USED: '天亮前只來得及做一件',
+  ALREADY_USED: '出發前只來得及做一件',
+  PANEL_LOCKED: '選錯了，面板鎖住一下',
   VOTING: '大家正在表決',
 };
 
@@ -358,6 +367,9 @@ export class Room {
     const { cards, tonight } = this.drawSetup();
 
     const firstRound = this.roundsPlayed === 0;
+    // 第二局起同一群人已經認識，認識隊友從 60 秒縮成 30 秒（DECISIONS 20）；測試縮短 introMs 時同比例
+    const introMs = firstRound ? this.introMs : Math.round((this.introMs * LOCK_OPENS_AT_LATER) / LOCK_OPENS_AT);
+    const slotRots = slots.map(() => [0, 90, 180, 270][Math.floor(this.random() * 4)]);
     this.roundsPlayed++;
     const btHolders = this.assignBreakthrough(participants, roles);
     const tonightHolders = new Map<DialId, string>();
@@ -372,7 +384,7 @@ export class Room {
       seedId: SEED_ID,
       startedAt: this.now(),
       firstRound,
-      game: createGame({ seedId: SEED_ID, playerCount: n, firstRound, slots, cards, tonight, sweep: !firstRound, sweepWarningMs: this.sweepWarningMs, grayOrder, lockOpensAt: this.introMs }),
+      game: createGame({ seedId: SEED_ID, playerCount: n, firstRound, slots, cards, tonight, sweep: !firstRound, sweepWarningMs: this.sweepWarningMs, grayOrder, lockOpensAt: introMs }),
       participants,
       roles,
       engineerId,
@@ -389,8 +401,16 @@ export class Room {
       fails: new Map(),
       lastVote: null,
       voteLog: [],
+      endedVotes: [],
+      introMs,
+      slotRots,
     };
     this.touch();
+  }
+
+  /** 這局認識隊友多久（毫秒）。 */
+  introOf(): number {
+    return this.round?.introMs ?? this.introMs;
   }
 
   /** 職能分派：第二局起盡量讓每個人拿到和上一局不同的職能（ADR-0003 第 35 條）。 */
@@ -490,7 +510,7 @@ export class Room {
     const open = dawnOpensAt(g);
     const p = r.proposal;
     const voteShown = !!r.lastVote && this.elapsed() - r.lastVote.at <= VOTE_RESULT_SHOW_MS;
-    return [g.phase, this.elapsed() >= this.introMs, g.hint.shown, g.warned, g.repair?.assistLevel, g.crisisAt, g.result?.stars, open !== null && g.now >= open, p?.id, p?.votes.size, voteShown, g.used?.at].join('|');
+    return [g.phase, this.elapsed() >= this.introOf(), g.hint.shown, g.warned, g.repair?.assistLevel, g.crisisAt, g.result?.stars, open !== null && g.now >= open, p?.id, p?.votes.size, voteShown, g.used?.at].join('|');
   }
 
   private online(pid: string): boolean {
@@ -665,6 +685,8 @@ export class Room {
   private propose(pid: string, a: Action): Rejection | null {
     const r = this.round!;
     const at = this.elapsed();
+    // 結算後不開表決（連點「衝向海灘」不留下看不見的表決；docs/15 L3）
+    if (r.game.phase === 'settled' || r.game.phase === 'ended') return null;
     if (r.proposal) {
       r.game = apply(r.game, { type: 'tick', at });
       return { action: a.type, reasons: [{ code: 'VOTING', text: `大家正在表決「${Room.voteLabel(r.proposal.key)}」：等結果出來` }] };
@@ -700,6 +722,8 @@ export class Room {
   vote(pid: string, proposalId: string, choice: VoteChoice): void {
     const r = this.round;
     const p = r?.proposal;
+    // 剛結束的表決又收到票（連點、網路晚到）：安靜忽略，不跳錯誤
+    if (r && (!p || p.id !== proposalId) && r.endedVotes?.includes(proposalId)) return;
     if (!r || !p || p.id !== proposalId) throw new Error('這個表決已經結束了');
     if (!p.voters.includes(pid)) throw new Error('你不用表決這件事');
     if (choice !== 'yes' && choice !== 'wait' && choice !== 'info') throw new Error('看不懂這一票');
@@ -724,8 +748,12 @@ export class Room {
     const p = r.proposal;
     if (!p) return;
     const at = this.elapsed();
-    if (!this.proposalValid(p)) {
+    const end = () => {
       r.proposal = null;
+      r.endedVotes = [...(r.endedVotes ?? []), p.id].slice(-5);
+    };
+    if (!this.proposalValid(p)) {
+      end();
       r.lastVote = { key: p.key, by: p.by, outcome: 'cancelled', wait: 0, info: 0, at, tries: r.fails.get(p.key) ?? 0 };
       r.voteLog.push({ key: p.key, by: p.by, outcome: 'cancelled', at });
       return;
@@ -734,14 +762,14 @@ export class Room {
     if (no.length) {
       const tries = (r.fails.get(p.key) ?? 0) + 1;
       r.fails.set(p.key, tries);
-      r.proposal = null;
+      end();
       r.lastVote = { key: p.key, by: p.by, outcome: 'rejected', wait: no.filter((v) => v === 'wait').length, info: no.filter((v) => v === 'info').length, at, tries };
       r.voteLog.push({ key: p.key, by: p.by, outcome: 'rejected', at });
       return;
     }
     const pending = p.voters.filter((v) => this.online(v) && !p.votes.has(v));
     if (pending.length && at < p.deadline) return;
-    r.proposal = null;
+    end();
     r.fails.delete(p.key);
     r.voteLog.push({ key: p.key, by: p.by, outcome: 'passed', at });
     this.execute(p.by, p.action);
@@ -769,7 +797,8 @@ export class Room {
       }
       case 'TOO_EARLY': {
         const sec = Math.max(1, Math.ceil((g.lockOpensAt - at) / 1000));
-        return `先花 1 分鐘認識隊友、交換情報；再 ${sec} 秒就能決定。東西可以先丟`;
+        const total = Math.round(g.lockOpensAt / 1000);
+        return `先花 ${total >= 60 && total % 60 === 0 ? `${total / 60} 分鐘` : `${total} 秒`}認識隊友、交換情報；再 ${sec} 秒就能決定。東西可以先丟`;
       }
       case 'PINNED':
         return '船主不准丟麥子（風暴變大以前）';
@@ -781,8 +810,10 @@ export class Room {
         return '今晚做不到這件事';
       case 'ALREADY_USED': {
         const u = this.round!.game.used;
-        return u ? `天亮前只來得及做一件：${USE_TEXT[u.use].done}` : '天亮前只來得及做一件';
+        return u ? `出發前只來得及做一件：${USE_TEXT[u.use].done}` : '出發前只來得及做一件';
       }
+      case 'PANEL_LOCKED':
+        return '選錯了，面板鎖住一下：趁這幾秒再問清楚';
       default:
         return reasonText(code);
     }
@@ -889,7 +920,7 @@ export class Room {
     const elapsed = this.elapsed();
     let phase: ViewPhase = 'lobby';
     if (r && g && participant) {
-      phase = g.phase === 'planning' && elapsed < this.introMs ? 'intro' : g.phase;
+      phase = g.phase === 'planning' && elapsed < this.introOf() ? 'intro' : g.phase;
     } else if (r && g && (g.phase === 'settled' || g.phase === 'ended')) {
       phase = 'lobby';
     }
@@ -959,7 +990,7 @@ export class Room {
       startedAt: r.startedAt,
       elapsedMs: elapsed,
       timeLimitMs: TIME_UP_AT,
-      introMs: this.introMs,
+      introMs: this.introOf(),
       lockOpensAt: r.startedAt + g.lockOpensAt,
       crisisAt: r.startedAt + crisisAtFor(g.cards),
     };
@@ -978,7 +1009,7 @@ export class Room {
     v.ship = {
       items: ITEMS.map((id) => ({ id, weight: weights[id], onShip: g.plan.items.includes(id), gone: !aboard.includes(id), pinned: pinned.includes(id), swept: g.swept.includes(id) })),
       sweep: g.sweep,
-      sweepWarning: warn ? { stormAt: r.startedAt + g.stormAt, floating: warn.floating } : null,
+      sweepWarning: warn ? { stormAt: r.startedAt + g.stormAt, floating: warn.floating, extra: warn.extra, overweight: warn.overweight } : null,
       provides: powered ? providers(g) : null,
       weight: ev.weight,
       cap: ev.cap,
@@ -1109,11 +1140,15 @@ export class Room {
                 })),
               }
             : null,
-        mySymbols: g.phase === 'blackout' ? rep.slots.flatMap((s, i) => (holders[i] === pid ? [{ slot: i, id: s.answer, desc: describeSymbol(parseSymbol(s.answer)) }] : [])) : [],
+        mySymbols:
+          g.phase === 'blackout'
+            ? rep.slots.flatMap((s, i) => (holders[i] === pid ? [{ slot: i, id: s.answer, desc: describeSymbol(parseSymbol(s.answer)), rot: r.slotRots?.[i] ?? 0 }] : []))
+            : [],
         myEliminationClue: g.phase === 'blackout' ? r.clueHolders.get(pid) ?? null : null,
         engineerNickname: this.nick(engOp),
         order: holders.map((h, i) => ({ slot: i, nickname: this.nick(h) })),
         wrongFlash: rep.wrongPicks,
+        lockedUntil: rep.lockedUntil > rep.startedAt ? r.startedAt + rep.lockedUntil : null,
       };
       v.can.repair = g.phase === 'blackout' && engOp === pid;
       v.can.eliminate = g.phase === 'blackout' && !rep.eliminateUsed && prefHolder === pid;

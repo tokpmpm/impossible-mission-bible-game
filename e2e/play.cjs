@@ -179,6 +179,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const objector = pages.find((p) => p !== cap);
   await objector.waitForSelector('.vote-card.ask [data-choice=wait]', { timeout: 5000 });
   await shot(objector, '07b-vote-ask');
+  // 表決中「決定好了」是真的 disabled（docs/15 M1）
+  await cap.waitForSelector('[data-action=lock][disabled]', { timeout: 5000 });
   await shot(cap, '07c-vote-wait');
   await objector.click('.vote-card.ask [data-choice=wait]');
   for (const p of pages) await p.waitForSelector('.banner.vote-res.no', { timeout: 5000 });
@@ -218,7 +220,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
               await sleep(200);
             }
           }
-          if (guard === 0 && tag === '') await p.screenshot({ path: OUT + '09-hold-symbol.png' });
+          if (guard === 0 && tag === '') {
+            await p.screenshot({ path: OUT + '09-hold-symbol.png' });
+            if (!(await p.$('.hold.show .hold-bow'))) errs.push('記號旁沒有「船頭↑」');
+          }
           await p.mouse.up();
           await sleep(100);
         }
@@ -226,6 +231,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       const opt = eng.locator(`[data-action=pick][data-opt="${desc}"]`);
       if (!(await opt.count())) { errs.push('找不到記號選項 ' + desc); break; }
       if (guard === 0 && tag === '') await shot(eng, '10-eng-panel');
+      if (guard === 0 && tag === '') {
+        // 選錯一次：面板鎖 2–3 秒（DECISIONS 20），選項真的 disabled，之後才能再選
+        const bad = eng.locator(`[data-action=pick]:not([data-opt="${desc}"]):not([disabled])`).first();
+        await bad.click();
+        await eng.waitForSelector('.panel-locked', { timeout: 5000 });
+        await shot(eng, '10b-eng-panel-locked');
+        if (!(await eng.$('.panel-locked [data-action=pick][disabled]'))) errs.push('選錯後面板沒有鎖住');
+        await eng.waitForSelector('.panel-locked', { state: 'detached', timeout: 6000 });
+      }
       await opt.first().click();
       await eng.waitForFunction((prev) => { const h = document.querySelector('.eng h2'); return !h || h.textContent.trim() !== prev; }, ask, { timeout: 5000 });
       await sleep(100);

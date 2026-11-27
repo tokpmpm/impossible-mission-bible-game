@@ -4,7 +4,7 @@
 import QRCore from 'qrcode/lib/core/qrcode.js';
 // @ts-expect-error 同上
 import SvgTag from 'qrcode/lib/renderer/svg-tag.js';
-import { FORMULA_VERSION } from '../engine/score.ts';
+import { FORMULA_VERSION, computeScore } from '../engine/score.ts';
 import { MemoryStore, NAME_REASON_TEXT, TOP_N, checkTeamName, type LeaderboardStore } from './leaderboard.ts';
 import { Room } from './room.ts';
 import type { RoomStore } from './roomstore.ts';
@@ -69,6 +69,9 @@ export class Hub {
     opts: { publicUrl?: string | null; introMs?: number; sweepWarningMs?: number; voteMs?: number; leaderboard?: LeaderboardStore; store?: RoomStore | null; staleMs?: number; now?: () => number } = {},
   ) {
     this.leaderboard = opts.leaderboard ?? new MemoryStore();
+    // 公式改版（docs/13）：舊版本的紀錄用存下來的原始資料以目前公式重算，不必清榜
+    this.leaderboard.rescore(FORMULA_VERSION, (raw) => computeScore(raw).total);
+    // （原始資料壞掉、算不出數字的紀錄由 rescore 保留原分數）
     this.fixedBaseUrl = opts.publicUrl || null;
     this.introMs = opts.introMs;
     this.sweepWarningMs = opts.sweepWarningMs;
@@ -165,7 +168,9 @@ export class Hub {
     try {
       this.handle(conn, msg);
     } catch (e) {
-      this.send(conn, { t: 'error', msg: (e as Error).message, ...(e instanceof CodedError ? { code: e.code } : {}) });
+      // for：這個錯誤是回應哪一種訊息（手機用來把登記上榜的錯誤放在輸入框旁，其他錯誤不混進去；docs/15 L2）
+      const kind = typeof (msg as { t?: unknown })?.t === 'string' ? (msg as { t: string }).t : undefined;
+      this.send(conn, { t: 'error', msg: (e as Error).message, ...(kind ? { for: kind } : {}), ...(e instanceof CodedError ? { code: e.code } : {}) });
     } finally {
       this.markDirty(conn.roomCode);
     }

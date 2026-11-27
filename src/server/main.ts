@@ -111,12 +111,13 @@ export function startServer(
   const ticker = setInterval(() => hub.tick(), opts.tickMs ?? 250);
   const sweeper = setInterval(() => hub.sweep(), 60_000);
 
-  return new Promise<{ port: number; close: () => Promise<void>; rooms: Map<string, unknown> }>((resolve) => {
+  return new Promise<{ port: number; close: () => Promise<void>; rooms: Map<string, unknown>; hub: Hub }>((resolve) => {
     server.listen(port, () => {
       actualPort = (server.address() as { port: number }).port;
       resolve({
         port: actualPort,
         rooms: hub.rooms,
+        hub,
         close: () =>
           new Promise<void>((done) => {
             clearInterval(ticker);

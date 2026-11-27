@@ -306,3 +306,26 @@ test('fileLeaderboard：檔案不存在時是空榜；寫入後（含自動建�
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('公式改版（v3-trial，DECISIONS 20）：舊紀錄用原始資料重算，時間 3:30 前滿分；兩種儲存都一樣', async () => {
+  const { computeScore, FORMULA_VERSION } = await import('../src/engine/score.ts');
+  const { Hub } = await import('../src/server/hub.ts');
+  const { DatabaseSync } = await import('node:sqlite');
+  const raw = {
+    formula: 'v2-trial', stars: 3 as const, safe: true, repairMs: 30_000, repairLimitMs: 60_000, assistLevel: 0 as const, slots: 4, firstRound: false,
+    wrongPicks: 0, finishedAt: 200_000, cards: { a: 'A5' as const, b: 'B4' as const }, tonight: { 食: '糧食' as const, 繩: '纜索' as const, 水: '深' as const },
+    sweep: true, solutions: 3, difficultyPoints: 53, playerCount: 6,
+  };
+  const v2Total = 600 + 70 + 60 + 73 + Math.round(100 * (480_000 - 200_000) / 360_000); // 舊版：2:00 起扣
+  const stores = [new MemoryStore(), new SqlStore(((db) => (sql: string, ...p: (string | number | null)[]) => db.prepare(sql).all(...p) as Record<string, unknown>[])(new DatabaseSync(':memory:')))];
+  for (const store of stores) {
+    store.add({ roundId: 'old', name: '舊隊', key: '舊隊', score: v2Total, players: 6, at: 1, formula: 'v2-trial', raw });
+    new Hub({ leaderboard: store });
+    const row = store.all()[0];
+    assert.equal(row.formula, FORMULA_VERSION);
+    assert.equal(row.score, computeScore(raw).total);
+    assert.equal(computeScore(raw).time, 100, '3:20 上岸在 v3 是滿分');
+    assert.equal(row.raw.formula, 'v2-trial', '原始資料不動');
+    assert.equal(store.rescore(FORMULA_VERSION, () => 0), 0, '已是新版的不再重算');
+  }
+});

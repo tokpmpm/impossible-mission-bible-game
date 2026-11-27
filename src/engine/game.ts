@@ -11,6 +11,8 @@ export const TIME_UP_AT = 480_000; // 8:00
 export const FIRST_ROUND_EXTRA = 15_000;
 export const SECOND_ASSIST_AFTER = 15_000; // 逾時再 15 秒，只留正確＋1 個錯誤選項
 export const LOCK_OPENS_AT = 60_000; // 前 60 秒可以丟東西但不能「決定好了」，先認識隊友
+export const LOCK_OPENS_AT_LATER = 30_000; // 第二局起（同一群人）認識隊友縮成 30 秒（DECISIONS 20）
+export const WRONG_PICK_LOCK_MS = 2_500; // 補船選錯後面板鎖 2.5 秒（不扣分；DECISIONS 20）
 export const SWEEP_WARNING_MS = 10_000; // 風暴捲走前 10 秒提醒（DECISIONS 16）
 /** 至少顧好幾件才算平安上岸（DECISIONS 18：0–1 件＝沒能平安上岸；這是遊戲結果，經文裡 276 人都上了岸）。 */
 export const SAFE_MIN_STARS = 2;
@@ -52,6 +54,8 @@ export interface RepairState {
   grayed: string[][];
   eliminateUsed: boolean;
   wrongPicks: number;
+  /** 選錯後面板鎖到什麼時候（局內毫秒）；鎖住時按選項不算數。 */
+  lockedUntil: number;
   doneAt: number | null;
 }
 
@@ -68,7 +72,8 @@ export type ExtraReason =
   | 'SWEPT' // 已經被浪捲走，撈不回來
   | 'NO_ITEM' // 要用掉的東西不在船上
   | 'CANNOT_TONIGHT' // 今晚做不到（水太深）或那件事已經顧好
-  | 'ALREADY_USED'; // 天亮前只來得及做一件
+  | 'ALREADY_USED' // 出發前只來得及做一件
+  | 'PANEL_LOCKED'; // 補船選錯後面板鎖住幾秒
 
 export interface GameState {
   seedId: SeedId;
@@ -233,11 +238,31 @@ export function usesTonight(state: GameState): UseId[] {
   return usesAvailable(seedOf(state), activeCards(state), state.tonight, all);
 }
 
-/** 規劃期：漂著的東西還有幾毫秒被捲走（沒有風暴捲走或不在提醒時段＝null）。 */
-export function sweepWarning(state: GameState): { inMs: number; floating: ItemId[] } | null {
+/**
+ * 如果風暴現在來，會被捲走什麼：漂著的東西（floating）＋還超重時浪從最重的開始捲走的（extra；同重由畫面右邊開始），
+ * 直到不超重。startCrisis 與預警共用這一段，所以「預警列出的＝實際捲走的」（docs/15 H1）。
+ */
+export function sweepPreview(state: GameState): { floating: ItemId[]; extra: ItemId[]; overweight: number } {
+  const eff = effective(seedOf(state), worldOf(state));
+  const aboard = eff.aboard.filter((i) => !state.swept.includes(i));
+  const floating = aboard.filter((i) => !state.plan.items.includes(i));
+  const keep = aboard.filter((i) => state.plan.items.includes(i));
+  let weight = keep.reduce((n, i) => n + eff.weights[i], 0);
+  const overweight = Math.max(0, weight - eff.cap);
+  const order = [...keep].sort((x, y) => eff.weights[y] - eff.weights[x] || ITEMS.indexOf(y) - ITEMS.indexOf(x));
+  const extra: ItemId[] = [];
+  for (const i of order) {
+    if (weight <= eff.cap) break;
+    extra.push(i);
+    weight -= eff.weights[i];
+  }
+  return { floating, extra, overweight };
+}
+
+/** 規劃期：風暴還有幾毫秒、會捲走什麼（沒有風暴捲走或不在提醒時段＝null）。extra＝超重而會被浪先捲走的東西。 */
+export function sweepWarning(state: GameState): { inMs: number; floating: ItemId[]; extra: ItemId[]; overweight: number } | null {
   if (!state.sweep || state.phase !== 'planning' || !state.warned) return null;
-  const aboard = aboardOf(state).aboard;
-  return { inMs: Math.max(0, state.stormAt - state.now), floating: aboard.filter((i) => !state.plan.items.includes(i)) };
+  return { inMs: Math.max(0, state.stormAt - state.now), ...sweepPreview(state) };
 }
 
 function clone(state: GameState): GameState {
@@ -248,17 +273,8 @@ function startCrisis(s: GameState, at: number, cause: 'lock' | 'timeout'): void 
   if (s.crisisAt !== null) return; // 一局只發生一次
   if (s.sweep) {
     // 風暴捲走：漂著的東西撈不回來；還超重就從最重的開始捲走（同重由畫面右邊開始），直到不超重
-    const seed = seedOf(s);
-    const eff = effective(seed, worldOf(s));
-    const gone = eff.aboard.filter((i) => !s.plan.items.includes(i));
-    const keep = eff.aboard.filter((i) => s.plan.items.includes(i));
-    let weight = keep.reduce((n, i) => n + eff.weights[i], 0);
-    const order = [...keep].sort((x, y) => eff.weights[y] - eff.weights[x] || ITEMS.indexOf(y) - ITEMS.indexOf(x));
-    for (const i of order) {
-      if (weight <= eff.cap) break;
-      gone.push(i);
-      weight -= eff.weights[i];
-    }
+    const p = sweepPreview(s);
+    const gone = [...p.floating, ...p.extra];
     s.swept = ITEMS.filter((i) => gone.includes(i));
     s.plan.items = s.plan.items.filter((i) => !gone.includes(i));
     if (s.swept.length) s.log.push({ at, kind: 'swept', data: { items: s.swept } });
@@ -283,6 +299,7 @@ function startCrisis(s: GameState, at: number, cause: 'lock' | 'timeout'): void 
     grayed: s.pendingSlots.map(() => []),
     eliminateUsed: false,
     wrongPicks: 0,
+    lockedUntil: 0,
     doneAt: null,
   };
   s.log.push({ at, kind: 'crisis', data: { cause } });
@@ -426,11 +443,14 @@ export function apply(prev: GameState, event: GameEvent): GameState {
       if (s.phase !== 'blackout' || !s.repair) return reject(s, event.type, at, ['WRONG_PHASE']);
       const r = s.repair;
       const slot = r.slots[r.progress];
+      // 選錯後面板鎖幾秒（不扣分）：鎖住時按什麼都不算，免得亂按猜中（DECISIONS 20）
+      if (at < (r.lockedUntil ?? 0)) return reject(s, event.type, at, ['PANEL_LOCKED']);
       if (event.option === slot.answer) {
         r.progress++;
         if (r.progress === r.slots.length) restorePower(s, at);
       } else if (slot.options.includes(event.option)) {
         r.wrongPicks++;
+        r.lockedUntil = at + WRONG_PICK_LOCK_MS;
       }
       return s;
     }

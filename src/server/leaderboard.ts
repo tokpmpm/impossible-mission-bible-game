@@ -50,6 +50,8 @@ export interface LeaderboardStore {
   all(): LeaderRow[];
   /** 管理用：隱藏或恢復一筆（不刪原始資料，榜不重置）。目前沒有對外端點，由維運直接呼叫。 */
   setHidden(id: number, hidden: boolean): void;
+  /** 改公式後重算：公式版本不是 `formula` 的每一筆，用原始資料以 `compute` 重算分數並寫回（原始資料不動）。回傳重算了幾筆。 */
+  rescore(formula: string, compute: (raw: ScoreRaw) => number): number;
 }
 
 // ---------- 隊名 ----------
@@ -124,6 +126,16 @@ function resultFor(ranked: LeaderRow[], key: string, id: number): SubmitResult {
   return { rank: i + 1, best: ranked[i]?.id === id, bestScore: ranked[i]?.score ?? 0 };
 }
 
+/** 用新公式重算一筆；原始資料壞掉（算出來不是數字、丟錯）＝null，保留原分數。 */
+function safeScore(compute: (raw: ScoreRaw) => number, r: LeaderRow): number | null {
+  try {
+    const x = compute(r.raw);
+    return Number.isFinite(x) ? Math.round(x) : null;
+  } catch {
+    return null;
+  }
+}
+
 // ---------- 記憶體（Node 本機；可接 JSON 檔） ----------
 
 export class MemoryStore implements LeaderboardStore {
@@ -160,6 +172,20 @@ export class MemoryStore implements LeaderboardStore {
     if (!r) return;
     r.hidden = hidden;
     this.onChange?.(this.rows);
+  }
+
+  rescore(formula: string, compute: (raw: ScoreRaw) => number): number {
+    let n = 0;
+    for (const r of this.rows) {
+      if (r.formula === formula) continue;
+      const score = safeScore(compute, r);
+      if (score === null) continue;
+      r.score = score;
+      r.formula = formula;
+      n++;
+    }
+    if (n) this.onChange?.(this.rows);
+    return n;
   }
 }
 
@@ -243,5 +269,17 @@ export class SqlStore implements LeaderboardStore {
 
   setHidden(id: number, hidden: boolean): void {
     this.exec('UPDATE leaderboard SET hidden = ? WHERE id = ?', hidden ? 1 : 0, id);
+  }
+
+  rescore(formula: string, compute: (raw: ScoreRaw) => number): number {
+    const old = this.exec('SELECT * FROM leaderboard WHERE formula <> ?', formula).map(SqlStore.row);
+    let n = 0;
+    for (const r of old) {
+      const score = safeScore(compute, r);
+      if (score === null) continue;
+      this.exec('UPDATE leaderboard SET score = ?, formula = ? WHERE id = ?', score, formula, r.id);
+      n++;
+    }
+    return n;
   }
 }

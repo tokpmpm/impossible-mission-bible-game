@@ -13,7 +13,7 @@ import { PLAYER_FACTOR, REPAIR_MS_PER_SLOT, SCORE_MAX, computeScore, difficultyK
 /** 一份「中等」的原始資料，各測試只改要測的欄位。 */
 function raw(over: Partial<ScoreRaw> = {}): ScoreRaw {
   return {
-    formula: 'v2-trial',
+    formula: 'v3-trial',
     stars: 3,
     safe: true,
     repairMs: 30_000,
@@ -128,10 +128,11 @@ test('計分：首局協助已出現但還沒逾時（assistLevel 1、用時 < �
   assert.equal(b.teamwork, speed + 60);
 });
 
-test('計分：時間 2:00 前滿分、8:00 為 0、中間線性', () => {
+test('計分（v3）：時間 3:30 前滿分、8:00 為 0、中間線性', () => {
   assert.equal(computeScore(raw({ finishedAt: 0 })).time, 100);
   assert.equal(computeScore(raw({ finishedAt: 120_000 })).time, 100);
-  assert.equal(computeScore(raw({ finishedAt: 300_000 })).time, 50);
+  assert.equal(computeScore(raw({ finishedAt: 210_000 })).time, 100);
+  assert.equal(computeScore(raw({ finishedAt: 345_000 })).time, 50);
   assert.equal(computeScore(raw({ finishedAt: TIME_UP_AT })).time, 0);
   assert.equal(computeScore(raw({ finishedAt: TIME_UP_AT + 60_000 })).time, 0);
 });
@@ -151,7 +152,7 @@ test('計分：總分是四項相加×人數係數，且回傳公式版本與試
   assert.equal(b.total, b.mission + b.teamwork + b.time + b.difficulty);
   assert.equal(b.factor, 1);
   assert.equal(b.trial, true);
-  assert.equal(b.formula, 'v2-trial');
+  assert.equal(b.formula, 'v3-trial');
 });
 
 test('計分：滿分情境剛好 1000，不會超過', () => {
@@ -223,7 +224,7 @@ test('rawOf：真的跑完一局三星上岸，原始資料各欄位正確', () 
   const s = playToShore(5_000, 200_000);
   assert.equal(s.phase, 'settled');
   const r = rawOf(s)!;
-  assert.equal(r.formula, 'v2-trial');
+  assert.equal(r.formula, 'v3-trial');
   assert.equal(r.stars, 3);
   assert.equal(r.safe, true);
   assert.equal(r.repairMs, 5_000);
@@ -273,7 +274,7 @@ test('rawOf：記下 slots／firstRound／wrongPicks；選錯不計分但存下�
   const slot = s.repair!.slots[0];
   const bad = slot.options.find((o) => o !== slot.answer)!;
   s = apply(s, { type: 'repairPick', at: crisis + 3_000, option: bad });
-  s = apply(s, { type: 'repairPick', at: crisis + 4_000, option: bad });
+  s = apply(s, { type: 'repairPick', at: crisis + 6_000, option: bad }); // 選錯後面板鎖 2.5 秒，過了才算第二次
   for (const sl of s.repair!.slots) s = apply(s, { type: 'repairPick', at: crisis + 10_000, option: sl.answer });
   s = apply(s, { type: 'use', at: crisis + 10_100, use: '吃飯' });
   s = apply(s, { type: 'depart', at: 200_000 });
@@ -366,17 +367,17 @@ test('docs/13 範例 A／B／C 與公平性對照：逐項與文件一致', () =
   };
   const shallow = { ...CLASSIC, 水: '淺' as const };
   const A = ex('A3', 'B1', CLASSIC, { firstRound: true, repairLimitMs: 75_000, repairMs: 30_000, finishedAt: 150_000 });
-  assert.deepEqual([A.mission, A.teamwork, A.time, A.difficulty, A.total], [600, 144, 92, 80, 916]);
+  assert.deepEqual([A.mission, A.teamwork, A.time, A.difficulty, A.total], [600, 144, 100, 80, 924]);
   const B = ex('A4', 'B5', shallow, { repairMs: 50_000, finishedAt: 300_000, sweep: true });
-  assert.deepEqual([B.mission, B.teamwork, B.time, B.difficulty, B.total], [600, 83, 50, 20, 753]);
+  assert.deepEqual([B.mission, B.teamwork, B.time, B.difficulty, B.total], [600, 83, 67, 20, 770]);
   const B2 = ex('A4', 'B5', shallow, { repairMs: 70_000, assistLevel: 1, finishedAt: 300_000, sweep: true });
-  assert.deepEqual([B2.teamwork, B2.total], [30, 700]);
+  assert.deepEqual([B2.teamwork, B2.total], [30, 717]);
   const C = ex('A2', 'B2', CLASSIC, { playerCount: 3, slots: 2, repairLimitMs: 45_000, repairMs: 20_000, stars: 2, finishedAt: 360_000, sweep: true });
-  assert.deepEqual([C.mission, C.teamwork, C.time, C.difficulty, C.total], [400, 107, 33, 67, 607]);
+  assert.deepEqual([C.mission, C.teamwork, C.time, C.difficulty, C.total], [400, 107, 44, 67, 618]);
   const c3 = ex('A2', 'B2', CLASSIC, { playerCount: 3, slots: 2, repairLimitMs: 45_000, repairMs: 15_000, finishedAt: 360_000, sweep: true });
   const c6 = ex('A2', 'B2', CLASSIC, { playerCount: 6, slots: 4, repairLimitMs: 60_000, repairMs: 30_000, finishedAt: 360_000, sweep: true });
-  assert.equal(c3.total, 863);
-  assert.equal(c6.total, 863);
+  assert.equal(c3.total, 874);
+  assert.equal(c6.total, 874);
   const D = ex('A2', 'B2', CLASSIC, { repairMs: 30_000, stars: 1, safe: false, finishedAt: 360_000, sweep: true });
   assert.deepEqual([D.mission, D.teamwork, D.time, D.difficulty, D.total], [0, 130, 0, 0, 130]);
 });

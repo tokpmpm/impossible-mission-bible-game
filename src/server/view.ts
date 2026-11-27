@@ -46,7 +46,7 @@ export type ServerMessage =
   /** 只送給按的那支手機：這個動作被規則擋下了，附原因與下一步。 */
   | ({ t: 'rejected'; id: string } & Rejection)
   /** code：ROOM_GONE＝重連時房間已經不在了（伺服器被清掉）。 */
-  | { t: 'error'; msg: string; code?: 'ROOM_GONE' }
+  | { t: 'error'; msg: string; code?: 'ROOM_GONE'; /** 回應哪一種訊息（例：'submitScore'）。 */ for?: string }
   /** 只送給房主：登記結果（rank＝這一隊現在第幾名；best＝這次是不是這隊最好成績）。 */
   | { t: 'submitted'; name: string; rank: number; best: boolean; bestScore: number }
   | { t: 'leaderboard'; entries: LeaderEntry[]; formula: string; trial: true }
@@ -115,7 +115,8 @@ export interface View {
     /** 這局有沒有「風暴捲走」（首局沒有）。 */
     sweep: boolean;
     /** 捲走前 10 秒提醒：風暴幾點來（伺服器時間）、漂著的東西。 */
-    sweepWarning: null | { stormAt: number; floating: ItemId[] };
+    /** 捲走預警：漂著的（floating）＋超重而會被浪從最重開始捲走的（extra）。和實際捲走的一致（docs/15 H1）。 */
+    sweepWarning: null | { stormAt: number; floating: ItemId[]; extra: ItemId[]; overweight: number };
     /** 今晚三件事各靠哪一樣：補好船後才公開（危機前要問隊友）。 */
     provides: Record<NeedId, ItemId> | null;
     weight: number;
@@ -173,11 +174,14 @@ export interface View {
     panel: null | {
       slots: { index: number; askNickname: string; options: { id: string; desc: string; grayed: boolean }[]; done: boolean }[];
     };
-    mySymbols: { slot: number; id: string; desc: string }[];
+    /** rot：持有者看到的圖轉幾度（旁邊標「船頭↑」；DECISIONS 20 試行）。 */
+    mySymbols: { slot: number; id: string; desc: string; rot: number }[];
     myEliminationClue: string | null;
     engineerNickname: string;
     order: { slot: number; nickname: string }[];
     wrongFlash: number;
+    /** 選錯後面板鎖到什麼時候（伺服器時間）；沒鎖＝null。 */
+    lockedUntil: number | null;
   };
   result: null | {
     stars: 0 | 1 | 2 | 3;
