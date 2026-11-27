@@ -13,3 +13,4 @@ Status: accepted（2026-11-14，使用者選擇 Cloudflare）；取代 ADR-0004 
 ## Consequences
 - 房間狀態只在記憶體：所有人都離線一段時間後物件可能被回收，房間消失；Cloudflare 更新部署時，進行中的房間也會中斷。
 - 免費方案的 Durable Object 必須是 SQLite 型（`new_sqlite_classes`），目前沒有用到儲存。
+- 2026-11-22 補記：SQLite 已用來存排行榜（ADR-0008）與房間（ADR-0010）；物件重啟、重新部署後房間會讀回，上面「房間消失」的情況只剩閒置 30 分鐘被清掉。

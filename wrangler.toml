@@ -12,6 +12,12 @@ binding = "ASSETS"
 name = "HUB"
 class_name = "GameHub"
 
+# 部署新版時，正在用的 GameHub 最多延後 30 分鐘才換新程式（預設 5 分鐘），盡量不在遊戲中途重啟（docs/16 P7）。
+# 就算重啟，房間也已存進 SQLite（ADR-0010），大家會自動接回同一局。
+[durable_objects.code_update_strategy]
+mode = "deferred"
+max_delay = 1800
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["GameHub"]

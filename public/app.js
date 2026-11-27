@@ -31,6 +31,12 @@ let lastOvl = '';
 const ui = {
   view: null,
   status: 'connecting',
+  /** 從什麼時候開始沒連上（連著是 null）；連續連線逾時次數；還沒送出的動作數（docs/16 連線加強）。 */
+  down: Date.now(),
+  timeouts: 0,
+  pendingN: 0,
+  /** 重連時伺服器說房間已經不在了（ROOM_GONE）：顯示說明頁。 */
+  gone: false,
   offset: 0,
   hadSession: !!loadSession(),
   left: false,
@@ -116,7 +122,8 @@ function writeFlag(k, on) {
   }
 }
 
-const now = () => Date.now() + ui.offset;
+// 暫停中（一半以上隊友斷線，DECISIONS 19）：所有倒數停在暫停那一刻
+const now = () => (ui.view && ui.view.paused ? ui.view.paused.at : Date.now() + ui.offset);
 
 function esc(s) {
   return String(s ?? '')
@@ -150,8 +157,10 @@ function toast(msg) {
 let autoSent = false;
 
 const conn = createConnection({
-  onStatus(s) {
+  onStatus(s, info) {
     ui.status = s;
+    ui.down = info ? info.downSince : null;
+    ui.timeouts = info ? info.timeouts : 0;
     renderStatus();
     // ?auto=1（單機試玩）：沒有 session 時自動用 nick 建立或加入房間
     if (s === 'open' && params.get('auto') && !autoSent && !loadSession() && ui.nick) {
@@ -160,7 +169,12 @@ const conn = createConnection({
       else conn.send({ t: 'create', nickname: ui.nick, ...(params.get('seat') ? { practice: true } : {}) });
     }
   },
+  onPending(n) {
+    ui.pendingN = n;
+    renderStatus();
+  },
   onWelcome() {
+    ui.gone = false;
     ui.left = false;
     ui.busy = false;
     ui.hadSession = true;
@@ -199,6 +213,19 @@ const conn = createConnection({
       // 登記被伺服器擋下：訊息放在輸入框旁
       ui.subBusy = false;
       ui.subErr = msg;
+      render();
+      return;
+    }
+    if (ctx.code === 'ROOM_GONE') {
+      // 伺服器說房間不在了：不論畫面停在哪裡，都清掉舊資料，告訴大家怎麼辦
+      clearSession();
+      conn.clearPending();
+      ui.view = null;
+      ui.hadSession = false;
+      ui.gone = true;
+      ui.zoom = false;
+      ui.leaveConfirm = false;
+      lastHud = '';
       render();
       return;
     }
@@ -361,7 +388,20 @@ function statusLine(v) {
 
 // ───────── 首頁 ─────────
 
+function renderGone() {
+  return `<main class="screen center gone">
+      <div class="logo">不可能的任務</div>
+      <section class="card">
+        <h2>這一局中斷了</h2>
+        <p>原本的房間已經不在了（可能放著太久沒人用，或伺服器清掉了）。<strong>不是你的問題。</strong></p>
+        <p>請房主重新建立房間，大家再掃一次新的 QR Code。</p>
+      </section>
+      <button class="btn primary block" data-action="gone-ok">回首頁</button>
+    </main>`;
+}
+
 function renderHome() {
+  if (ui.gone) return renderGone();
   const waiting = ui.hadSession && !ui.view && !ui.left;
   if (waiting) {
     return `<main class="screen center">
@@ -983,6 +1023,17 @@ function renderResult(v) {
   </main>`;
 }
 
+/** 遊戲中：暫停說明、離線隊友（他的工作暫時由在線的人負責；不是自己能按的按鈕本來就不會出現）。 */
+function connNotes(v) {
+  if (v.paused) {
+    const who = v.paused.offline.length ? `（${v.paused.offline.map(esc).join('、')}）` : '';
+    return `<div class="conn-note paused" role="status"><strong>⏸ 時間暫停</strong>：一半以上的隊友斷線了${who}。等大家連回來，會從這裡繼續。</div>`;
+  }
+  const off = v.players.filter((p) => !p.connected && p.roleIds && p.roleIds.length);
+  if (!off.length) return '';
+  return `<div class="conn-note" role="status">${off.map((p) => esc(p.nickname)).join('、')} 斷線中：他的工作暫時交給在線的人。</div>`;
+}
+
 function renderSpectator(v) {
   const list = v.players.map((p) => `<li class="player ${p.connected ? '' : 'off'}"><span class="dot"></span><span class="pname">${esc(p.nickname)}</span></li>`).join('');
   return `<main class="screen">
@@ -1074,13 +1125,34 @@ function autoOpenCard(v) {
 
 // ───────── 主畫面 ─────────
 
+/** 斷線橫幅：2 秒內的短暫重連不顯示（免得閃）；顯示斷了幾秒；10 秒給建議；20 秒或連續逾時給「重新整理」。 */
 function renderStatus() {
   const el = document.getElementById('conn');
   if (!el) return;
-  const bad = ui.status !== 'open';
+  const secs = ui.status !== 'open' && ui.down ? Math.floor((Date.now() - ui.down) / 1000) : 0;
+  const bad = ui.status !== 'open' && secs >= 2;
   el.hidden = !bad;
-  el.textContent = ui.status === 'connecting' ? '連線中…' : '連線中斷，正在重新連線…';
+  if (!bad) {
+    el.dataset.key = '';
+    return;
+  }
+  const stuck = secs >= 20 || ui.timeouts >= 3;
+  const key = [secs >= 10, stuck, ui.pendingN > 0].join('|');
+  if (el.dataset.key !== key) {
+    // 文字有變才重畫（role=status 會被報讀；秒數另外放、不報讀）
+    el.dataset.key = key;
+    el.innerHTML =
+      `<span class="conn-main">連線中斷，正在重新連線…</span> <span class="conn-secs" aria-hidden="true"></span>` +
+      (ui.pendingN > 0 ? `<span class="conn-sub">你按的動作會在連上後自動送出</span>` : '') +
+      (secs >= 10 ? `<span class="conn-sub">網路不穩：可以試著切換 Wi‑Fi／行動網路</span>` : '') +
+      (stuck ? `<button class="btn small conn-reload" data-action="reload">重新整理</button>` : '');
+  }
+  const s = el.querySelector('.conn-secs');
+  if (s) s.textContent = `（${secs} 秒）`;
 }
+setInterval(() => {
+  if (ui.status !== 'open') renderStatus();
+}, 1000);
 
 
 // ───────── 輕量 DOM 差異更新：只改有變的節點，其餘（含進行中的動畫、捲動、焦點）原封不動 ─────────
@@ -1169,6 +1241,7 @@ function render() {
     }
     if (ui.zoom && v.phase !== 'blackout') html += renderZoom(v);
   }
+  if (v && !['lobby', 'settled', 'ended'].includes(v.phase) && !v.me.spectator) html = connNotes(v) + html;
   if (!hudKey) hudKey = hud.replace(/data-cd="round">[^<]*/, '');
   if (hudKey !== lastHud) {
     hudEl.innerHTML = hud;
@@ -1338,6 +1411,13 @@ document.addEventListener('click', (e) => {
       ui.subOpen = false;
       ui.subErr = '';
       ui.subBusy = false;
+      render();
+      break;
+    case 'reload':
+      location.reload();
+      break;
+    case 'gone-ok':
+      ui.gone = false;
       render();
       break;
     case 'forget':

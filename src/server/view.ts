@@ -11,19 +11,20 @@ export type ClientMessage =
   | { t: 'create'; nickname: string; practice?: boolean }
   | { t: 'join'; code: string; nickname: string }
   | { t: 'resume'; playerId: string; token: string }
-  | { t: 'pref'; value: Preference | null }
-  | { t: 'start' } // 房主；至少 3 人
+  // 下面這些會改變狀態的訊息可以帶 mid（訊息代號，2026-11-22 連線加強）：伺服器回 ack（id＝mid）、同一個 mid 只處理一次，手機斷線重連後可以安心重送。
+  | { t: 'pref'; value: Preference | null; mid?: string }
+  | { t: 'start'; mid?: string } // 房主；至少 3 人
   | { t: 'act'; id: string; ev: Action } // id：手機產生的唯一代號，重送不會重複執行
   /** 對進行中的表決投票：id＝表決代號。 */
-  | { t: 'vote'; id: string; choice: VoteChoice }
-  | { t: 'thank'; to: string | null }
-  | { t: 'next' } // 房主：再來一局（新的故事卡）
+  | { t: 'vote'; id: string; choice: VoteChoice; mid?: string }
+  | { t: 'thank'; to: string | null; mid?: string }
+  | { t: 'next'; mid?: string } // 房主：再來一局（新的故事卡）
   /** 房主：把這局登記上排行榜（每局一次、練習房不行）。 */
-  | { t: 'submitScore'; name: string }
+  | { t: 'submitScore'; name: string; mid?: string }
   /** 查排行榜前 10 名（也可以用 HTTP GET /api/leaderboard）。 */
   | { t: 'leaderboard' }
   | { t: 'leave' }
-  /** 心跳：每 20 秒一次，讓雲端伺服器保持清醒。 */
+  /** 心跳：每 10 秒一次；伺服器 45 秒沒收到任何訊息就當作斷線（2026-11-22 連線加強）。 */
   | { t: 'ping' };
 
 export type Action =
@@ -44,7 +45,8 @@ export type ServerMessage =
   | { t: 'ack'; id: string }
   /** 只送給按的那支手機：這個動作被規則擋下了，附原因與下一步。 */
   | ({ t: 'rejected'; id: string } & Rejection)
-  | { t: 'error'; msg: string }
+  /** code：ROOM_GONE＝重連時房間已經不在了（伺服器被清掉）。 */
+  | { t: 'error'; msg: string; code?: 'ROOM_GONE' }
   /** 只送給房主：登記結果（rank＝這一隊現在第幾名；best＝這次是不是這隊最好成績）。 */
   | { t: 'submitted'; name: string; rank: number; best: boolean; bestScore: number }
   | { t: 'leaderboard'; entries: LeaderEntry[]; formula: string; trial: true }
@@ -78,6 +80,8 @@ export interface View {
   joinUrl: string;
   qrSvg: string | null; // 只有大廳時提供
   serverNow: number;
+  /** 一半以上隊員離線時暫停（DECISIONS 19）：at＝暫停的伺服器時間，倒數要停在這一刻；offline＝離線的人。 */
+  paused: { at: number; offline: string[] } | null;
   me: {
     id: string;
     nickname: string;

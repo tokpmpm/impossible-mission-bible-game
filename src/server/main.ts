@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { Hub, type Conn } from './hub.ts';
 import { MemoryStore, type LeaderRow } from './leaderboard.ts';
+import type { RoomStore } from './roomstore.ts';
 
 /** 本機排行榜：給了檔名就存成 JSON（伺服器重開還在）；沒給就只在記憶體。 */
 export function fileLeaderboard(file: string | null | undefined): MemoryStore {
@@ -45,7 +46,9 @@ export function lanAddress(): string | null {
   return null;
 }
 
-export function startServer(opts: { port?: number; publicUrl?: string; tickMs?: number; introMs?: number; sweepWarningMs?: number; voteMs?: number; leaderboardFile?: string } = {}) {
+export function startServer(
+  opts: { port?: number; publicUrl?: string; tickMs?: number; introMs?: number; sweepWarningMs?: number; voteMs?: number; leaderboardFile?: string; store?: RoomStore; staleMs?: number } = {},
+) {
   const port = opts.port ?? Number(process.env.PORT ?? 3000);
   // INTRO_MS：只給自動測試縮短「認識隊友」時間用；正式遊戲固定 60 秒
   const introMs = opts.introMs ?? (process.env.INTRO_MS ? Number(process.env.INTRO_MS) : undefined);
@@ -55,7 +58,9 @@ export function startServer(opts: { port?: number; publicUrl?: string; tickMs?: 
   const leaderboard = fileLeaderboard(opts.leaderboardFile ?? process.env.LEADERBOARD_FILE);
   // VOTE_MS：同上，只給自動測試縮短「沒回應就算同意」的 10 秒
   const voteMs = opts.voteMs ?? (process.env.VOTE_MS ? Number(process.env.VOTE_MS) : undefined);
-  const hub = new Hub({ publicUrl: opts.publicUrl ?? process.env.PUBLIC_URL ?? null, introMs, sweepWarningMs, voteMs, leaderboard });
+  // STALE_MS：同上，只給自動測試縮短心跳逾時（正式 45 秒）
+  const staleMs = opts.staleMs ?? (process.env.STALE_MS ? Number(process.env.STALE_MS) : undefined);
+  const hub = new Hub({ publicUrl: opts.publicUrl ?? process.env.PUBLIC_URL ?? null, introMs, sweepWarningMs, voteMs, leaderboard, store: opts.store, staleMs });
   let actualPort = port;
 
   function originOf(req: IncomingMessage): string {
@@ -97,7 +102,7 @@ export function startServer(opts: { port?: number; publicUrl?: string; tickMs?: 
   const wss = new WebSocketServer({ server, path: '/ws' });
 
   wss.on('connection', (ws, req) => {
-    const conn: Conn = { send: (d) => ws.readyState === ws.OPEN && ws.send(d), origin: originOf(req), roomCode: null, playerId: null };
+    const conn: Conn = { send: (d) => ws.readyState === ws.OPEN && ws.send(d), close: () => ws.terminate(), origin: originOf(req), roomCode: null, playerId: null };
     hub.open(conn);
     ws.on('message', (data) => hub.message(conn, String(data)));
     ws.on('close', () => hub.close(conn));
@@ -115,6 +120,7 @@ export function startServer(opts: { port?: number; publicUrl?: string; tickMs?: 
         close: () =>
           new Promise<void>((done) => {
             clearInterval(ticker);
+            hub.flush(true);
             clearInterval(sweeper);
             for (const c of wss.clients) c.terminate();
             wss.close();

@@ -140,6 +140,14 @@ function randomId(len = 16): string {
   return s;
 }
 
+/** 序列化：Map 存成 {$m: [[k, v]…]}，其餘照 JSON。 */
+function replacer(_k: string, v: unknown): unknown {
+  return v instanceof Map ? { $m: [...v.entries()] } : v;
+}
+function reviver(_k: string, v: unknown): unknown {
+  return v && typeof v === 'object' && !Array.isArray(v) && '$m' in v && Object.keys(v).length === 1 ? new Map((v as { $m: [unknown, unknown][] }).$m) : v;
+}
+
 function cardView(id: CardId, alreadyGone: ItemId[] = []): CardView {
   const v = { id, deck: CARDS[id].deck, ...CARD_TEXT[id] };
   // 卡片要帶走的東西早就被你們丟了：照實說，不假裝有影響
@@ -157,6 +165,11 @@ export class Room {
   round: Round | null = null;
   roundsPlayed = 0;
   lastActivity = Date.now();
+  /**
+   * 暫停（2026-11-22 使用者決定，DECISIONS 19）：這局一半以上的隊員同時離線（伺服器重啟、場地網路掛掉）時，
+   * 倒數、表決、捲走等所有局內時間都停住；大家連回來後從停住的地方繼續。值＝開始暫停的伺服器時間。
+   */
+  pausedAt: number | null = null;
   /** 開局認識隊友的時間；這段時間可以排方案但不能鎖定。 */
   introMs: number;
   private lastSig = '';
@@ -208,6 +221,7 @@ export class Room {
     if (!p || p.token !== token || p.left) return null;
     p.connected = true;
     this.transferHostIfNeeded();
+    this.updatePause();
     this.touch();
     return p;
   }
@@ -217,6 +231,7 @@ export class Room {
     if (!p) return;
     p.connected = false;
     this.transferHostIfNeeded();
+    this.updatePause();
   }
 
   leave(id: string): void {
@@ -226,6 +241,7 @@ export class Room {
     p.left = true;
     if (!this.round) this.players = this.players.filter((x) => x.id !== id);
     this.transferHostIfNeeded();
+    this.updatePause();
   }
 
   private transferHostIfNeeded(): void {
@@ -417,17 +433,52 @@ export class Room {
   // ---------- 操作 ----------
 
   elapsed(): number {
-    return this.round ? this.now() - this.round.startedAt : 0;
+    if (!this.round) return 0;
+    return (this.pausedAt ?? this.now()) - this.round.startedAt;
+  }
+
+  private pausedView(): View['paused'] {
+    const r = this.round;
+    if (!r || this.pausedAt === null) return null;
+    const offline = r.participants.map((id) => this.get(id)).filter((p): p is Player => !!p && !p.left && !p.connected);
+    return { at: this.pausedAt, offline: offline.map((p) => p.nickname) };
+  }
+
+  /** 這局進行中、沒離開的隊員裡，一半以上離線＝要暫停。 */
+  private shouldPause(): boolean {
+    const r = this.round;
+    if (!r || r.game.phase === 'settled' || r.game.phase === 'ended') return false;
+    const team = r.participants.map((id) => this.get(id)).filter((p): p is Player => !!p && !p.left);
+    if (!team.length) return false;
+    const offline = team.filter((p) => !p.connected).length;
+    return offline * 2 >= team.length;
+  }
+
+  /** 依目前在線人數開始或結束暫停；結束時把開局時間往後挪，局內時間就接得上。回傳是否有變化。 */
+  updatePause(): boolean {
+    const want = this.shouldPause();
+    if (want && this.pausedAt === null) {
+      this.pausedAt = this.now();
+      return true;
+    }
+    if (!want && this.pausedAt !== null) {
+      if (this.round) this.round.startedAt += this.now() - this.pausedAt;
+      this.pausedAt = null;
+      return true;
+    }
+    return false;
   }
 
   /** 定時呼叫；回傳狀態是否有需要廣播的變化。 */
   tick(): boolean {
+    const pauseChanged = this.updatePause();
     const r = this.round;
-    if (!r || r.game.phase === 'settled' || r.game.phase === 'ended') return false;
+    if (!r || r.game.phase === 'settled' || r.game.phase === 'ended') return pauseChanged;
+    if (this.pausedAt !== null) return pauseChanged;
     r.game = apply(r.game, { type: 'tick', at: this.elapsed() });
     if (r.proposal) this.settleVote();
     const sig = this.signature();
-    if (sig === this.lastSig) return false;
+    if (sig === this.lastSig) return pauseChanged;
     this.lastSig = sig;
     return true;
   }
@@ -501,18 +552,82 @@ export class Room {
   }
 
   /**
+   * 訊息去重（act 的 id、其他訊息的 mid 共用）：第一次看到回傳 false 並記下；看過回傳 true。
+   * 每人只記最近 300 個。
+   */
+  seen(pid: string, msgId: string): boolean {
+    const p = this.get(pid);
+    if (!p) return false;
+    if (p.seenActs.includes(msgId)) return true;
+    p.seenActs.push(msgId);
+    if (p.seenActs.length > 300) p.seenActs.shift();
+    return false;
+  }
+
+  // ---------- 存檔（2026-11-22 連線加強：伺服器重啟、重新部署後房間還在） ----------
+
+  /** 整個房間轉成文字（存進 Durable Object 的 SQLite）。 */
+  serialize(): string {
+    return JSON.stringify(
+      {
+        v: 1,
+        savedAt: this.now(),
+        code: this.code,
+        players: this.players,
+        hostId: this.hostId,
+        round: this.round,
+        roundsPlayed: this.roundsPlayed,
+        lastActivity: this.lastActivity,
+        pausedAt: this.pausedAt,
+        introMs: this.introMs,
+        sweepWarningMs: this.sweepWarningMs ?? null,
+        practice: this.practice,
+        voteMs: this.voteMs,
+        usedCards: this.usedCards,
+        lastTonight: this.lastTonight,
+        forceCards: this.forceCards,
+      },
+      replacer,
+    );
+  }
+
+  /**
+   * 從存檔讀回。讀回時大家都算離線（連線都斷了），等各自 resume；
+   * 進行中的局因此會先暫停（DECISIONS 19），大家連回來再繼續。
+   */
+  static restore(json: string, opts: { now?: () => number } = {}): Room {
+    const d = JSON.parse(json, reviver);
+    if (d.v !== 1) throw new Error('看不懂的房間存檔版本');
+    const room = new Room(d.code, { now: opts.now, introMs: d.introMs, sweepWarningMs: d.sweepWarningMs ?? undefined, voteMs: d.voteMs, practice: d.practice });
+    room.players = d.players;
+    room.hostId = d.hostId;
+    room.round = d.round;
+    room.roundsPlayed = d.roundsPlayed;
+    room.lastActivity = d.lastActivity;
+    room.pausedAt = d.pausedAt;
+    // 存檔之後到讀回之前（伺服器重啟的那段時間）也算暫停：倒數從最後存檔那一刻接著走
+    const live = room.round && room.round.game.phase !== 'settled' && room.round.game.phase !== 'ended';
+    if (room.pausedAt === null && live && typeof d.savedAt === 'number') room.pausedAt = d.savedAt;
+    room.usedCards = d.usedCards ?? [];
+    room.lastTonight = d.lastTonight ?? null;
+    room.forceCards = d.forceCards ?? null;
+    for (const p of room.players) p.connected = false;
+    room.updatePause();
+    return room;
+  }
+
+  /**
    * 執行一個動作。重複送出（同一個 id）會被忽略並回傳 null；
    * 被規則擋下時回傳 Rejection（原因＋下一步）。
    */
   act(pid: string, actId: string, a: Action): Rejection | null {
     const p = this.get(pid);
     if (!p) throw new Error('找不到玩家');
-    if (p.seenActs.includes(actId)) return null;
-    p.seenActs.push(actId);
-    if (p.seenActs.length > 300) p.seenActs.shift();
+    if (this.seen(pid, actId)) return null;
     const r = this.round;
     if (!r) throw new Error('還沒開始');
     if (!this.permitted(pid, a)) throw new Error('這不是你負責的操作');
+    if (this.pausedAt !== null) return { action: a.type, reasons: [{ code: 'PAUSED', text: '一半以上的隊友斷線了，時間先停住：等大家連回來再繼續' }] };
     if (VOTED.includes(a.type)) return this.propose(pid, a);
     return this.execute(pid, a);
   }
@@ -575,7 +690,13 @@ export class Room {
     return null;
   }
 
-  /** 投票。重複投同一個表決會被忽略；表決已經結束會丟錯誤。 */
+  /** 這局正在進行、沒有暫停（伺服器定時存檔用）。 */
+  isLive(): boolean {
+    const g = this.round?.game;
+    return !!g && g.phase !== 'settled' && g.phase !== 'ended' && this.pausedAt === null;
+  }
+
+  /** 投票。重複投同一個表決會被忽略；表決已經結束會丟錯誤。暫停中的票先記著，恢復後才結算。 */
   vote(pid: string, proposalId: string, choice: VoteChoice): void {
     const r = this.round;
     const p = r?.proposal;
@@ -585,7 +706,8 @@ export class Room {
     if (p.votes.has(pid)) return;
     p.votes.set(pid, choice);
     this.touch();
-    this.settleVote();
+    // 暫停中不結算（審查 #29 建議 1）：票先記著，大家連回來 tick 時才看結果、才執行
+    if (this.pausedAt === null) this.settleVote();
   }
 
   /** 表決還能不能成立（階段變了、提案的人離線＝取消）。 */
@@ -779,6 +901,7 @@ export class Room {
       joinUrl,
       qrSvg: phase === 'lobby' || phase === 'intro' ? qrSvg : null,
       serverNow: this.now(),
+      paused: this.pausedView(),
       me: {
         id: me.id,
         nickname: me.nickname,

@@ -1,6 +1,7 @@
 // Cloudflare Workers 入口：靜態檔交給 Assets，/ws 交給唯一的 GameHub Durable Object（ADR-0005）。
 import { Hub, type Conn } from '../server/hub.ts';
 import { SqlStore } from '../server/leaderboard.ts';
+import { SqlRoomStore } from '../server/roomstore.ts';
 
 export interface Env {
   HUB: DurableObjectNamespace;
@@ -19,6 +20,7 @@ export default {
 /**
  * 所有房間都在這一個物件的記憶體裡；只要還有人連線就會一直活著。
  * 排行榜存在這個物件的 SQLite（wrangler.toml 的 new_sqlite_classes）：物件被回收、重新部署後仍在（ADR-0008）。
+ * 房間也存進同一個 SQLite（ADR-0010）：物件重啟後讀回，大家重連就回到原本那一局。
  */
 export class GameHub implements DurableObject {
   private hub: Hub;
@@ -27,7 +29,8 @@ export class GameHub implements DurableObject {
 
   constructor(state: DurableObjectState, _env: Env) {
     const sql = state.storage.sql;
-    this.hub = new Hub({ leaderboard: new SqlStore((query, ...params) => sql.exec(query, ...params).toArray()) });
+    const exec = (query: string, ...params: (string | number | null)[]) => sql.exec(query, ...params).toArray();
+    this.hub = new Hub({ leaderboard: new SqlStore(exec), store: new SqlRoomStore(exec) });
   }
 
   async fetch(req: Request): Promise<Response> {
@@ -40,16 +43,26 @@ export class GameHub implements DurableObject {
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
     server.accept();
-    const conn: Conn = { send: (d) => server.send(d), origin: new URL(req.url).origin, roomCode: null, playerId: null };
+    const conn: Conn = {
+      send: (d) => server.send(d),
+      close: () => server.close(4000, 'heartbeat timeout'),
+      origin: new URL(req.url).origin,
+      roomCode: null,
+      playerId: null,
+    };
     this.hub.open(conn);
     server.addEventListener('message', (e) => {
       this.hub.message(conn, typeof e.data === 'string' ? e.data : new TextDecoder().decode(e.data as ArrayBuffer));
     });
     const closed = () => {
       this.hub.close(conn);
-      if (this.hub.conns.size === 0 && this.timer) {
-        clearInterval(this.timer);
-        this.timer = null;
+      if (this.hub.conns.size === 0) {
+        // 最後一個人走了：物件可能很快被回收，先把房間存好
+        this.hub.flush(true);
+        if (this.timer) {
+          clearInterval(this.timer);
+          this.timer = null;
+        }
       }
     };
     server.addEventListener('close', closed);
