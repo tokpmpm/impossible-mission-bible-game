@@ -77,12 +77,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   if ((await countPages('[data-action=sail]')) !== 1) errs.push('「開船」不只在房主手機上');
   if (await host.$('[data-cd="round"]')) errs.push('上船時就開始倒數');
   await host.click('[data-action=sail]');
-  // 開局：起風卡自動翻開
-  await host.waitForSelector('.card-ovl');
-  await shot(host, '03-card-a');
-  for (const p of pages) { await p.waitForSelector('.card-ovl'); await p.click('[data-action=card-close]'); }
-  await sleep(200);
+  // 首局：起風卡不在開局蓋上來，認識隊友結束時才翻（docs/17 問題 1-C）
+  await sleep(600);
+  if ((await countPages('.card-ovl')) !== 0) errs.push('首局起風卡在開局就蓋上來了');
   for (let i = 0; i < N; i++) await shot(pages[i], `04-intro-p${i}`);
+  // 雙向任務條：至少有一支手機寫「等一下 X 會來找你」
+  if ((await countPages('.task-bar .tk-in')) === 0) errs.push('沒有任何手機顯示「等一下 某某 會來找你」');
 
   const findPage = async (sel) => {
     for (const p of pages) if (await p.$(sel + ':not([disabled])')) return p;
@@ -170,7 +170,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const sup = await findPage('.tray');
   const cap = await findPage('[data-action=lock]');
   // 前 60 秒（測試時縮短）不能決定
-  await cap.click('[data-action=lock]');
+  await cap.$eval('[data-action=lock]', (el) => el.click()); // aria-disabled（還在認識隊友）：Playwright 不肯點，直接觸發
   await cap.waitForSelector('.bar-note.rejected', { timeout: 5000 });
   await shot(cap, '05-lock-too-early');
   await cap.click('[data-action=note-close]');
@@ -185,6 +185,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await shot(sup, '06-thrown');
   for (let i = 0; i < N; i++) await shot(pages[i], `07-plan-p${i}`);
   await cap.waitForSelector('.status-line[data-lock-open="1"]', { timeout: 75000 });
+  // 認識隊友結束：起風卡翻開
+  await host.waitForSelector('.card-ovl', { timeout: 5000 });
+  await shot(host, '03-card-a');
+  for (const p of pages) { await p.waitForSelector('.card-ovl'); await p.click('[data-action=card-close]'); }
+  await sleep(200);
   // 表決：有一個人按「等一下」→ 沒通過（所有手機看到結果、不點名）；再提一次，大家同意
   await cap.click('[data-action=lock]');
   const objector = pages.find((p) => p !== cap);
@@ -258,8 +263,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   }
   await doRepair('');
   await pages[0].waitForSelector('.blackout', { state: 'detached', timeout: 15000 });
+  // 章節卡「第十四天夜裡」先出現（不擋操作），播完才翻風暴卡
+  await pages[0].waitForSelector('.chapter-ovl.night', { timeout: 3000 });
+  await shot(pages[0], '10c-chapter-night');
   // 風暴卡翻開
-  for (const p of pages) { await p.waitForSelector('.card-ovl', { timeout: 5000 }); }
+  for (const p of pages) { await p.waitForSelector('.card-ovl', { timeout: 10000 }); }
   await shot(pages[0], '11-card-b');
   for (const p of pages) await p.click('[data-action=card-close]');
   await sleep(300);
@@ -332,7 +340,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await pages[0].waitForSelector('.blackout', { timeout: 15000 });
   await doRepair('r2-');
   await pages[0].waitForSelector('.blackout', { state: 'detached', timeout: 15000 });
-  for (const p of pages) { await p.waitForSelector('.card-ovl', { timeout: 5000 }); await p.click('[data-action=card-close]'); }
+  for (const p of pages) { await p.waitForSelector('.card-ovl', { timeout: 10000 }); await p.click('[data-action=card-close]'); }
   await sleep(300);
   const swept = await pages[0].$('.banner.sweep');
   const sweptText = swept ? await swept.textContent() : '';
@@ -352,7 +360,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     provides[id] = via ? (await via.getAttribute('title')).replace('今晚靠', '') : null;
     litNow[id] = /\b(lit|pending)\b/.test(await el.getAttribute('class'));
   }
-  const bCard = await pages[0].getAttribute('.card-chip:nth-child(2)', 'data-card');
+  // 故事卡小卡只在全船狀態裡（非管倉、船長預設收起），找看得到的那支手機
+  let bCard = null;
+  for (const p of pages) if (!bCard && (await p.$('.card-chip[data-card^="B"]'))) bCard = await p.getAttribute('.card-chip[data-card^="B"]', 'data-card');
   // 卡片已顧好的事：東西不在船上了卻亮著（A4 船身、B5 天亮）
   const cardDone = Object.keys(provides).filter((n) => weights[provides[n]] === undefined && litNow[n]);
   const todo = Object.keys(provides).filter((n) => !cardDone.includes(n));

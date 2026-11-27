@@ -78,6 +78,50 @@ async function shot(p, name, full = false) {
 }
 
 const SCENES = {
+  async 'onboarding-rest'() {
+    // 5 人局（背包：外衣、乾果、一首歌）：被找的人看到誰會來、主畫面收合、章節卡、乾果出場、火堆旁、第二局前輩
+    const t = await table(5, 390, { 1: 'coat', 2: 'nuts', 3: 'song' });
+    await t.pages[0].click('[data-action=start]');
+    await sleep(800);
+    await t.pages[0].click('[data-action=sail]');
+    await sleep(1000);
+    const target = t.room.players.find((p) => t.room.view(p.id, '', null).task?.incoming?.length);
+    await shot(t.pageOf(target.id), '01-taskbar-incoming', true);
+    await shot(t.pageOf(t.who('medic')), '02-main-folded-medic', true);
+    for (const item of ['麥子', '器具', '小船']) t.act(t.who('supply'), { type: 'setItem', item, on: false });
+    await t.jump(61_000);
+    await t.closeCards();
+    t.act(t.who('nav'), { type: 'lock' });
+    await t.agree();
+    await sleep(300);
+    await shot(t.pageOf(t.who('eng')), '03-chapter-dark');
+    await sleep(3200);
+    const eng = t.who('eng');
+    for (const sl of t.room.round.game.repair.slots) {
+      await sleep(1200);
+      t.act(eng, { type: 'repairPick', option: sl.answer });
+    }
+    await sleep(700);
+    await shot(t.pageOf(t.who('comms')), '04-chapter-night');
+    await sleep(4000);
+    await t.closeCards();
+    t.act(t.who('comms'), { type: 'use', use: '吃飯' });
+    await t.agree();
+    await sleep(900);
+    await shot(t.pageOf(t.who('supply')), '05-meal-nuts');
+    await sleep(3000);
+    t.act(t.who('nav'), { type: 'depart' });
+    await t.agree();
+    await sleep(6500);
+    const rp = t.pages[1];
+    await rp.evaluate(() => document.querySelector('.fireside')?.scrollIntoView());
+    await shot(rp, '06-result-fireside');
+    await shot(rp, '06b-result-full', true);
+    await t.pages[0].click('[data-action=next]');
+    await sleep(1200);
+    const comms2 = t.who('comms');
+    await shot(t.pageOf(comms2), '07-round2-rolecard-prev');
+  },
   async 'onboarding-core'() {
     // 6 人局：上船角色卡（醫生沒有按鈕、船長有按鈕）、三格動畫、開局任務條＋離天亮、夜裡錨住船／出發前、角色卡浮窗
     const t = await table(6, 390);

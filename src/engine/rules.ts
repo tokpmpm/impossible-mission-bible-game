@@ -27,7 +27,7 @@ export type RejectReason =
 
 export const REASON_TEXT: Record<RejectReason, string> = {
   NOT_POWERED: '還在黑暗中',
-  WAIT_DAWN: '還在等天亮',
+  WAIT_DAWN: '還要等天色亮一點',
   OVERWEIGHT: '超重',
 };
 

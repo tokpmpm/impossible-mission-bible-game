@@ -137,17 +137,26 @@ export interface View {
     /** 天亮前用掉的那一件（所有手機播動畫）；at 為伺服器時間。 */
     used: null | { id: UseId; item: ItemId; at: number; by: string; mine: boolean };
     dawnAt: number | null; // 伺服器時間：幾點起可以衝向海灘
+    /** 帶乾果上船的人（吃飯動畫時出場）；沒人帶＝null。 */
+    nutsBy: string | null;
     lastRejection: null | { at: number; action: Action['type']; reasons: string[] };
   };
   /** 我這局的任務（一句）：給沒有按鈕的人知道自己要做什麼。 */
   myTask: string | null;
   /** 開局下一步：例 { verb: '問', nickname: '大衛', text: '糧食要留嗎？' } */
-  nextSteps: { verb: '問' | '告訴' | '找'; nickname: string; text: string; roleId: RoleId; roleName: string }[];
+  nextSteps: { verb: '問' | '告訴' | '找'; nickname: string; text: string; roleId: RoleId; roleName: string; toId: string }[];
   /** 任務條：你現在要做的一件事（合併 myTask 與下一步；docs/17 問題 2）。text＝自己的事；go＝去找誰。 */
-  task: null | { text: string | null; go: null | { verb: '問' | '告訴' | '找'; nickname: string; roleId: RoleId; roleName: string; text: string } };
+  task: null | {
+    text: string | null;
+    go: null | { verb: '問' | '告訴' | '找'; nickname: string; roleId: RoleId; roleName: string; text: string };
+    /** 誰等一下會來找我（雙向任務條）。 */
+    incoming: { nickname: string; roleId: RoleId; roleName: string }[];
+  };
   /** 角色卡（上船時大張顯示，之後點頂端角色可再看）。 */
   roleCard: null | {
     roles: { id: RoleId; name: string; line: string; who: string; ref: string | null; note: string | null; button: string | null; when: string; know: string }[];
+    /** 第二局起：上一局拿同一個職能的人。 */
+    prev: { roleName: string; nickname: string }[];
   };
   /** 我能做的操作（只有 true 的才畫按鈕） */
   can: {
@@ -203,6 +212,8 @@ export interface View {
     lit: Record<NeedId, boolean>;
     cause: 'depart' | 'time_up' | 'ended';
     moments: MomentView[];
+    /** 火堆旁：最多 3 件剛才真的發生的事（有名字）＋徒 28:2；bag＝背包物品的出場（遊戲編的，分開顯示）。 */
+    fireside: { verse: { text: string; ref: string }; lines: string[]; bag: string[] };
     bible: string; // 「經文裡」對照
     tonightLine: string; // 「今晚靠的是……」（不指名誰沒說）
     verse: { text: string; ref: string };
