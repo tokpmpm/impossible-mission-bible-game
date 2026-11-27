@@ -30,7 +30,7 @@ function proxy(port, base, jitter) {
   return st;
 }
 (async () => {
-  const server = process.env.E2E_EXTERNAL ? null : spawn(process.execPath, ['src/server/main.ts'], { cwd: path.join(__dirname, '..'), env: { ...process.env, PORT: String(PORT), INTRO_MS: '0' }, stdio: 'ignore' });
+  const server = process.env.E2E_EXTERNAL ? null : spawn(process.execPath, ['src/server/main.ts'], { cwd: path.join(__dirname, '..'), env: { ...process.env, PORT: String(PORT), INTRO_MS: '0', BOARDING_MS: process.env.BOARDING_MS || '0' }, stdio: 'ignore' });
   process.on('exit', () => server?.kill());
   for (let i = 0; i < 100; i++) { try { if ((await fetch(`http://localhost:${PORT}/healthz`)).ok) break; } catch {} await sleep(100); }
   const kinds = [['iPhone 13', 'iPhone 甲'], ['Pixel 7', 'Android 乙'], ['iPhone SE', 'iPhone 丙'], ['Galaxy S9+', 'Android 丁']];

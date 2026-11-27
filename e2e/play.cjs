@@ -66,6 +66,17 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   if (!bags.includes('油燈') || !bags.includes('外衣')) errs.push('大廳名單沒有顯示背包物品：' + bags.trim().slice(0, 80));
   await shot(host, '02-lobby-host');
   await host.click('[data-action=start]');
+  // 上船（不計時，DECISIONS 20）：每支手機先看到自己的角色卡；房主可以提早開船
+  for (const p of pages) await p.waitForSelector('.role-card', { timeout: 5000 });
+  for (let i = 0; i < N; i++) await shot(pages[i], `02b-boarding-rolecard-p${i}`);
+  for (const p of pages) {
+    if (!(await p.$('.role-card .rc-who'))) errs.push('角色卡沒有「故事裡」那一行');
+    if (!(await p.$('.role-card .rc-now'))) errs.push('角色卡沒有「現在要做的一件事」');
+    if (await p.$('.tray, [data-action=lock]')) errs.push('上船時就出現了操作按鈕');
+  }
+  if ((await countPages('[data-action=sail]')) !== 1) errs.push('「開船」不只在房主手機上');
+  if (await host.$('[data-cd="round"]')) errs.push('上船時就開始倒數');
+  await host.click('[data-action=sail]');
   // 開局：起風卡自動翻開
   await host.waitForSelector('.card-ovl');
   await shot(host, '03-card-a');
@@ -292,6 +303,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await sleep(1500);
   await shot(pages[2], '16-reload-resume');
   await host.click('[data-action=next]');
+  // 第二局起上船較短（只有角色卡）；房主開船
+  await host.waitForSelector('[data-action=sail]', { timeout: 5000 });
+  await host.click('[data-action=sail]');
   // ── 第二局：新的故事卡與見聞、職能輪替；風暴捲走 ──
   await host.waitForSelector('.card-ovl');
   await shot(host, 'r2-03-card-a');

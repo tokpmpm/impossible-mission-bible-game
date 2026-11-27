@@ -83,7 +83,7 @@ async function resume(url: string, old: Phone): Promise<Phone> {
 }
 
 test('心跳逾時：太久沒送任何訊息的連線會被伺服器關掉並標成離線；有送心跳的不會', async () => {
-  const srv = await startServer({ port: 0, publicUrl: 'http://test.local', tickMs: 20, staleMs: 400 });
+  const srv = await startServer({ boardingMs: 0, port: 0, publicUrl: 'http://test.local', tickMs: 20, staleMs: 400 });
   const { host, phones } = await room(srv, 3, 100);
   try {
     const quiet = phones[2];
@@ -99,7 +99,7 @@ test('心跳逾時：太久沒送任何訊息的連線會被伺服器關掉並�
 });
 
 test('訊息去重：同一個 mid 重送只處理一次，每次都回 ack', async () => {
-  const srv = await startServer({ port: 0, publicUrl: 'http://test.local', tickMs: 20 });
+  const srv = await startServer({ boardingMs: 0, port: 0, publicUrl: 'http://test.local', tickMs: 20 });
   const { host, phones } = await room(srv, 3);
   try {
     host.send({ t: 'start', mid: 'm-start' });
@@ -118,7 +118,7 @@ test('訊息去重：同一個 mid 重送只處理一次，每次都回 ack', as
 });
 
 test('房間不見：resume 找不到房間回 code ROOM_GONE', async () => {
-  const srv = await startServer({ port: 0, publicUrl: 'http://test.local', tickMs: 20 });
+  const srv = await startServer({ boardingMs: 0, port: 0, publicUrl: 'http://test.local', tickMs: 20 });
   try {
     const p = await new Phone(`ws://localhost:${srv.port}/ws`).open();
     p.send({ t: 'resume', playerId: 'nobody', token: 'x' });
@@ -131,7 +131,7 @@ test('房間不見：resume 找不到房間回 code ROOM_GONE', async () => {
 });
 
 test('暫停（DECISIONS 19）：一半以上隊員離線時倒數停住、動作被擋；回來後從停住的地方繼續', async () => {
-  const srv = await startServer({ port: 0, publicUrl: 'http://test.local', tickMs: 20, introMs: 0 });
+  const srv = await startServer({ boardingMs: 0, port: 0, publicUrl: 'http://test.local', tickMs: 20, introMs: 0 });
   const { url, host, phones } = await room(srv, 4);
   try {
     host.send({ t: 'start' });
@@ -168,7 +168,7 @@ test('暫停（DECISIONS 19）：一半以上隊員離線時倒數停住、動�
 
 test('存檔：伺服器重啟後讀回房間，大家重連回到同一局、同一個職能；重連前這局是暫停的', async () => {
   const store = new MemoryRoomStore();
-  const srv1 = await startServer({ port: 0, publicUrl: 'http://test.local', tickMs: 20, introMs: 0, store });
+  const srv1 = await startServer({ boardingMs: 0, port: 0, publicUrl: 'http://test.local', tickMs: 20, introMs: 0, store });
   const { host, phones } = await room(srv1, 3);
   host.send({ t: 'start' });
   await host.until(() => host.view?.phase === 'planning');
@@ -181,7 +181,7 @@ test('存檔：伺服器重啟後讀回房間，大家重連回到同一局、�
   await srv1.close(); // 關機前會把房間存好
   assert.ok(store.rows.has(code), '房間有存檔');
 
-  const srv2 = await startServer({ port: 0, publicUrl: 'http://test.local', tickMs: 20, introMs: 0, store });
+  const srv2 = await startServer({ boardingMs: 0, port: 0, publicUrl: 'http://test.local', tickMs: 20, introMs: 0, store });
   try {
     const url = `ws://localhost:${srv2.port}/ws`;
     const restored = srv2.rooms.get(code) as Room;

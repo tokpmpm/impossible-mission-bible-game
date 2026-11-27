@@ -13,7 +13,11 @@ const PREFS = [
   { value: 'song', label: '一首歌', note: '' },
 ];
 const PREF_OF = Object.fromEntries(PREFS.map((p) => [p.value, p]));
-const NEED_LABEL = { 力氣: '力氣', 船身: '船身', 天亮: '等天亮' };
+// 「天亮」只剩一個意思：倒數走完、衝向海灘的時刻（DECISIONS 20）；錨顧的那件事叫「錨住船」
+const NEED_LABEL = { 力氣: '力氣', 船身: '船身', 天亮: '錨住船' };
+/** 上船：角色卡先顯示幾毫秒，首局接著三格故事動畫（各 10 秒）。 */
+const ROLE_CARD_MS = 8000;
+const STORY_FRAME_MS = 10000;
 
 const root = document.getElementById('app');
 const toastEl = document.getElementById('toast');
@@ -48,6 +52,10 @@ const ui = {
   holding: null,
   seenWrong: null,
   wrongUntil: 0,
+  /** 上船：在第幾局選了「回到角色卡」（不看動畫）；目前畫的是哪一段；角色卡浮窗。 */
+  boardingSkip: null,
+  boardingShown: null,
+  roleCardOpen: false,
   /** 我已經投過票的表決（本地鎖定，docs/15 M1）。 */
   votedFor: null,
   /** 登記上榜送出的時間（8 秒逾時）。 */
@@ -87,7 +95,7 @@ const ui = {
   board: null, // null＝沒開；{ loading, entries, error }
 };
 
-const ACTION_LABEL = { lock: '決定好了', depart: '衝向海灘', use: '天亮前要做的事', setItem: '丟東西' };
+const ACTION_LABEL = { lock: '決定好了', depart: '衝向海灘', use: '出發前要做的事', setItem: '丟東西' };
 const VOTE_CHOICE = { yes: '同意', wait: '等一下', info: '我有情報' };
 const USE_DONE = { 吃飯: '召集大家吃了', 拋錨: '從船尾拋下了', 捆船底: '用來捆綁船底：' };
 const USE_REF = { 吃飯: '徒 27:33–36', 拋錨: '徒 27:29', 捆船底: '徒 27:17' };
@@ -316,8 +324,14 @@ function nickOf(v, idOrName) {
 }
 
 function roleBadge(v) {
+  // 角色放大，點一下再看一次角色卡（docs/17 問題 3）
+  const clickable = !!v.roleCard && v.phase !== 'lobby';
   return v.me.roles
-    .map((r) => `<span class="role-chip">${art.role(r.id, 22)}<span>${esc(r.name)}</span></span>`)
+    .map((r) =>
+      clickable
+        ? `<button class="role-chip big" data-action="role-card" aria-label="看我的角色卡：${esc(r.name)}">${art.role(r.id, 26)}<span>${esc(r.name)}</span></button>`
+        : `<span class="role-chip">${art.role(r.id, 22)}<span>${esc(r.name)}</span></span>`,
+    )
     .join('');
 }
 
@@ -328,8 +342,9 @@ function renderTopbar(v) {
         <button class="btn small danger" data-action="leave-yes">離開</button></div>`
     : `<button class="btn small ghost" data-action="leave" aria-label="離開房間">離開</button>`;
   const live = v.round && ['intro', 'planning', 'replanning'].includes(v.phase);
+  // 一個時鐘、有故事意義：8 分鐘倒數就是「離天亮」，走完＝天亮＝衝向海灘（docs/17 問題 4）
   const cd = live
-    ? `<div class="tb-cd" role="timer" aria-label="剩下時間"><span aria-hidden="true">⏳</span><strong data-cd="round">${mmss(v.round.startedAt + v.round.timeLimitMs - now())}</strong></div>`
+    ? `<div class="tb-cd dawn-clock" role="timer" aria-label="離天亮還有"><span class="tb-cd-k">🌅 離天亮</span><strong data-cd="round">${mmss(v.round.startedAt + v.round.timeLimitMs - now())}</strong></div>`
     : '';
   return `<header class="topbar ${live ? 'live' : ''}">
     <div class="tb-room"><span class="tb-label">房號</span><strong>${esc(v.code)}</strong></div>
@@ -616,7 +631,7 @@ function tonightCards(v) {
     .join('')}</section>`;
 }
 
-/** 天亮前的三種用掉：只有今晚做得到、輪到自己的人看得到按鈕；全隊只能做一件。 */
+/** 出發前的三種用掉：只有今晚做得到、輪到自己的人看得到按鈕；全隊只能做一件。 */
 function useCards(v) {
   if (!v.can.uses || !v.can.uses.length) return '';
   const busy = !!v.vote;
@@ -625,7 +640,7 @@ function useCards(v) {
       <button class="btn secondary block" data-action="use" data-use="${esc(u.id)}" ${u.ready && !busy ? '' : 'disabled'}>${esc(u.icon)} ${forceLabel(v, 'use:' + u.id, u.label)}</button>
       <p class="muted small">${u.ready ? `用掉${esc(u.item)}，${esc(NEED_LABEL[u.need])}就顧好了（${esc(u.ref)}）` : `${esc(u.item)}不在船上：先請管倉撈回來`}</p></div></div>`)
     .join('');
-  return `<section class="use-card"><p class="use-rule">天亮前全隊只來得及做<strong>一件</strong>（吃飯也算）：按下去要大家都同意</p>${btns}</section>`;
+  return `<section class="use-card"><p class="use-rule">出發前全隊只來得及做<strong>一件</strong>（吃飯也算）：按下去要大家都同意</p>${btns}</section>`;
 }
 
 /** 已經 2 次沒通過的動作：按鈕改成「強制執行」（不用再表決）。 */
@@ -690,6 +705,116 @@ function sweepBanner(v) {
   return '';
 }
 
+/** 任務條：每個畫面只有一條「你現在要做的事」，寫出要找的人和他的角色（docs/17 問題 2）。 */
+function taskBar(v) {
+  const t = v.task;
+  if (!t || (!t.text && !t.go)) return '';
+  const go = t.go
+    ? `<span class="tk-go"><span class="ns-verb">去${esc(t.go.verb)}</span> <strong>${esc(t.go.nickname)}</strong><span class="tk-role">（${art.role(t.go.roleId, 18)}${esc(t.go.roleName)}）</span>：${esc(t.go.text)}</span>`
+    : '';
+  const main = t.text ? `<span class="tk-main">${esc(t.text)}</span>` : go;
+  const sub = t.text && go ? `<span class="tk-sub">先${go}</span>` : '';
+  return `<section class="task-bar" aria-label="你現在要做的事"><span class="tk-k">▶ 你現在要做的事</span>${main}${sub}</section>`;
+}
+
+/** 天色條：8 分鐘從深藍走到橘色，小太陽走到底＝天亮（docs/17 問題 4）。 */
+function skyBar(v) {
+  if (!v.round) return '';
+  const p = Math.max(0, Math.min(1, (now() - v.round.startedAt) / v.round.timeLimitMs));
+  return `<div class="skybar" aria-hidden="true"><i data-sky style="width:${(p * 100).toFixed(1)}%"></i><span class="sky-sun" data-sky-sun style="left:${(p * 100).toFixed(1)}%">☀</span></div>`;
+}
+
+// ───────── 上船（倒數前、不計時：角色卡＋首局三格故事動畫；DECISIONS 20） ─────────
+
+function boardingStage(v) {
+  const r = v.round;
+  if (!r) return 'card';
+  const t = now() - (r.startedAt - r.boardingMs);
+  if (!r.firstRound || ui.boardingSkip === r.no || t < ROLE_CARD_MS) return 'card';
+  return 'f' + Math.min(2, Math.floor((t - ROLE_CARD_MS) / STORY_FRAME_MS));
+}
+
+function roleCardHtml(v, opts = {}) {
+  const rc = v.roleCard;
+  if (!rc || !rc.roles.length) return '';
+  const names = rc.roles.map((r) => r.name);
+  const head = names.length > 1 ? `你是 ${esc(names[0])}，也是 ${esc(names[1])}` : `你是 ${esc(names[0])}`;
+  const arts = rc.roles.map((r) => art.role(r.id, rc.roles.length > 1 ? 72 : 96)).join('');
+  const lines = rc.roles.map((r) => `<p class="rc-line">「${esc(r.line)}」</p>`).join('');
+  const who = rc.roles
+    .map((r) => `<p class="rc-who">故事裡：${esc(r.who)}${r.ref ? `<cite>${esc(r.ref)}</cite>` : ''}${r.note ? `<small>（${esc(r.note)}）</small>` : ''}</p>`)
+    .join('');
+  const t = v.task;
+  const now1 = t && (t.go || t.text)
+    ? `<div class="rc-now"><b>現在要做的一件事</b><p>${t.go ? `去${esc(t.go.verb)} <strong>${esc(t.go.nickname)}</strong>（${esc(t.go.roleName)}）：${esc(t.go.text)}` : esc(t.text)}</p></div>`
+    : '';
+  const btns = rc.roles.filter((r) => r.button);
+  const buttons = btns.length
+    ? `<div class="rc-btns"><b>你負責的按鈕</b>${btns
+        .map((r) => `<p><span class="fake-btn" aria-hidden="true">${esc(r.button)}</span><span class="rc-when">${esc(r.when)}才會出現</span></p>`)
+        .join('')}</div>`
+    : `<div class="rc-btns none"><b>你沒有按鈕</b><p>你的情報就是別人缺的那一塊：${esc(rc.roles.map((r) => r.know).join('；'))}</p></div>`;
+  const know = btns.length ? `<p class="rc-know">只有你知道：${esc(rc.roles.map((r) => r.know).join('；'))}</p>` : '';
+  return `<section class="role-card ${opts.overlay ? 'in-ovl' : ''}" aria-label="我的角色卡">
+    <div class="rc-art" aria-hidden="true">${arts}</div>
+    <h1>${head}</h1>${lines}${who}${now1}${buttons}${know}
+  </section>`;
+}
+
+const STORY_FRAMES = [
+  {
+    art: () => art.scene({ sky: 'storm', onDeck: ['糧食', '纜索', '錨', '麥子', '器具', '小船'], afloat: [], load: { weight: 15, cap: 8 }, rock: 'storm' }),
+    h: '風暴要來了，船太重',
+    p: '船上的東西太重，船最多只能載 8。大家一起決定<b>丟什麼、留什麼</b>；每個人只知道一部分，要開口問。',
+    ref: '徒 27:14–15',
+  },
+  {
+    art: () => `<div class="sf-dark">${art.darkness()}<span class="sf-eng">${art.role('eng', 72)}</span></div>`,
+    h: '天會黑一陣子',
+    p: '只有<b>木匠</b>的手機上有補船面板；其他人手上各有一個記號，<b>用說的</b>告訴木匠。',
+    ref: '徒 27:20',
+  },
+  {
+    art: () => art.landing({ lit: { 力氣: true, 船身: true, 天亮: true } }),
+    h: '天亮時，衝向海灘',
+    p: '頂端「🌅 離天亮」倒數走完＝天亮。上岸前顧好三件事中 <b>2 件以上</b>，全船平安上岸。',
+    ref: '徒 27:39–44',
+    extra: () =>
+      `<div class="sf-three">${[['力氣', '要吃飯'], ['船身', '留著繩子'], ['天亮', '留著錨']]
+        .map(([id, how]) => `<span>${art.need(id, true, 40)}<b>${esc(NEED_LABEL[id])}</b><small>${how}</small></span>`)
+        .join('')}</div>`,
+  },
+];
+
+function renderBoarding(v) {
+  const r = v.round;
+  const stage = boardingStage(v);
+  ui.boardingShown = stage;
+  let body;
+  if (stage === 'card') body = roleCardHtml(v);
+  else {
+    const i = Number(stage.slice(1));
+    const f = STORY_FRAMES[i];
+    const dots = STORY_FRAMES.map((_, k) => `<i class="${k === i ? 'on' : ''}"></i>`).join('');
+    body = `<section class="story-frame" data-key="sf${i}">
+      <div class="sf-art" aria-hidden="true">${f.art()}</div>
+      <h1>${esc(f.h)}</h1><p>${f.p}</p>${f.extra ? f.extra() : ''}<cite>${esc(f.ref)}</cite>
+      <div class="sf-dots" aria-hidden="true">${dots}</div>
+    </section>`;
+  }
+  const left = Math.max(0, r.startedAt - now());
+  const skipAnim = r.firstRound && stage !== 'card' ? `<button class="btn ghost small" data-action="boarding-skip">回到我的角色卡</button>` : r.firstRound && ui.boardingSkip === r.no ? `<button class="btn ghost small" data-action="boarding-story">看故事動畫 ▸</button>` : '';
+  const sail = v.me.isHost ? `<button class="btn primary block" data-action="sail">大家都看完了，開船！</button>` : '';
+  return `<main class="screen boarding">
+    <p class="boarding-k">上船中・還沒開始計時</p>
+    ${body}
+    <div class="boarding-foot">
+      <p class="muted small">倒數 <strong data-cd="boarding">${mmss(left)}</strong> 後開始${v.me.isHost ? '' : '（房主可以提早開船）'}</p>
+      ${skipAnim}${sail}
+    </div>
+  </main>`;
+}
+
 function nextSteps(v) {
   if (!v.nextSteps.length || v.phase === 'replanning') return '';
   return `<div class="next-step">${v.nextSteps
@@ -711,7 +836,7 @@ function renderShip(v) {
   // 表決中：真的 disabled（連點不送出，docs/15 M1）；認識隊友時間只用 aria-disabled，按了會說還剩幾秒
   if (v.can.lock) button = `<button class="btn primary block big" data-action="lock" ${v.vote ? 'disabled aria-disabled="true"' : lockOpen(v) ? '' : 'aria-disabled="true"'}>${forceLabel(v, 'lock', '決定好了')}</button>`;
   if (v.can.depart) button = `<button class="btn primary block big" data-action="depart" ${v.vote ? 'disabled aria-disabled="true"' : ''}>${forceLabel(v, 'depart', '衝向海灘')}</button>`;
-  const task = v.myTask ? `<p class="my-task">${esc(v.myTask)}</p>` : '';
+  const task = taskBar(v);
   return `<main class="screen ship ${button ? 'has-bar' : ''}">
     <div class="ship-meta">${loadGauge(s)}${needsRow(v)}</div>
     ${cardChips(v)}
@@ -720,7 +845,6 @@ function renderShip(v) {
     ${useCards(v)}
     ${v.can.items ? itemTray(v) : ''}
     ${task}
-    ${nextSteps(v)}
     ${tonightCards(v)}
     <section class="clues" aria-label="你的線索">${clueCards(v)}</section>
     <button class="btn ghost small zoom-btn" data-action="zoom">放大給隊友看</button>
@@ -1125,6 +1249,9 @@ function overlayHtml(v) {
     const c = [v.cards.a, v.cards.b].find((x) => x && x.id === ui.cardOpen);
     if (c) return cardOverlay(c, c.deck === 'A' ? '起風時發生的事' : '風暴中發生的事');
   }
+  if (ui.roleCardOpen && v.roleCard && v.phase !== 'boarding') {
+    return `<div class="ovl card-ovl" role="dialog" aria-modal="true" aria-label="我的角色卡">${roleCardHtml(v, { overlay: true })}<button class="btn primary block rc-close" data-action="role-card-close">知道了</button></div>`;
+  }
   return '';
 }
 
@@ -1135,6 +1262,7 @@ function overlayKey(v) {
   if (ui.mealAt && Date.now() - ui.mealAt < MEAL_MS) return 'meal:' + ui.mealAt;
   if (ui.useAt && ui.useKind !== '吃飯' && Date.now() - ui.useAt < MEAL_MS) return 'use:' + ui.useAt;
   if (ui.cardOpen && [v.cards.a, v.cards.b].some((x) => x && x.id === ui.cardOpen)) return 'card:' + ui.cardOpen;
+  if (ui.roleCardOpen && v.roleCard && v.phase !== 'boarding') return 'role:' + JSON.stringify(v.roleCard) + JSON.stringify(v.task);
   return '';
 }
 
@@ -1248,13 +1376,17 @@ function render() {
         hud = renderTopbar(v);
         html = renderLobby(v);
         break;
+      case 'boarding':
+        hud = renderTopbar(v);
+        html = renderBoarding(v);
+        break;
       case 'intro':
       case 'planning':
       case 'replanning':
         {
           const opts = sceneOpts(v);
           hudKey = renderTopbar(v).replace(/data-cd="round">[^<]*/, '') + JSON.stringify(opts) + storyLine(v);
-          if (hudKey !== lastHud) hud = `${renderTopbar(v)}<div class="stage">${art.scene(opts)}${storyLine(v)}</div>`;
+          if (hudKey !== lastHud) hud = `${renderTopbar(v)}${skyBar(v)}<div class="stage">${art.scene(opts)}${storyLine(v)}</div>`;
         }
         html = renderShip(v);
         break;
@@ -1322,6 +1454,8 @@ setInterval(() => {
     else if (k === 'sweep' && v.ship && v.ship.sweepWarning) {
       el.textContent = String(Math.max(0, Math.ceil((v.ship.sweepWarning.stormAt - now()) / 1000)));
       continue;
+    } else if (k === 'boarding' && v.round) {
+      ms = v.round.startedAt - now();
     } else if (k === 'panel-lock' && v.repair && v.repair.lockedUntil) {
       el.textContent = String(Math.max(1, Math.ceil((v.repair.lockedUntil - now()) / 1000)));
       continue;
@@ -1336,6 +1470,14 @@ setInterval(() => {
   }
   let redraw = false;
   if (v.round && ui.lockOpen === false && lockOpen(v)) redraw = true;
+  // 上船：角色卡 → 故事動畫各格，時間到換畫面
+  if (v.phase === 'boarding' && boardingStage(v) !== ui.boardingShown) redraw = true;
+  // 天色條：跟著倒數走
+  if (v.round) {
+    const p = (Math.max(0, Math.min(1, (now() - v.round.startedAt) / v.round.timeLimitMs)) * 100).toFixed(1) + '%';
+    for (const el of root.querySelectorAll('[data-sky]')) el.style.width = p;
+    for (const el of root.querySelectorAll('[data-sky-sun]')) el.style.left = p;
+  }
   if (v.ship && v.ship.dawnAt && now() >= v.ship.dawnAt && root.querySelector('[data-cd="dawn"]')) redraw = true;
   if (ui.revealAt && Date.now() - ui.revealAt >= REVEAL_MS) {
     ui.revealAt = 0;
@@ -1513,6 +1655,25 @@ document.addEventListener('click', (e) => {
       break;
     case 'use':
       conn.act({ type: 'use', use: el.getAttribute('data-use') });
+      break;
+    case 'sail':
+      conn.send({ t: 'sail' });
+      break;
+    case 'boarding-skip':
+      ui.boardingSkip = v && v.round ? v.round.no : null;
+      render();
+      break;
+    case 'boarding-story':
+      ui.boardingSkip = null;
+      render();
+      break;
+    case 'role-card':
+      ui.roleCardOpen = !ui.roleCardOpen;
+      render();
+      break;
+    case 'role-card-close':
+      ui.roleCardOpen = false;
+      render();
       break;
     case 'vote':
       if (ui.votedFor === el.getAttribute('data-vote')) break;

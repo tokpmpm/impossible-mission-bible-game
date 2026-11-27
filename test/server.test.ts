@@ -64,7 +64,7 @@ class Phone {
 // sweepWarningMs：捲走前提醒縮成 300 毫秒（正式 10 秒），測試不用真的等
 // voteMs：表決「沒回應算同意」縮成 60 毫秒（正式 10 秒）；表決本身另外測（voteMs 加長）
 async function setup(n: number, introMs = 0, voteMs = 60) {
-  const srv = await startServer({ port: 0, publicUrl: 'http://test.local', tickMs: 20, introMs, sweepWarningMs: 300, voteMs });
+  const srv = await startServer({ boardingMs: 0, port: 0, publicUrl: 'http://test.local', tickMs: 20, introMs, sweepWarningMs: 300, voteMs });
   const url = `ws://localhost:${srv.port}/ws`;
   const host = await new Phone(url).open();
   host.send({ t: 'create', nickname: '房主' });
@@ -442,7 +442,7 @@ test('開局下一步有名字和問題；3 人局突破口也分在三支手機
 });
 
 test('心跳：送 ping 會收到 pong', async () => {
-  const srv = await startServer({ port: 0, publicUrl: 'http://test.local', tickMs: 20 });
+  const srv = await startServer({ boardingMs: 0, port: 0, publicUrl: 'http://test.local', tickMs: 20 });
   try {
     const ws = new WebSocket(`ws://localhost:${srv.port}/ws`);
     await new Promise((r) => ws.once('open', r));

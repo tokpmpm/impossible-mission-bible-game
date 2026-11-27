@@ -19,6 +19,8 @@ export type ClientMessage =
   | { t: 'vote'; id: string; choice: VoteChoice; mid?: string }
   | { t: 'thank'; to: string | null; mid?: string }
   | { t: 'next'; mid?: string } // 房主：再來一局（新的故事卡）
+  /** 房主：上船時大家看完角色卡了，提早開始倒數。 */
+  | { t: 'sail'; mid?: string }
   /** 房主：把這局登記上排行榜（每局一次、練習房不行）。 */
   | { t: 'submitScore'; name: string; mid?: string }
   /** 查排行榜前 10 名（也可以用 HTTP GET /api/leaderboard）。 */
@@ -57,7 +59,8 @@ export interface Rejection {
   reasons: { code: string; text: string }[];
 }
 
-export type ViewPhase = 'lobby' | 'intro' | 'planning' | 'blackout' | 'replanning' | 'settled' | 'ended';
+/** boarding：上船（倒數前不計時的角色卡＋動畫，DECISIONS 20）。 */
+export type ViewPhase = 'lobby' | 'boarding' | 'intro' | 'planning' | 'blackout' | 'replanning' | 'settled' | 'ended';
 
 export interface CardView {
   id: CardId;
@@ -101,6 +104,8 @@ export interface View {
     elapsedMs: number;
     timeLimitMs: number;
     introMs: number;
+    /** 上船（不計時）多久；倒數從 startedAt 開始，上船從 startedAt − boardingMs 開始。 */
+    boardingMs: number;
     lockOpensAt: number; // 伺服器時間
     crisisAt: number; // 伺服器時間：最晚起風暴的時間（含 A2）
   };
@@ -137,7 +142,13 @@ export interface View {
   /** 我這局的任務（一句）：給沒有按鈕的人知道自己要做什麼。 */
   myTask: string | null;
   /** 開局下一步：例 { verb: '問', nickname: '大衛', text: '糧食要留嗎？' } */
-  nextSteps: { verb: '問' | '告訴' | '找'; nickname: string; text: string }[];
+  nextSteps: { verb: '問' | '告訴' | '找'; nickname: string; text: string; roleId: RoleId; roleName: string }[];
+  /** 任務條：你現在要做的一件事（合併 myTask 與下一步；docs/17 問題 2）。text＝自己的事；go＝去找誰。 */
+  task: null | { text: string | null; go: null | { verb: '問' | '告訴' | '找'; nickname: string; roleId: RoleId; roleName: string; text: string } };
+  /** 角色卡（上船時大張顯示，之後點頂端角色可再看）。 */
+  roleCard: null | {
+    roles: { id: RoleId; name: string; line: string; who: string; ref: string | null; note: string | null; button: string | null; when: string; know: string }[];
+  };
   /** 我能做的操作（只有 true 的才畫按鈕） */
   can: {
     start: boolean;
