@@ -920,7 +920,8 @@ function engineerPanel(v, base) {
     .join('');
   if (!cur) return `<section class="bo-card"><h2>全部選好了！</h2><div class="pills">${pills}</div></section>`;
   // 選錯後面板鎖 2–3 秒（不扣分；DECISIONS 20）：選項真的 disabled，顯示還剩幾秒
-  const locked = !!r.lockedUntil && now() < r.lockedUntil;
+  // 手機多鎖 0.3 秒，網路抖動時不會比伺服器早解鎖（審查 #30 建議 3）
+  const locked = !!r.lockedUntil && now() < r.lockedUntil + 300;
   if (locked) ui.panelLockShown = true;
   const opts = cur.options
     .map(
@@ -1511,7 +1512,7 @@ setInterval(() => {
   }
   // 補船選錯後面板鎖住：時間到就解開
   const lu = ui.view && ui.view.repair && ui.view.repair.lockedUntil;
-  if (lu && ui.panelLockShown && now() >= lu) {
+  if (lu && ui.panelLockShown && now() >= lu + 300) {
     ui.panelLockShown = false;
     redraw = true;
   }
@@ -1730,9 +1731,10 @@ function holdInner(v, slot) {
   const assist = v.repair.assistLevel > 0;
   // 記號隨機轉向，旁邊標「船頭↑」（DECISIONS 20 試行）：直接拿給木匠看也要先對一下方向。整塊一起轉，船頭箭頭指的就是木匠面板的「上」。
   const rot = Number(s.rot) || 0;
-  return `<span class="hold-rot" style="transform: rotate(${rot}deg)"><span class="hold-bow" aria-hidden="true">船頭↑</span><span class="hold-sym">${symbolSvg(s.id, { size: 150, title: '你的記號' })}</span></span>${
-    rot ? '<span class="hold-note">你看到的圖是轉過的：照「船頭↑」那一邊當作上面來形容</span>' : ''
-  }${assist ? `<span class="hold-desc">${descHtml(s.desc || describeSymbol(s.id))}</span>` : ''}`;
+  // 「船頭」兩個字保持正的好讀，只有箭頭跟著圖轉、指向船頭（審查 #30 建議 2）
+  return `<span class="hold-bow" aria-hidden="true">船頭 <span class="bow-arrow" style="transform: rotate(${rot}deg)">↑</span></span><span class="hold-rot" style="transform: rotate(${rot}deg)"><span class="hold-sym">${symbolSvg(s.id, { size: 150, title: '你的記號' })}</span></span>${
+    rot ? '<span class="hold-note">你看到的圖是轉過的：箭頭指的那一邊是船頭，當作上面來形容</span>' : ''
+  }${assist ? `<span class="hold-desc">${rot ? '<small>協助：木匠面板上是</small>' : ''}${descHtml(s.desc || describeSymbol(s.id))}</span>` : ''}`;
 }
 
 /** 協助模式的描述：外形、缺口數、開口方向三個關鍵詞加粗（docs/15 L1）。 */
