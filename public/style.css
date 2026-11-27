@@ -465,7 +465,10 @@ input:focus { outline: none; border-color: var(--gold); }
   touch-action: manipulation;
 }
 .opt .sym { width: 100%; max-width: 72px; height: auto; }
-.opt span { font-size: 0.72rem; line-height: 1.25; text-align: center; color: #c9d0e6; }
+.opt .opt-desc { font-size: 0.88rem; line-height: 1.3; text-align: center; color: #dfe5f5; }
+.opt .opt-desc b, .hold-desc b { color: var(--gold-2); font-weight: 900; }
+.opt.locked { opacity: 0.45; cursor: wait; }
+.panel-locked .opts { outline: 2px solid rgba(255, 120, 90, 0.55); outline-offset: 4px; border-radius: var(--radius-s); }
 .opt:active { border-color: var(--gold); }
 .opt.gray { opacity: 0.22; cursor: not-allowed; filter: grayscale(1); }
 .sym-arrow { fill: var(--gold); }
@@ -491,6 +494,13 @@ input:focus { outline: none; border-color: var(--gold); }
 .hold.show { border-style: solid; background: #1c2440; }
 .hold-cover { font-size: 1.3rem; font-weight: 800; color: var(--gold-2); }
 .hold-desc { font-size: 1.15rem; font-weight: 800; }
+/* 記號隨機轉向＋船頭↑（DECISIONS 20 試行）：整塊一起轉 */
+.hold-rot { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; transition: none; }
+.hold-bow { font-size: 0.95rem; font-weight: 900; color: var(--gold-2); background: rgba(0, 0, 0, 0.35); border-radius: 999px; padding: 1px 10px; }
+.hold-note { font-size: 0.85rem; color: #c9d0e6; padding: 0 12px; text-align: center; }
+.tray-item.doomed { border-color: #6fb7ff; box-shadow: 0 0 0 2px rgba(111, 183, 255, 0.55); }
+.ti-wave { position: absolute; left: -8px; top: -6px; font-size: 1rem; }
+.sweep-extra { color: #fff; text-decoration: underline; }
 .order { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
 .order li { display: flex; gap: 10px; background: #161d33; border-radius: var(--radius-s); padding: 8px 12px; }
 .slotn { color: var(--gold-2); font-weight: 800; }
@@ -613,7 +623,7 @@ cite { display: block; margin-top: 4px; font-style: normal; color: var(--gold-2)
   body { font-size: 16px; }
   .screen { padding-left: 12px; padding-right: 12px; }
   .big-code strong { font-size: 2.1rem; }
-  .opt span { font-size: 0.66rem; }
+  .opt .opt-desc { font-size: 0.82rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -132,7 +132,7 @@ test('登記：房主成功登記 → 收到 submitted、view 帶 submitted、ca
   assert.equal(top[0].players, 3);
   // 存的是原始計分資料與公式版本
   const saved = hub.leaderboard.all()[0];
-  assert.equal(saved.formula, 'v2-trial');
+  assert.equal(saved.formula, 'v3-trial');
   assert.equal(saved.raw.stars, 3);
   assert.equal(saved.score, total);
 });
@@ -172,7 +172,7 @@ test('登記：result.score 的 parts 依序 mission、teamwork、time、difficu
     assert.equal(sc.total, Math.min(1000, Math.max(0, Math.round(sc.parts.reduce((s, p) => s + p.points, 0) * sc.factor))));
     assert.equal(sc.max, 1000);
     assert.equal(sc.trial, true);
-    assert.equal(sc.formula, 'v2-trial');
+    assert.equal(sc.formula, 'v3-trial');
   }
 });
 
@@ -193,7 +193,7 @@ test('登記：同隊名多局只留最高分；第二隊的名次依分數排',
 test('排行榜訊息：{t:"leaderboard"} 回傳前 10 名、公式版本與試行標記；未加入房間也能查', () => {
   const board = new MemoryStore();
   for (let i = 0; i < 13; i++) {
-    board.add({ roundId: `seed-${i}`, name: `隊${i}`, key: `隊${i}`, score: 100 + i * 10, players: 4, at: i, formula: 'v1-trial', raw: {} as never });
+    board.add({ roundId: `seed-${i}`, name: `隊${i}`, key: `隊${i}`, score: 100 + i * 10, players: 4, at: i, formula: 'v3-trial', raw: {} as never });
   }
   const hub = new Hub({ leaderboard: board });
   const c = new FakeConn();
@@ -204,7 +204,7 @@ test('排行榜訊息：{t:"leaderboard"} 回傳前 10 名、公式版本與試�
   assert.equal(m.entries[0].score, 220);
   assert.equal(m.entries[0].rank, 1);
   assert.equal(m.entries[9].score, 130);
-  assert.equal(m.formula, 'v2-trial');
+  assert.equal(m.formula, 'v3-trial');
   assert.equal(m.trial, true);
   assert.deepEqual(hub.leaderboardJson().entries, m.entries);
 });

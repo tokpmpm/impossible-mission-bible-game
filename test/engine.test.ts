@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   apply,
+  WRONG_PICK_LOCK_MS,
   applyAll,
   createGame,
   eliminationClueCount,
@@ -134,7 +135,7 @@ test('捲走前 10 秒提醒：到時（2:35）才出現，列出漂著的東西
   s = apply(s, { type: 'tick', at: CRISIS_AT - SWEEP_WARNING_MS - 1 });
   assert.equal(sweepWarning(s), null);
   s = apply(s, { type: 'tick', at: CRISIS_AT - SWEEP_WARNING_MS });
-  assert.deepEqual(sweepWarning(s), { inMs: SWEEP_WARNING_MS, floating: ['麥子', '器具', '小船'] });
+  assert.deepEqual(sweepWarning(s), { inMs: SWEEP_WARNING_MS, floating: ['麥子', '器具', '小船'], extra: [], overweight: 0 });
   assert.ok(s.log.some((l) => l.kind === 'storm_warning' && l.at === CRISIS_AT - SWEEP_WARNING_MS));
   // 提醒期間撈回來的不會被捲走
   s = apply(s, { type: 'setItem', at: CRISIS_AT - 3000, item: '器具', on: true });
@@ -145,6 +146,44 @@ test('捲走前 10 秒提醒：到時（2:35）才出現，列出漂著的東西
   const first = apply(newGame({ firstRound: true }), { type: 'tick', at: CRISIS_AT - 1000 });
   assert.equal(sweepWarning(first), null);
   assert.ok(!first.log.some((l) => l.kind === 'storm_warning'));
+});
+
+test('捲走預警（docs/15 H1）：還超重時，預警列出的（漂著的＋超重先捲走的）＝實際捲走的', () => {
+  // 第二局只丟小船：留 13、限 8，超重 5
+  let s = keep(newGame(), ['糧食', '纜索', '錨', '麥子', '器具'], 1000);
+  s = apply(s, { type: 'tick', at: CRISIS_AT - SWEEP_WARNING_MS });
+  const w = sweepWarning(s)!;
+  assert.deepEqual(w.floating, ['小船']);
+  assert.equal(w.overweight, 5);
+  assert.ok(w.extra.length > 0, '超重時要列出會先被捲走的東西');
+  s = apply(s, { type: 'tick', at: CRISIS_AT });
+  assert.deepEqual([...s.swept].sort(), [...w.floating, ...w.extra].sort());
+  // 不同組合都一致：窮舉 6 樣東西的留法
+  const items = ['糧食', '纜索', '錨', '麥子', '器具', '小船'] as const;
+  for (let mask = 0; mask < 64; mask++) {
+    const kept = items.filter((_, i) => mask & (1 << i));
+    let g = keep(newGame(), [...kept], 1000);
+    g = apply(g, { type: 'tick', at: CRISIS_AT - 1 });
+    const p = sweepWarning(g)!;
+    g = apply(g, { type: 'tick', at: CRISIS_AT });
+    assert.deepEqual([...g.swept].sort(), [...p.floating, ...p.extra].sort(), `留 ${kept.join('、')}`);
+  }
+});
+
+test('補船選錯：面板鎖 2.5 秒（按了不算、不多記選錯），之後照常', () => {
+  let s = keep(newGame({ firstRound: true }), ['糧食', '纜索', '錨'], 1000);
+  s = apply(s, { type: 'tick', at: CRISIS_AT });
+  const slot = s.repair!.slots[0];
+  const bad = slot.options.find((o) => o !== slot.answer)!;
+  s = apply(s, { type: 'repairPick', at: CRISIS_AT + 1000, option: bad });
+  assert.equal(s.repair!.wrongPicks, 1);
+  assert.equal(s.repair!.lockedUntil, CRISIS_AT + 1000 + WRONG_PICK_LOCK_MS);
+  s = apply(s, { type: 'repairPick', at: CRISIS_AT + 2000, option: slot.answer });
+  assert.equal(s.repair!.progress, 0, '鎖住時選對也不算');
+  assert.deepEqual(s.lastRejection?.reasons, ['PANEL_LOCKED']);
+  assert.equal(s.repair!.wrongPicks, 1);
+  s = apply(s, { type: 'repairPick', at: CRISIS_AT + 1000 + WRONG_PICK_LOCK_MS, option: slot.answer });
+  assert.equal(s.repair!.progress, 1);
 });
 
 test('第二局起「決定好了」：先提醒 10 秒（還能撈回），10 秒後才起風暴', () => {
