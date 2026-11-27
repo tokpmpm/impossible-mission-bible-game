@@ -115,3 +115,63 @@ test('換階段就清掉上一階段的表決結果（夜裡不掛白天的「�
   assert.equal(s.room.round!.game.phase, 'blackout');
   assert.equal(s.room.view(s.ps[0].id, '', null).voteResult, null);
 });
+
+// ───────── 新手引導其餘（feat/onboarding-rest，docs/17 v2） ─────────
+
+test('雙向任務條：被找的人看到「等一下 X 會來找你」，和找人的那一方一致', () => {
+  const s = setup(6, 0);
+  let pairs = 0;
+  for (const p of s.ps) {
+    const go = s.room.view(p.id, '', null).task?.go;
+    if (!go) continue;
+    const target = s.ps.find((q) => q.nickname === go.nickname)!;
+    const inc = s.room.view(target.id, '', null).task!.incoming;
+    assert.ok(inc.some((x) => x.nickname === p.nickname), `${p.nickname} → ${target.nickname}`);
+    pairs++;
+  }
+  assert.ok(pairs >= 3);
+});
+
+test('第二局角色卡：上一局拿同一個職能的人（不是自己）', () => {
+  const s = setup(4, 0);
+  const prevComms = s.who('comms');
+  s.room.round!.game = { ...s.room.round!.game, phase: 'ended' };
+  s.room.next(s.room.hostId!);
+  const nowComms = s.who('comms');
+  const rc = s.room.view(nowComms, '', null).roleCard!;
+  if (nowComms !== prevComms) assert.ok(rc.prev.some((x) => x.roleName === '伙房' && x.nickname === s.room.get(prevComms)!.nickname));
+  else assert.ok(!rc.prev.some((x) => x.roleName === '伙房'));
+  // 首局沒有前輩
+  const f = setup(4, 0);
+  for (const p of f.ps) assert.deepEqual(f.room.view(p.id, '', null).roleCard!.prev, []);
+});
+
+test('火堆旁：3–4 件真的發生、有名字的事（補最快的一格是誰形容誰選對、誰召集吃飯、外衣／一首歌）＋徒 28:2', () => {
+  const s = setup(3, 0);
+  s.room.setPref(s.ps[0].id, 'coat');
+  s.room.setPref(s.ps[1].id, 'nuts');
+  for (const item of ['麥子', '器具', '小船'] as const) s.act(s.who('supply'), { type: 'setItem', item, on: false });
+  s.clock.t = s.room.round!.startedAt + CRISIS_AT;
+  s.room.tick();
+  const eng = s.who('eng');
+  for (const slot of s.room.round!.game.repair!.slots) {
+    s.clock.t += 4000;
+    s.act(eng, { type: 'repairPick', option: slot.answer });
+  }
+  assert.equal(s.room.round!.slotDone!.length, 2);
+  assert.equal(s.room.view(s.ps[0].id, '', null).ship!.nutsBy, s.ps[1].nickname, '乾果在吃飯時出場');
+  s.act(s.who('comms'), { type: 'use', use: '吃飯' });
+  s.clock.t += 11_000;
+  s.room.tick();
+  s.act(s.who('nav'), { type: 'depart' });
+  s.clock.t += 11_000;
+  s.room.tick();
+  const res = s.room.view(s.ps[0].id, '', null).result!;
+  assert.equal(res.fireside.verse.ref, '徒 28:2');
+  const lines = res.fireside.lines;
+  assert.ok(lines.length >= 3 && lines.length <= 4, JSON.stringify(lines));
+  assert.match(lines[0], /^第 \d 格：.+ 4 秒就選對了。$/);
+  assert.ok(lines.some((l) => l.includes(s.room.get(s.who('comms'))!.nickname) && l.includes('召集大家吃了')));
+  assert.ok(lines.some((l) => l.includes(s.ps[0].nickname) && l.includes('外衣')));
+  assert.ok(!lines.some((l) => /死/.test(l)));
+});

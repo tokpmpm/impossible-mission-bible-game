@@ -35,6 +35,7 @@ QUOTES = [
     ('第十四天', r"replanning: \{ text: '([^']+)'", 27, 27, 27),
     ('結尾・吃飯', r"fed: \{ text: '([^']+)'", 27, 35, 36),
     ('結尾・上岸', r"shore: \{ text: '([^']+)'", 27, 44, 44),
+    ('火堆旁', r"FIRESIDE_VERSE = \{ text: '([^']+)'", 28, 2, 2),
 ]
 # 前端字幕（public/app.js）
 EXTRA = [

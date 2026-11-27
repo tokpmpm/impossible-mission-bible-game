@@ -1025,3 +1025,40 @@ cite { display: block; margin-top: 4px; font-style: normal; color: var(--gold-2)
 .boarding-foot { display: flex; flex-direction: column; gap: 8px; align-items: center; text-align: center; }
 .boarding-foot .btn.block { width: 100%; }
 @keyframes rc-in { from { opacity: 0; transform: translateY(12px) scale(0.98); } to { opacity: 1; transform: none; } }
+
+/* ───────── 新手引導其餘（2026-11-27，docs/17 v2） ───────── */
+.tk-in { font-size: 0.92rem; color: var(--text); background: rgba(106, 168, 255, 0.14); border-radius: 8px; padding: 4px 8px; margin-top: 2px; }
+.rc-prev { margin: 0; font-size: 0.92rem; color: var(--gold-2); background: rgba(242, 193, 78, 0.08); border-radius: var(--radius-s); padding: 6px 10px; }
+.stage.compact { max-height: 120px; overflow: hidden; }
+.stage.compact .art-scene { max-height: none; margin-top: -12%; }
+[hidden] { display: none !important; }
+.stage.compact .story { display: none; }
+.ship-summary { display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 12px; border-radius: var(--radius-s); border: 1px solid var(--line); background: var(--card); color: var(--text); font-size: 0.95rem; cursor: pointer; text-align: left; }
+.ship-summary strong { font-variant-numeric: tabular-nums; }
+.ship-summary .ss-needs { margin-left: auto; display: inline-flex; gap: 2px; }
+.fold-btn { align-self: center; }
+.my-info { display: flex; flex-direction: column; gap: 10px; }
+.mi-h { margin: 0; font-size: 0.95rem; color: var(--muted); }
+/* 收起時只留第一張（見聞優先；沒有見聞就是第一張線索） */
+.my-info.folded .tonight .tn-card ~ .tn-card,
+.my-info.folded .tonight ~ .clues,
+.my-info.folded .clues .clue ~ .clue { display: none; }
+.ovl.chapter-ovl { pointer-events: none; display: flex; align-items: center; justify-content: center; background: rgba(5, 10, 25, 0.9); animation: ch-fade 3.8s ease forwards; }
+.chapter-ovl.dark2 { animation-duration: 1.2s; }
+.chapter-ovl.dark { animation-duration: 3s; }
+.ch-bg { position: absolute; inset: 0; opacity: 0.25; overflow: hidden; }
+.ch-bg svg { width: 100%; height: 100%; }
+.ch-in { position: relative; text-align: center; padding: 20px; max-width: 420px; }
+.ch-in h2 { font-size: 2.2rem; margin: 4px 0 8px; color: var(--gold-2); font-weight: 900; }
+.ch-in p { margin: 0 0 6px; font-size: 1.1rem; line-height: 1.6; }
+.ch-k { color: var(--gold); font-size: 0.9rem !important; }
+.ch-sub { color: var(--muted); font-size: 0.98rem !important; }
+@keyframes ch-fade { 0% { opacity: 0; } 12% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
+.ovl-cameo { position: absolute; left: 50%; bottom: 12%; transform: translateX(-50%); background: rgba(0, 0, 0, 0.55); color: #fff; padding: 8px 14px; border-radius: 999px; display: flex; align-items: center; gap: 6px; white-space: nowrap; font-weight: 700; }
+.fireside { background: linear-gradient(180deg, #3a1f12 0%, var(--card) 70%); border-color: #c76a4a; }
+.fireside blockquote { margin: 0 0 8px; font-size: 0.95rem; color: var(--muted); }
+.fireside blockquote cite { display: block; font-style: normal; color: var(--gold); font-size: 0.85rem; }
+.fire-lines { margin: 0; padding-left: 1.2em; display: grid; gap: 6px; font-size: 1.05rem; }
+.fold-head { display: flex; width: 100%; align-items: center; justify-content: space-between; background: none; border: 0; color: inherit; padding: 0; cursor: pointer; }
+.fold-head h2 { margin: 0; }
+.thanks-q { margin: 0 0 8px; font-weight: 700; }

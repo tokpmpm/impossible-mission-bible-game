@@ -33,6 +33,7 @@ import {
   CLUES,
   ENDING_VERSES,
   FACTS,
+  FIRESIDE_VERSE,
   HINT_ROLE,
   HINT_TEXT,
   OBSERVER_ASKS_WITH_SCOUT,
@@ -133,6 +134,10 @@ interface Round {
   slotRots?: number[];
   /** 這局上船（不計時的角色卡＋動畫）多久；倒數從 startedAt 開始，上船期間 elapsed() 是負的。 */
   boardingMs?: number;
+  /** 上一局誰拿哪個職能（第二局起角色卡寫「上一局的伙房是 大衛」）。 */
+  prevRoles?: [RoleId, string][];
+  /** 補船每一格補好的時間、誰形容、誰選對（火堆旁回顧用真實紀錄）。 */
+  slotDone?: { slot: number; at: number; holder: string | null; by: string }[];
 }
 
 const EXTRA_REASON_TEXT: Record<string, string> = {
@@ -392,6 +397,9 @@ export class Room {
       const h = Room.holderIn(participants, roles, TONIGHT_ROLE[d]);
       if (h) tonightHolders.set(d, h);
     }
+    // 上一局的職能（每個職能取主要持有者）：第二局起角色卡寫「上一局的伙房是 大衛——卡住可以問他」
+    const prevRoles: [RoleId, string][] = [];
+    if (this.round) for (const [pid, rs] of this.round.roles) for (const role of rs) if (participants.includes(pid)) prevRoles.push([role, pid]);
     this.round = {
       id: `${this.code}-${this.roundsPlayed}-${randomId(8)}`,
       no: this.roundsPlayed,
@@ -419,6 +427,8 @@ export class Room {
       introMs,
       slotRots,
       boardingMs,
+      prevRoles,
+      slotDone: [],
     };
     this.touch();
   }
@@ -695,8 +705,12 @@ export class Room {
     const at = this.elapsed();
     const event = { ...a, at } as GameEvent;
     const before = r.game;
+    const holder = a.type === 'repairPick' && before.repair ? this.effectiveSlotHolder(before.repair.progress) : null;
     r.game = apply(r.game, event);
     r.actors.push({ kind: a.type, playerId: pid, at });
+    if (a.type === 'repairPick' && before.repair && r.game.repair && r.game.repair.progress > before.repair.progress) {
+      (r.slotDone ??= []).push({ slot: before.repair.progress, at, holder, by: pid });
+    }
     this.touch();
     if (r.game.rejections > before.rejections && r.game.lastRejection) {
       return { action: a.type, reasons: r.game.lastRejection.reasons.map((code) => ({ code, text: this.advice(code, pid, at) })) };
@@ -861,7 +875,7 @@ export class Room {
         if (!to || used.has(to)) continue;
         used.add(to);
         const toRole = (r.roles.get(to) ?? []).find((x) => x === ask.to || x === SPLIT_FROM[ask.to]) ?? ask.to;
-        out.push({ verb: ask.verb, nickname: this.nick(to), text: ask.text, roleId: toRole, roleName: ROLES[toRole].name });
+        out.push({ verb: ask.verb, nickname: this.nick(to), text: ask.text, roleId: toRole, roleName: ROLES[toRole].name, toId: to });
         break;
       }
     }
@@ -877,9 +891,19 @@ export class Room {
     const go = phase === 'replanning' ? undefined : steps[0];
     const goTask = go ? { verb: go.verb, nickname: go.nickname, roleId: go.roleId, roleName: go.roleName, text: go.text } : null;
     const operator = this.operatorOf('supply') === pid || (this.operatorOf('nav') === pid && phase !== 'intro');
-    if (operator && myTask) return { text: myTask, go: goTask };
-    if (goTask) return { text: null, go: goTask };
-    return myTask ? { text: myTask, go: null } : null;
+    // 雙向（docs/17 v2）：被找的人也知道「等一下 阿明（醫生）會來找你」，雙方都抬頭
+    const incoming =
+      phase === 'intro' || phase === 'planning'
+        ? this.round!.participants
+            .filter((q) => q !== pid && this.nextSteps(q)[0]?.toId === pid)
+            .map((q) => {
+              const role = this.round!.roles.get(q)![0];
+              return { nickname: this.nick(q), roleId: role, roleName: ROLES[role].name };
+            })
+        : [];
+    if (operator && myTask) return { text: myTask, go: goTask, incoming };
+    if (goTask) return { text: null, go: goTask, incoming };
+    return myTask || incoming.length ? { text: myTask, go: null, incoming } : null;
   }
 
   /** 角色卡：這局我的職能（3 人局兩個）、台詞、故事裡的人、按鈕什麼時候出現、只有我知道的事。 */
@@ -903,6 +927,11 @@ export class Room {
           when: anchor ? '補好船以後、水淺時' : c.when,
           know: anchor ? '風浪會變大；水有多深' : c.know,
         };
+      }),
+      // 第二局起：上一局拿同一個職能的人變成前輩（不是自己才寫）
+      prev: mine.flatMap((id) => {
+        const was = (r.prevRoles ?? []).find(([role]) => role === id)?.[1];
+        return was && was !== pid ? [{ roleName: ROLES[id].name, nickname: this.nick(was) }] : [];
       }),
     };
   }
@@ -1097,6 +1126,11 @@ export class Room {
         ? { id: g.used.use, item: g.used.item, at: r.startedAt + g.used.at, by: this.nick(useActor?.playerId), mine: useActor?.playerId === pid }
         : null,
       dawnAt: dawn !== null ? r.startedAt + dawn : null,
+      // 背包的乾果在吃飯時出場（docs/17 v2）：「美玲 把帶來的乾果也分給大家」
+      nutsBy: (() => {
+        const p = this.players.find((x) => r.participants.includes(x.id) && x.pref === 'nuts');
+        return p ? p.nickname : null;
+      })(),
       lastRejection: g.lastRejection
         ? { at: r.startedAt + g.lastRejection.at, action: g.lastRejection.action, reasons: g.lastRejection.reasons.map((x) => reasonText(x, ev.overweight)) }
         : null,
@@ -1254,6 +1288,7 @@ export class Room {
       lit: { 力氣: served.includes('力氣'), 船身: served.includes('船身'), 天亮: served.includes('天亮') },
       cause: g.result?.cause ?? 'ended',
       moments: this.moments(),
+      fireside: { verse: { ...FIRESIDE_VERSE }, lines: this.fireside() },
       bible: BIBLE_THROWS,
       tonightLine: this.tonightLine(),
       verse: g.used?.use === '吃飯' ? { ...ENDING_VERSES.fed } : { ...ENDING_VERSES.shore },
@@ -1300,6 +1335,40 @@ export class Room {
     const parts = [`力氣靠${p.力氣}`, CARDS[g.cards.a].done?.includes('船身') ? '船身早就捆好了' : `船身靠${p.船身}`, `錨住船靠錨`];
     const extra = g.tonight.水 === '淺' ? '水夠淺、拋得了錨' : '水太深，錨要留到快靠岸時再拋';
     return `今晚${parts.join('、')}；${extra}。力氣要吃了才有。`;
+  }
+
+  /**
+   * 火堆旁（docs/17 v2）：只列 3–4 件剛才真的發生、有名字的事，讓大家自然聊「你剛才到底怎麼形容的？」。
+   * 不虛構、不評分、不點名誰做錯；背包的外衣、一首歌在這裡出場。
+   */
+  fireside(): string[] {
+    const r = this.round!;
+    const g = r.game;
+    const out: string[] = [];
+    // 補得最快的一格：誰形容、誰幾秒選對
+    const done = r.slotDone ?? [];
+    if (done.length && g.repair) {
+      let best: { slot: number; ms: number; holder: string | null; by: string } | null = null;
+      done.forEach((d, i) => {
+        const ms = d.at - (i === 0 ? g.repair!.startedAt : done[i - 1].at);
+        if (!best || ms < best.ms) best = { slot: d.slot, ms, holder: d.holder, by: d.by };
+      });
+      const b = best!;
+      const sec = Math.max(1, Math.round(b.ms / 1000));
+      out.push(b.holder && b.holder !== b.by ? `第 ${b.slot + 1} 格：${this.nick(b.holder)} 形容，${this.nick(b.by)} ${sec} 秒就選對了。` : `第 ${b.slot + 1} 格：${this.nick(b.by)} ${sec} 秒就選對了。`);
+    }
+    if (g.used) {
+      const doer = [...r.actors].reverse().find((a) => a.kind === 'use' && a.at === g.used!.at);
+      const how = g.used.use === '吃飯' ? `召集大家吃了${g.used.item}` : g.used.use === '拋錨' ? '從船尾拋下了錨' : '捆綁了船底';
+      out.push(`${this.nick(doer?.playerId)} ${how}。`);
+    }
+    const waits = r.voteLog.filter((x) => x.outcome === 'rejected').length;
+    if (waits) out.push(`有人喊了 ${waits} 次「等一下」，大家停下來重新商量。`);
+    for (const item of ['coat', 'song'] as const) {
+      const p = this.players.find((x) => r.participants.includes(x.id) && x.pref === item);
+      if (p) out.push(CAMEOS[item].replace('{name}', p.nickname));
+    }
+    return out.slice(0, 4);
   }
 
   /** 這局真的發生的事（系統紀錄＋故事卡＋背包物品出場），有名字。不虛構互助、不評誰最重要。 */

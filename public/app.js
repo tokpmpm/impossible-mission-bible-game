@@ -56,6 +56,11 @@ const ui = {
   boardingSkip: null,
   boardingShown: null,
   roleCardOpen: false,
+  /** 主畫面收合：全船狀態（非管倉、船長預設收起）、我的情報（預設只開一張）。 */
+  shipOpen: false,
+  infoOpen: false,
+  /** 章節卡（天黑了、第十四天夜裡）：{ kind, at, ms }，不擋操作、時間到自己消失。 */
+  chapter: null,
   /** 我已經投過票的表決（本地鎖定，docs/15 M1）。 */
   votedFor: null,
   /** 登記上榜送出的時間（8 秒逾時）。 */
@@ -302,7 +307,11 @@ function onPhaseChange(prev, next) {
   ui.note = null;
   ui.justThrown = [];
   ui.justRescued = [];
-  if (next === 'blackout') ui.zoom = false;
+  if (next === 'blackout') {
+    ui.zoom = false;
+    ui.chapter = { kind: ui.view && ui.view.round && ui.view.round.firstRound ? 'dark' : 'dark2', at: Date.now() };
+  }
+  if (next === 'replanning' && prev === 'blackout') ui.chapter = { kind: 'night', at: Date.now() };
   // 衝向海灘：先播上岸動畫，再看結算（結果早已由伺服器決定）
   if (next === 'settled' && prev === 'replanning') ui.revealAt = Date.now();
   if (prev && next !== prev) window.scrollTo(0, 0);
@@ -590,6 +599,7 @@ function cardChips(v) {
   const chips = ['a', 'b']
     .map((k) => v.cards[k])
     .filter(Boolean)
+    .filter((c) => !(c.deck === 'A' && v.round && v.round.firstRound && v.phase === 'intro'))
     .map((c) => `<button class="card-chip" data-action="card-open" data-card="${c.id}" aria-label="看故事卡：${esc(c.title)}">
       <span class="cc-art" aria-hidden="true">${art.card(c.id)}</span><span class="cc-t">${esc(c.title)}</span></button>`)
     .join('');
@@ -708,13 +718,18 @@ function sweepBanner(v) {
 /** 任務條：每個畫面只有一條「你現在要做的事」，寫出要找的人和他的角色（docs/17 問題 2）。 */
 function taskBar(v) {
   const t = v.task;
-  if (!t || (!t.text && !t.go)) return '';
+  if (!t || (!t.text && !t.go && !(t.incoming || []).length)) return '';
   const go = t.go
     ? `<span class="tk-go"><span class="ns-verb">去${esc(t.go.verb)}</span> <strong>${esc(t.go.nickname)}</strong><span class="tk-role">（${art.role(t.go.roleId, 18)}${esc(t.go.roleName)}）</span>：${esc(t.go.text)}</span>`
     : '';
   const main = t.text ? `<span class="tk-main">${esc(t.text)}</span>` : go;
   const sub = t.text && go ? `<span class="tk-sub">先${go}</span>` : '';
-  return `<section class="task-bar" aria-label="你現在要做的事"><span class="tk-k">▶ 你現在要做的事</span>${main}${sub}</section>`;
+  // 雙向：被找的人也知道誰會來（找人本身就是最自然的自我介紹，雙方都抬頭）
+  const inc = (t.incoming || []).length
+    ? `<span class="tk-in">👋 等一下 ${t.incoming.map((x) => `<strong>${esc(x.nickname)}</strong>（${art.role(x.roleId, 16)}${esc(x.roleName)}）`).join('、')} 會來找你</span>`
+    : '';
+  if (!main && !inc) return '';
+  return `<section class="task-bar" aria-label="你現在要做的事"><span class="tk-k">▶ 你現在要做的事</span>${main || ''}${sub}${inc}</section>`;
 }
 
 /** 天色條：8 分鐘從深藍走到橘色，小太陽走到底＝天亮（docs/17 問題 4）。 */
@@ -755,9 +770,11 @@ function roleCardHtml(v, opts = {}) {
         .join('')}</div>`
     : `<div class="rc-btns none"><b>你沒有按鈕</b><p>你的情報就是別人缺的那一塊：${esc(rc.roles.map((r) => r.know).join('；'))}</p></div>`;
   const know = btns.length ? `<p class="rc-know">只有你知道：${esc(rc.roles.map((r) => r.know).join('；'))}</p>` : '';
+  // 第二局起：上一局的同職能變成前輩（docs/17 v2）
+  const prev = (rc.prev || []).map((x) => `<p class="rc-prev">上一局的${esc(x.roleName)}是 <strong>${esc(x.nickname)}</strong>——卡住可以問他</p>`).join('');
   return `<section class="role-card ${opts.overlay ? 'in-ovl' : ''}" aria-label="我的角色卡">
     <div class="rc-art" aria-hidden="true">${arts}</div>
-    <h1>${head}</h1>${lines}${who}${now1}${buttons}${know}
+    <h1>${head}</h1>${lines}${who}${now1}${buttons}${know}${prev}
   </section>`;
 }
 
@@ -830,26 +847,48 @@ function renderShip(v) {
     ? `<div class="banner fed" role="status">${art.item(s.used.item, 22)} ${esc(s.used.mine ? '你' : s.used.by)}${esc(USE_DONE[s.used.id])}${esc(s.used.item)}（${esc(USE_REF[s.used.id])}）</div>`
     : '';
   const dawnWait = v.phase === 'replanning' && s.dawnAt && now() < s.dawnAt
-    ? `<div class="banner dawn" role="status">⚓ 拋了錨，等天亮：<strong data-cd="dawn">${mmss(s.dawnAt - now())}</strong></div>`
+    ? `<div class="banner dawn" role="status">⚓ 拋了錨，等天色亮一點：<strong data-cd="dawn">${mmss(s.dawnAt - now())}</strong></div>`
     : '';
   let button = '';
   // 表決中：真的 disabled（連點不送出，docs/15 M1）；認識隊友時間只用 aria-disabled，按了會說還剩幾秒
   if (v.can.lock) button = `<button class="btn primary block big" data-action="lock" ${v.vote ? 'disabled aria-disabled="true"' : lockOpen(v) ? '' : 'aria-disabled="true"'}>${forceLabel(v, 'lock', '決定好了')}</button>`;
   if (v.can.depart) button = `<button class="btn primary block big" data-action="depart" ${v.vote ? 'disabled aria-disabled="true"' : ''}>${forceLabel(v, 'depart', '衝向海灘')}</button>`;
   const task = taskBar(v);
-  return `<main class="screen ship ${button ? 'has-bar' : ''}">
-    <div class="ship-meta">${loadGauge(s)}${needsRow(v)}</div>
-    ${cardChips(v)}
+  // 主畫面三層（docs/17 問題 2）：任務條 → 我的情報（只展開一張）→ 全船狀態（管倉、船長預設展開，其他人收起；互看手機仍然可以）
+  const operator = v.can.items || v.can.lock || v.can.depart;
+  const shipOpen = operator || ui.shipOpen;
+  const shipStatus = shipOpen
+    ? `<div class="ship-meta">${loadGauge(s)}${needsRow(v)}</div>${cardChips(v)}${operator ? '' : `<button class="btn ghost small fold-btn" data-action="ship-fold" aria-expanded="true">收起全船狀態 ▴</button>`}`
+    : `<button class="ship-summary" data-action="ship-fold" aria-expanded="false"><span>全船狀態</span><strong>${s.weight}／${s.cap}</strong>${s.overweight ? `<span class="g-over">超重 ${s.overweight}</span>` : ''}<span class="ss-needs">${['力氣', '船身', '天亮'].map((id) => art.need(id, !!(s.needs && s.needs.find((n) => n.id === id && n.lit)), 20)).join('')}</span><span aria-hidden="true">▸</span></button>
+      <div class="ship-meta folded" hidden>${loadGauge(s)}${needsRow(v)}</div>`;
+  return `<main class="screen ship ${button ? 'has-bar' : ''} ${shipOpen ? '' : 'compact'}">
+    ${operator ? shipStatus : ''}
     ${voteCard(v)}${voteResultBanner(v)}
     ${sweepBanner(v)}${hint}${crisis}${fedLine}${dawnWait}
     ${useCards(v)}
     ${v.can.items ? itemTray(v) : ''}
     ${task}
-    ${tonightCards(v)}
-    <section class="clues" aria-label="你的線索">${clueCards(v)}</section>
+    ${myInfo(v)}
+    ${operator ? '' : shipStatus}
     <button class="btn ghost small zoom-btn" data-action="zoom">放大給隊友看</button>
   </main>
   ${actionBar(v, button)}`;
+}
+
+/** 我的情報：見聞＋線索，預設只展開最重要的一張（見聞優先、再來是突破口、有圖的線索），其他收成「還有 N 張」。 */
+function myInfo(v) {
+  const tn = tonightCards(v);
+  const cl = clueCards(v);
+  const tnN = (v.tonight || []).length;
+  const n = tnN + v.clues.length;
+  if (!n) return '';
+  const open = ui.infoOpen || n <= 1;
+  // 全部都畫出來（互看、放大給隊友看都要用），只是收起來的用 CSS 藏住
+  return `<section class="my-info ${open ? 'open' : 'folded'}" aria-label="我的情報">
+    <h2 class="mi-h">我的情報</h2>
+    ${tn}<section class="clues" aria-label="你的線索">${cl}</section>
+    ${n > 1 ? `<button class="btn ghost small fold-btn" data-action="info-fold" aria-expanded="${open}">${open ? '收起來 ▴' : `還有 ${n - 1} 張 ▸`}</button>` : ''}
+  </section>`;
 }
 
 // ───────── 黑暗中補船 ─────────
@@ -1149,6 +1188,11 @@ function renderResult(v) {
       return `<button class="chip ${on ? 'on' : ''}" aria-pressed="${on}" data-action="thank" data-to="${esc(p.id)}">${on ? '♥ ' : ''}${esc(p.nickname)}</button>`;
     })
     .join('');
+  const fire = res.fireside && res.fireside.lines.length
+    ? `<section class="card fireside"><h2>🔥 火堆旁：剛才發生的事</h2>
+        <blockquote>${esc(res.fireside.verse.text)}<cite>${esc(res.fireside.verse.ref)}</cite></blockquote>
+        <ul class="fire-lines">${res.fireside.lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul></section>`
+    : '';
   const thanks = res.thanks.length
     ? `<ul class="thanks">${res.thanks.map((t) => `<li>${esc(nickOf(v, t.from))} <span aria-label="謝謝">→</span> ${esc(nickOf(v, t.to))}</li>`).join('')}</ul>`
     : '';
@@ -1160,18 +1204,20 @@ function renderResult(v) {
       <p class="saved">${esc(res.saved.text)}<cite>${esc(res.saved.ref)}</cite></p>
     </section>
     ${res.score ? renderScore(v, res.score) : ''}
-    <section class="card"><h2>這局發生的事</h2><ul class="moments">${moments}</ul>
+    ${fire}
+    <section class="card log-card">
+      <button class="fold-head" data-action="log-fold" aria-expanded="${!!ui.logOpen}"><h2>整局紀錄</h2><span aria-hidden="true">${ui.logOpen ? '▴' : '▸'}</span></button>
+      <div class="log-body" ${ui.logOpen ? '' : 'hidden'}><ul class="moments">${moments}</ul>
       ${res.tonightLine ? `<p class="tonight-line">${esc(res.tonightLine)}</p>` : ''}
-      <p class="bible-cmp">${esc(res.bible)}</p></section>
+      <p class="bible-cmp">${esc(res.bible)}</p></div></section>
     <section class="card verse-card">
       <blockquote>${esc(res.verse.text)}<cite>${esc(res.verse.ref)}</cite></blockquote>
       <p class="fact"><span class="tip-k">你知道嗎？</span>${esc(res.fact)}</p>
     </section>
-    <section class="card">
-      <h2>謝謝誰？</h2>
+    <section class="card thanks-card">
+      <p class="thanks-q">想謝謝誰嗎？點一下名字就好<span class="muted small">（不計分）</span></p>
       <div class="chips">${thankBtns || '<span class="muted">沒有其他隊友</span>'}</div>
       ${thanks}
-      ${res.question ? `<p class="ask-q">隨口聊聊：${esc(res.question)}</p>` : ''}
     </section>
     ${action ? `<div class="action-end">${action}</div>` : `<p class="waiting">等房主開下一局</p>`}
   </main>`;
@@ -1234,7 +1280,8 @@ function overlayHtml(v) {
     return `<div class="ovl landing-ovl" aria-hidden="true">${art.landing({ lit: v.result.lit })}<p class="ovl-cap">天亮了，衝向海灘！<cite>徒 27:39–41</cite></p></div>`;
   }
   if (ui.mealAt && Date.now() - ui.mealAt < MEAL_MS) {
-    return `<div class="ovl meal-ovl" aria-hidden="true">${art.meal()}<p class="ovl-cap">於是他們都放下心，也就吃了。<cite>徒 27:36</cite></p></div>`;
+    const nuts = v.ship && v.ship.nutsBy ? `<p class="ovl-cameo">${art.pref('nuts', 24)} ${esc(v.ship.nutsBy)} 把帶來的乾果也分給大家。</p>` : '';
+    return `<div class="ovl meal-ovl" aria-hidden="true">${art.meal()}<p class="ovl-cap">於是他們都放下心，也就吃了。<cite>徒 27:36</cite></p>${nuts}</div>`;
   }
   if (ui.useAt && ui.useKind !== '吃飯' && Date.now() - ui.useAt < MEAL_MS) {
     return ui.useKind === '拋錨'
@@ -1245,6 +1292,7 @@ function overlayHtml(v) {
             : '<p class="ovl-cap">就用纜索捆綁船底。<cite>徒 27:17</cite></p>'
         }</div>`;
   }
+  if (chapterOn()) return chapterHtml(v, ui.chapter.kind);
   if (ui.cardOpen) {
     const c = [v.cards.a, v.cards.b].find((x) => x && x.id === ui.cardOpen);
     if (c) return cardOverlay(c, c.deck === 'A' ? '起風時發生的事' : '風暴中發生的事');
@@ -1261,17 +1309,34 @@ function overlayKey(v) {
   if (ui.revealAt && Date.now() - ui.revealAt < REVEAL_MS && v.result) return 'landing:' + ui.revealAt;
   if (ui.mealAt && Date.now() - ui.mealAt < MEAL_MS) return 'meal:' + ui.mealAt;
   if (ui.useAt && ui.useKind !== '吃飯' && Date.now() - ui.useAt < MEAL_MS) return 'use:' + ui.useAt;
+  if (chapterOn()) return 'chapter:' + ui.chapter.kind + ui.chapter.at;
   if (ui.cardOpen && [v.cards.a, v.cards.b].some((x) => x && x.id === ui.cardOpen)) return 'card:' + ui.cardOpen;
   if (ui.roleCardOpen && v.roleCard && v.phase !== 'boarding') return 'role:' + JSON.stringify(v.roleCard) + JSON.stringify(v.task);
   return '';
 }
 
-/** 新翻開的故事卡自動跳出一次（開局一張、補好船一張）。 */
+// ───────── 章節卡（docs/17 v2）：天黑了／第十四天夜裡。不擋操作（點穿過去），幾秒後自己消失 ─────────
+const CHAPTER_MS = { dark: 3000, dark2: 1200, night: 3800 };
+function chapterOn() {
+  return !!ui.chapter && Date.now() - ui.chapter.at < CHAPTER_MS[ui.chapter.kind];
+}
+function chapterHtml(v, kind) {
+  if (kind === 'dark' || kind === 'dark2') {
+    return `<div class="ovl chapter-ovl ${kind}" aria-live="polite"><div class="ch-bg" aria-hidden="true">${art.darkness()}</div>
+      <div class="ch-in"><p class="ch-k">第一幕結束</p><h2>天黑了</h2>${kind === 'dark' ? '<p>太陽和星辰多日不顯露（27:20）。<br>用說的，幫木匠補船。</p>' : ''}</div></div>`;
+  }
+  return `<div class="ovl chapter-ovl night" aria-live="polite"><div class="ch-bg" aria-hidden="true">${art.scene({ sky: 'night', onDeck: [], afloat: [], load: { weight: 0, cap: 5 }, rock: 'calm' })}</div>
+    <div class="ch-in"><p class="ch-k">徒 27:27</p><h2>第十四天夜裡</h2><p>水手覺得快到陸地了。<br><b>天一亮，就衝向海灘。</b></p>
+    <p class="ch-sub">在那之前，全隊只來得及再做<b>一件</b>：吃飯、拋錨、捆船底選一件。</p></div></div>`;
+}
+
+/** 新翻開的故事卡自動跳出一次（開局一張、補好船一張）。章節卡播完才跳；首局的起風卡等認識隊友結束才翻（docs/17 問題 1-C）。 */
 function autoOpenCard(v) {
-  if (!v || !v.round || ui.cardOpen) return;
+  if (!v || !v.round || ui.cardOpen || chapterOn()) return;
   if (!['intro', 'planning', 'replanning'].includes(v.phase)) return;
   for (const c of [v.cards.a, v.cards.b]) {
     if (!c) continue;
+    if (c.deck === 'A' && v.round.firstRound && v.phase === 'intro') continue;
     const key = `${v.round.no}:${c.id}`;
     if (ui.seenCards.has(key)) continue;
     ui.seenCards.add(key);
@@ -1386,7 +1451,10 @@ function render() {
         {
           const opts = sceneOpts(v);
           hudKey = renderTopbar(v).replace(/data-cd="round">[^<]*/, '') + JSON.stringify(opts) + storyLine(v);
-          if (hudKey !== lastHud) hud = `${renderTopbar(v)}${skyBar(v)}<div class="stage">${art.scene(opts)}${storyLine(v)}</div>`;
+          // 非管倉、非船長：船圖縮成一條（docs/17 3.4）；展開全船狀態時恢復
+          const big = v.can.items || v.can.lock || v.can.depart || ui.shipOpen;
+          hudKey += big ? 'big' : 'small';
+          if (hudKey !== lastHud) hud = `${renderTopbar(v)}${skyBar(v)}<div class="stage ${big ? '' : 'compact'}">${art.scene(opts)}${storyLine(v)}</div>`;
         }
         html = renderShip(v);
         break;
@@ -1497,6 +1565,10 @@ setInterval(() => {
   }
   if (ui.note && Date.now() > ui.note.until) {
     ui.note = null;
+    redraw = true;
+  }
+  if (ui.chapter && !chapterOn()) {
+    ui.chapter = null;
     redraw = true;
   }
   if (ui.wrongUntil && Date.now() > ui.wrongUntil) {
@@ -1665,6 +1737,18 @@ document.addEventListener('click', (e) => {
       break;
     case 'boarding-story':
       ui.boardingSkip = null;
+      render();
+      break;
+    case 'log-fold':
+      ui.logOpen = !ui.logOpen;
+      render();
+      break;
+    case 'ship-fold':
+      ui.shipOpen = !ui.shipOpen;
+      render();
+      break;
+    case 'info-fold':
+      ui.infoOpen = !ui.infoOpen;
       render();
       break;
     case 'role-card':
