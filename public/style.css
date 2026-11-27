@@ -1064,3 +1064,6 @@ cite { display: block; margin-top: 4px; font-style: normal; color: var(--gold-2)
 .fold-head { display: flex; width: 100%; align-items: center; justify-content: space-between; background: none; border: 0; color: inherit; padding: 0; cursor: pointer; }
 .fold-head h2 { margin: 0; }
 .thanks-q { margin: 0 0 8px; font-weight: 700; }
+
+.fire-bag-h { margin: 10px 0 4px; font-size: 0.85rem; color: var(--muted); }
+.fire-lines.fire-bag { font-size: 0.95rem; color: var(--muted); }

@@ -212,8 +212,8 @@ export interface View {
     lit: Record<NeedId, boolean>;
     cause: 'depart' | 'time_up' | 'ended';
     moments: MomentView[];
-    /** 火堆旁：3–4 件剛才真的發生的事（有名字）＋徒 28:2。 */
-    fireside: { verse: { text: string; ref: string }; lines: string[] };
+    /** 火堆旁：最多 3 件剛才真的發生的事（有名字）＋徒 28:2；bag＝背包物品的出場（遊戲編的，分開顯示）。 */
+    fireside: { verse: { text: string; ref: string }; lines: string[]; bag: string[] };
     bible: string; // 「經文裡」對照
     tonightLine: string; // 「今晚靠的是……」（不指名誰沒說）
     verse: { text: string; ref: string };

@@ -9,3 +9,4 @@ coverage/
 .DS_Store
 *.log
 .wrangler/
+.claude/RESUME.md

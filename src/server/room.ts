@@ -1295,7 +1295,7 @@ export class Room {
       lit: { 力氣: served.includes('力氣'), 船身: served.includes('船身'), 天亮: served.includes('天亮') },
       cause: g.result?.cause ?? 'ended',
       moments: this.moments(),
-      fireside: { verse: { ...FIRESIDE_VERSE }, lines: this.fireside() },
+      fireside: { verse: { ...FIRESIDE_VERSE }, ...this.fireside() },
       bible: BIBLE_THROWS,
       tonightLine: this.tonightLine(),
       verse: g.used?.use === '吃飯' ? { ...ENDING_VERSES.fed } : { ...ENDING_VERSES.shore },
@@ -1348,7 +1348,7 @@ export class Room {
    * 火堆旁（docs/17 v2）：只列 3–4 件剛才真的發生、有名字的事，讓大家自然聊「你剛才到底怎麼形容的？」。
    * 不虛構、不評分、不點名誰做錯；背包的外衣、一首歌在這裡出場。
    */
-  fireside(): string[] {
+  fireside(): { lines: string[]; bag: string[] } {
     const r = this.round!;
     const g = r.game;
     const out: string[] = [];
@@ -1371,11 +1371,13 @@ export class Room {
     }
     const waits = r.voteLog.filter((x) => x.outcome === 'rejected').length;
     if (waits) out.push(`有人喊了 ${waits} 次「等一下」，大家停下來重新商量。`);
+    // 背包物品的出場是遊戲編的小劇場，另外放（審查 #32 建議 2：不和真實紀錄混在一起）
+    const bag: string[] = [];
     for (const item of ['coat', 'song'] as const) {
       const p = this.players.find((x) => r.participants.includes(x.id) && x.pref === item);
-      if (p) out.push(CAMEOS[item].replace('{name}', p.nickname));
+      if (p) bag.push(CAMEOS[item].replace('{name}', p.nickname));
     }
-    return out.slice(0, 4);
+    return { lines: out.slice(0, 3), bag };
   }
 
   /** 這局真的發生的事（系統紀錄＋故事卡＋背包物品出場），有名字。不虛構互助、不評誰最重要。 */

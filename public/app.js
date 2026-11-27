@@ -309,7 +309,8 @@ function onPhaseChange(prev, next) {
   ui.justRescued = [];
   if (next === 'blackout') {
     ui.zoom = false;
-    ui.chapter = { kind: ui.view && ui.view.round && ui.view.round.firstRound ? 'dark' : 'dark2', at: Date.now() };
+    // 只有真的從白天換到天黑才播；重新整理一進來就在天黑時不重播（審查 #32 建議 1）
+    if (prev && prev !== 'blackout') ui.chapter = { kind: ui.view && ui.view.round && ui.view.round.firstRound ? 'dark' : 'dark2', at: Date.now() };
   }
   if (next === 'replanning' && prev === 'blackout') ui.chapter = { kind: 'night', at: Date.now() };
   // 衝向海灘：先播上岸動畫，再看結算（結果早已由伺服器決定）
@@ -1189,10 +1190,17 @@ function renderResult(v) {
       return `<button class="chip ${on ? 'on' : ''}" aria-pressed="${on}" data-action="thank" data-to="${esc(p.id)}">${on ? '♥ ' : ''}${esc(p.nickname)}</button>`;
     })
     .join('');
-  const fire = res.fireside && res.fireside.lines.length
-    ? `<section class="card fireside"><h2>🔥 火堆旁：剛才發生的事</h2>
-        <blockquote>${esc(res.fireside.verse.text)}<cite>${esc(res.fireside.verse.ref)}</cite></blockquote>
-        <ul class="fire-lines">${res.fireside.lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul></section>`
+  // 火堆旁：真的發生的紀錄和「你們帶上船的東西」分開（審查 #32 建議 2）；沒能平安上岸時不畫火堆、不引 28:2，只列剛才的紀錄（建議 3）
+  const fs = res.fireside;
+  const bag = fs && fs.bag && fs.bag.length && res.safe ? `<p class="fire-bag-h">🎒 你們帶上船的東西</p><ul class="fire-lines fire-bag">${fs.bag.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>` : '';
+  const fire = fs && (fs.lines.length || bag)
+    ? res.safe
+      ? `<section class="card fireside"><h2>🔥 火堆旁：剛才發生的事</h2>
+        <blockquote>${esc(fs.verse.text)}<cite>${esc(fs.verse.ref)}</cite></blockquote>
+        ${fs.lines.length ? `<ul class="fire-lines">${fs.lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}${bag}</section>`
+      : fs.lines.length
+        ? `<section class="card"><h2>剛才發生的事</h2><ul class="fire-lines">${fs.lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul></section>`
+        : ''
     : '';
   const thanks = res.thanks.length
     ? `<ul class="thanks">${res.thanks.map((t) => `<li>${esc(nickOf(v, t.from))} <span aria-label="謝謝">→</span> ${esc(nickOf(v, t.to))}</li>`).join('')}</ul>`

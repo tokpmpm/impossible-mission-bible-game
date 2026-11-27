@@ -169,9 +169,10 @@ test('火堆旁：3–4 件真的發生、有名字的事（補最快的一格�
   const res = s.room.view(s.ps[0].id, '', null).result!;
   assert.equal(res.fireside.verse.ref, '徒 28:2');
   const lines = res.fireside.lines;
-  assert.ok(lines.length >= 3 && lines.length <= 4, JSON.stringify(lines));
+  assert.ok(lines.length >= 2 && lines.length <= 3, JSON.stringify(lines));
   assert.match(lines[0], /^第 \d 格：.+ 4 秒就選對了。$/);
   assert.ok(lines.some((l) => l.includes(s.room.get(s.who('comms'))!.nickname) && l.includes('召集大家吃了')));
-  assert.ok(lines.some((l) => l.includes(s.ps[0].nickname) && l.includes('外衣')));
+  assert.ok(!lines.some((l) => l.includes('外衣')), '背包小劇場不混在真實紀錄裡');
+  assert.ok(res.fireside.bag.some((l) => l.includes(s.ps[0].nickname) && l.includes('外衣')));
   assert.ok(!lines.some((l) => /死/.test(l)));
 });
